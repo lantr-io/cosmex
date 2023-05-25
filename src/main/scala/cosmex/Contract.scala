@@ -303,8 +303,7 @@ object CosmexContract {
       ownInputAddress: Address,
       ownInputValue: Value,
       txInfo: TxInfo,
-      exchangePkh: PubKeyHash,
-      exchangePubKey: PubKey,
+      params: ExchangeParams,
       state: OnChainState,
       newSignedSnapshot: SignedSnapshot,
       spendingTxOutRef: TxOutRef,
@@ -315,7 +314,7 @@ object CosmexContract {
       case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
         val validInitiator = initiator match
           case Party.Client   => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
-          case Party.Exchange => txSignedBy(txInfo.signatories, exchangePkh, "no exchange sig")
+          case Party.Exchange => txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
         newSignedSnapshot match
           case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
             val newChannelState =
@@ -330,82 +329,93 @@ object CosmexContract {
             val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
             validInitiator
             && balancedSnapshot(signedSnapshot.snapshotTradingState, ownInputValue)
-            && validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, exchangePubKey)
+            && validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, params.exchangePubKey)
             && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
   }
 
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
     import ScriptPurpose.*
-    import Action.*
-    import OnChainChannelState.*
+
+    def cosmexSpending(txInfo: TxInfo, spendingTxOutRef: TxOutRef): Boolean = {
+      import Action.*
+      import OnChainChannelState.*
+      
+      def findOwnInputAndIndex(i: BigInt, txIns: List[TxInInfo]): (TxOut, BigInt) = txIns match
+        case List.Nil => throw new Exception("Own input not found")
+        case List.Cons(txInInfo, tail) => txInInfo match
+          case TxInInfo(txOutRef, resolved) =>
+            if txInInfo.outRef === spendingTxOutRef then (resolved, i)
+            else findOwnInputAndIndex(i + 1, tail)
+
+      findOwnInputAndIndex(0, txInfo.inputs) match
+        case (ownTxInResolvedTxOut, ownIndex) =>
+          state match
+            case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+              channelState match
+                case OpenState =>
+                  action match
+                    case Update =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleUpdate(
+                        ownTxInResolvedTxOut.address,
+                        ownOutput,
+                        state,
+                        txInfo.signatories,
+                        clientPkh,
+                        params.exchangePkh
+                      )
+                    case ClientAbort =>
+                      /*  This should only be called by the client on channel open
+                          in case the exchange doesn't respond to the initial snapshot
+                          hence, the currentSnapshot must be version 0, with only the client's balance
+                          Note: this allows the client to claim all locked funds in the channel,
+                          hence the exchange MUST contest with a valid snapshot if needed.
+                          Consider penalizing the client for this. */
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleClientAbort(
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        txInfo,
+                        state,
+                        spendingTxOutRef,
+                        ownOutput
+                      )
+                    case Close(party, signedSnapshot) =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleClose(
+                        party,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        txInfo,
+                        params,
+                        state,
+                        signedSnapshot,
+                        spendingTxOutRef,
+                        ownOutput
+                      )
+                    case Trades(actionTrades, actionCancelOthers) =>
+                    case Payout                                   =>
+                    case Transfer(txOutIndex, value)              =>
+                    case Timeout                                  =>
+
+                case SnapshotContestState(
+                      contestSnapshot,
+                      contestSnapshotStart,
+                      contestInitiator,
+                      contestChannelTxOutRef
+                    ) =>
+                case TradesContestState(latestTradingState, tradeContestStart) =>
+                case PayoutState(clientBalance, exchangeBalance)               =>
+      false
+    }
+
     ctx match
       case ScriptContext(txInfo, purpose) =>
         purpose match
-          case Minting(curSymbol)     => throw new Exception("Minting not supported")
-          case Rewarding(stakingCred) => throw new Exception("Rewarding not supported")
-          case Certifying(cert)       => throw new Exception("Certifying not supported")
-          case Spending(spendingTxOutRef) =>
-            findOwnInputAndIndex(txInfo.inputs, spendingTxOutRef) match
-              case (ownTxInInfo, ownIndex) =>
-                params match
-                  case ExchangeParams(exchangePkh, exchangePubKey, contestationPeriodInMilliseconds) =>
-                    state match
-                      case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                        channelState match
-                          case OpenState =>
-                            action match
-                              case Update =>
-                                val ownOutput = txInfo.outputs !! ownIndex
-                                handleUpdate(
-                                  ownTxInInfo.resolved.address,
-                                  ownOutput,
-                                  state,
-                                  txInfo.signatories,
-                                  clientPkh,
-                                  exchangePkh
-                                )
-                              case ClientAbort =>
-                                /*  This should only be called by the client on channel open
-                                in case the exchange doesn't respond to the initial snapshot
-                                hence, the currentSnapshot must be version 0, with only the client's balance
-                                Note: this allows the client to claim all locked funds in the channel,
-                                hence the exchange MUST contest with a valid snapshot if needed.
-                                Consider penalizing the client for this. */
-                                val ownOutput = txInfo.outputs !! ownIndex
-                                handleClientAbort(
-                                  ownTxInInfo.resolved.address,
-                                  ownTxInInfo.resolved.value,
-                                  txInfo,
-                                  state,
-                                  spendingTxOutRef,
-                                  ownOutput
-                                )
-                              case Close(party, signedSnapshot) =>
-                                handleClose(
-                                  party,
-                                  ownTxInInfo.resolved.address,
-                                  ownTxInInfo.resolved.value,
-                                  txInfo,
-                                  exchangePkh,
-                                  exchangePubKey,
-                                  state,
-                                  signedSnapshot,
-                                  spendingTxOutRef,
-                                  txInfo.outputs !! ownIndex
-                                )
-                              case Trades(actionTrades, actionCancelOthers) =>
-                              case Payout                                   =>
-                              case Transfer(txOutIndex, value)              =>
-                              case Timeout                                  =>
-
-                          case SnapshotContestState(
-                                contestSnapshot,
-                                contestSnapshotStart,
-                                contestInitiator,
-                                contestChannelTxOutRef
-                              ) =>
-                          case TradesContestState(latestTradingState, tradeContestStart) =>
-                          case PayoutState(clientBalance, exchangeBalance)               =>
+          case Minting(curSymbol)         => throw new Exception("Minting not supported")
+          case Rewarding(stakingCred)     => throw new Exception("Rewarding not supported")
+          case Certifying(cert)           => throw new Exception("Certifying not supported")
+          case Spending(spendingTxOutRef) => cosmexSpending(txInfo, spendingTxOutRef)
 
     false
   }
