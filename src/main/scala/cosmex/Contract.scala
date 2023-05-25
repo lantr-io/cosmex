@@ -15,8 +15,12 @@ import scalus.ledger.api.v1.Value.{+, -}
 import dotty.tools.dotc.Run
 import scalus.prelude.AssocMap
 import scalus.prelude.Maybe
+import scalus.prelude.Maybe.*
 import scalus.prelude.Prelude.given
+import scalus.prelude.Prelude.===
+import scalus.prelude.Prelude.Eq
 import java.util.Currency
+import scalus.builtins.Builtins
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -44,11 +48,10 @@ type Pair = (AssetClass, AssetClass)
 
 case class LimitOrder(orderPair: Pair, orderAmount: BigInt, orderPrice: BigInt)
 
-case class PendingTxType(
-    pendingIn: Boolean,
-    pendingOut: Option[TxOutIndex],
-    pendingTransfer: Option[TxOutIndex]
-)
+enum PendingTxType:
+  case PendingIn
+  case PendingOut(txOutIndex: TxOutIndex)
+  case PendingTransfer(txOutIndex: TxOutIndex)
 
 case class PendingTx(
     pendingTxValue: Value,
@@ -100,15 +103,42 @@ case class ExchangeParams(
 
 @Compile
 object CosmexContract {
+  given Eq[TxOutRef] = (a: TxOutRef, b: TxOutRef) => a match
+    case  TxOutRef(aTxId, aTxOutIndex) => b match
+      case TxOutRef(bTxId, bTxOutIndex) => aTxOutIndex === bTxOutIndex && Builtins.equalsByteString(aTxId.hash, bTxId.hash)
+  
   def validator(redeemer: Data, datum: Data, ctxData: Data): Unit = {
     val a = validRange(_)
     val b = applyTrade(_, _)
+    val c = handlePendingTx(_, _, _)
     ()
   }
 
   def assetClassValue(assetClass: AssetClass, i: BigInt): Value =
     Value.apply(assetClass._1, assetClass._2, i)
 
+  def handlePendingTx(
+    contestChannelTxOutRef: TxOutRef,
+    snapshotPendingTx: Maybe[PendingTx],
+    snapshotTradingState: TradingState
+  ): TradingState = {
+    snapshotPendingTx match 
+      case Nothing => snapshotTradingState
+      case Just(pendingTx) => pendingTx match
+        case PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef) =>
+          snapshotTradingState match
+            case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+              if pendingTxSpentTxOutRef === contestChannelTxOutRef then
+                pendingTxType match 
+                  case PendingTxType.PendingIn =>
+                    new TradingState(tsClientBalance + pendingTxValue, tsExchangeBalance, tsOrders)
+                  case PendingTxType.PendingOut(a) =>
+                    new TradingState(tsClientBalance - pendingTxValue, tsExchangeBalance, tsOrders)
+                  case PendingTxType.PendingTransfer(a) =>
+                    new TradingState(tsClientBalance, tsExchangeBalance - pendingTxValue, tsOrders)
+                
+              else snapshotTradingState
+  }
     
   /* 
     Apply a trade to the trading state.
