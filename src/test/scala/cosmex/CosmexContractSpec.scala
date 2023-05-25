@@ -22,6 +22,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
 
   test("Pretty print CosmexContract") {
     println(CosmexValidator.compiledValidator.pretty.render(100))
+    println(s"Size: ${CosmexValidator.flatEncodedValidator.size}")
   }
 
   def assertEval(p: Program, expected: Expected) = {

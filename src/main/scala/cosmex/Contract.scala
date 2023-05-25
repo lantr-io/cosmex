@@ -22,6 +22,11 @@ import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.Eq
 import java.util.Currency
 import scalus.builtins.Builtins
+import scalus.sir.SimpleSirToUplcLowering
+import scalus.uplc.ProgramFlatCodec
+import scalus.uplc.Program
+import io.bullet.borer.Cbor
+import scalus.utils.Hex
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -200,6 +205,18 @@ object CosmexContract {
      && expectNewState(ownOutput, ownInputAddress, state, newValue)
   }
 
+  def handleClientAbort(ownInputAddress: Address, ownInputValue: Value, txInfo: TxInfo, state: OnChainState, spendingTxOutRef: TxOutRef, ownOutput: TxOut) = {
+    val contestSnapshotStart = validRange(txInfo.validRange)._2
+    state match
+      case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+        val tradingState =  new TradingState(tsClientBalance = Value.zero, tsExchangeBalance = Value.zero, tsOrders = AssocMap.empty)
+        val snapshot = new Snapshot(snapshotTradingState = tradingState, snapshotPendingTx = Nothing, snapshotVersion = 0)
+        val contestSnapshotState = new OnChainChannelState.SnapshotContestState(contestSnapshot = snapshot, contestSnapshotStart = contestSnapshotStart, contestInitiator = Party.Client, contestChannelTxOutRef = spendingTxOutRef)
+        val snapshotContestState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
+        txSignedBy(txInfo.signatories, clientPkh, "no client sig")
+              && expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
+  }
+
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
     import ScriptPurpose.*
     import Action.*
@@ -222,6 +239,14 @@ object CosmexContract {
                             val ownOutput = txInfo.outputs !! ownIndex
                             handleUpdate(ownTxInInfo.resolved.address, ownOutput, state, txInfo.signatories, clientPkh, exchangePkh)
                           case ClientAbort =>
+                            /*  This should only be called by the client on channel open
+                                in case the exchange doesn't respond to the initial snapshot
+                                hence, the currentSnapshot must be version 0, with only the client's balance
+                                Note: this allows the client to claim all locked funds in the channel,
+                                hence the exchange MUST contest with a valid snapshot if needed.
+                                Consider penalizing the client for this. */
+                            val ownOutput = txInfo.outputs !! ownIndex
+                            handleClientAbort(ownTxInInfo.resolved.address, ownTxInInfo.resolved.value, txInfo, state, spendingTxOutRef, ownOutput)
                           case Close(party, signedSnapshot) =>
                           case Trades(actionTrades, actionCancelOthers) =>
                           case Payout =>
@@ -341,4 +366,9 @@ object CosmexContract {
 
 object CosmexValidator {
   val compiledValidator = Compiler.compile(CosmexContract.validator)
+  val validator = new SimpleSirToUplcLowering(generateErrorTraces = true).lower(compiledValidator)
+  val flatEncodedValidator = ProgramFlatCodec.encodeFlat(Program((2,0,0),validator))
+  val cborEncodedValidator = Cbor.encode(flatEncodedValidator).toByteArray
+  val doubleCborEncodedValidator = Cbor.encode(cborEncodedValidator).toByteArray
+  val doubleCborEncodedValidatorHex = Hex.bytesToHex(doubleCborEncodedValidator)
 }
