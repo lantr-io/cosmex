@@ -416,6 +416,29 @@ object CosmexContract {
             timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
   }
 
+  def handleTradesContestTimeout(
+      params: ExchangeParams,
+      txInfo: TxInfo,
+      tradeContestStart: POSIXTime,
+      state: OnChainState,
+      latestTradingState: TradingState,
+      ownInputAddress: Address,
+      ownInputValue: Value,
+      ownOutput: TxOut
+  ) = {
+    val (start, _) = validRange(txInfo.validRange)
+    val timeoutPassed =
+      val timeoutTime = tradeContestStart + params.contestationPeriodInMilliseconds
+      timeoutTime < start
+    val newChannelState = latestTradingState match
+      case TradingState(tsClientBalance, tsExchangeBalance, _) =>
+        new OnChainChannelState.PayoutState(clientBalance = tsClientBalance, exchangeBalance = tsExchangeBalance)
+    state match
+      case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+        val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+        timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+  }
+
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
     import ScriptPurpose.*
 
@@ -532,7 +555,18 @@ object CosmexContract {
                       throw new Exception("Transfer not supported in SnapshotContestState")
                 case TradesContestState(latestTradingState, tradeContestStart) =>
                   action match
-                    case Timeout                                  =>
+                    case Timeout =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleTradesContestTimeout(
+                        params,
+                        txInfo,
+                        tradeContestStart,
+                        state,
+                        latestTradingState,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        ownOutput
+                      )
                     case Trades(actionTrades, actionCancelOthers) =>
                     case Update      => throw new Exception("Update not supported in TradesContestState")
                     case ClientAbort => throw new Exception("ClientAbort not supported in TradesContestState")
