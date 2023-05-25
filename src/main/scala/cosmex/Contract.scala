@@ -14,6 +14,7 @@ import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Value.{+, -}
 import dotty.tools.dotc.Run
 import scalus.prelude.AssocMap
+import scalus.prelude.List
 import scalus.prelude.Maybe
 import scalus.prelude.Maybe.*
 import scalus.prelude.Prelude.given
@@ -103,6 +104,57 @@ case class ExchangeParams(
 
 @Compile
 object CosmexContract {
+
+  given Eq[Value] = (a: Value, b: Value) => false // FIXME
+
+  given maybeEq[A](using eq: Eq[A]): Eq[Maybe[A]] = (a: Maybe[A], b: Maybe[A]) => a match
+    case Nothing => b match
+      case Nothing => true
+      case Just(a) => false
+    case Just(value) => b match
+      case Nothing => false
+      case Just(value2) => value === value2
+  
+
+  given Eq[PubKeyHash] = (a: PubKeyHash, b: PubKeyHash) => Builtins.equalsByteString(a.hash, b.hash)
+
+  given Eq[Credential] = (a: Credential, b: Credential) => a match
+    case Credential.PubKeyCredential(hash) => b match
+      case Credential.PubKeyCredential(hash2) => hash === hash2
+      case Credential.ScriptCredential(hash) => false
+    case Credential.ScriptCredential(hash) => b match
+      case Credential.PubKeyCredential(hash2) => false
+      case Credential.ScriptCredential(hash2) => hash === hash2
+
+  given Eq[StakingCredential] = (lhs: StakingCredential, rhs: StakingCredential) => lhs match
+    case StakingCredential.StakingHash(cred) => rhs match
+      case StakingCredential.StakingHash(cred2) => cred === cred2
+      case StakingCredential.StakingPtr(a, b, c) => false
+    case StakingCredential.StakingPtr(a, b, c) => rhs match
+      case StakingCredential.StakingHash(cred2) => false
+      case StakingCredential.StakingPtr(a2, b2, c2) => a === a2 && b === b2 && c === c2
+  
+  given Eq[Address] = (a: Address, b: Address) => a match
+    case Address(credentials, stakingCredential) => b match
+      case Address(credentials2, stakingCredential2) => 
+        credentials === credentials2 && stakingCredential === stakingCredential2
+
+  given Eq[OutputDatum] = (a: OutputDatum, b: OutputDatum) => a match
+    case OutputDatum.NoOutputDatum => b match
+      case OutputDatum.NoOutputDatum => true
+      case OutputDatum.OutputDatumHash(datumHash) => false
+      case OutputDatum.OutputDatum(datum) => false
+    case OutputDatum.OutputDatumHash(datumHash) => b match
+      case OutputDatum.NoOutputDatum => false
+      case OutputDatum.OutputDatumHash(datumHash2) => datumHash === datumHash2
+      case OutputDatum.OutputDatum(datum) => false
+    case OutputDatum.OutputDatum(datum) => b match
+      case OutputDatum.NoOutputDatum => false
+      case OutputDatum.OutputDatumHash(datumHash) => false
+      case OutputDatum.OutputDatum(datum2) =>  false // FIXME: datum === datum2 
+  
+
+
   given Eq[TxOutRef] = (a: TxOutRef, b: TxOutRef) => a match
     case  TxOutRef(aTxId, aTxOutIndex) => b match
       case TxOutRef(bTxId, bTxOutIndex) => aTxOutIndex === bTxOutIndex && Builtins.equalsByteString(aTxId.hash, bTxId.hash)
@@ -111,7 +163,81 @@ object CosmexContract {
     val a = validRange(_)
     val b = applyTrade(_, _)
     val c = handlePendingTx(_, _, _)
+    val d = cosmexValidator(_, _, _, _)
     ()
+  }
+
+  def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
+      def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match 
+        case List.Nil => throw new Exception("Own input not found")
+        case List.Cons(txInInfo, tail) =>
+          if txInInfo.outRef === spendingTxOutRef then (txInInfo, i)
+          else go(i + 1, tail)
+      
+      go(0, inputs)
+  }
+
+  def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
+    ownOutput match
+      case TxOut(address, value, datum, referenceScript) => 
+        val newStateData = Builtins.mkI(1) // FIXME: use newState.toData
+        datum === new OutputDatum.OutputDatum(newStateData) &&
+          address === ownInputAddress &&
+          value === newValue
+  }
+
+  def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash, msg: String): Boolean =
+    List.find(signatories)(k.hash === _.hash) match
+      case Just(a) => true
+      case Nothing => throw new Exception(msg)
+
+  def handleUpdate(ownInputAddress: Address, ownOutput: TxOut, state: OnChainState, signatories: List[PubKeyHash], clientPkh: PubKeyHash, exchangePkh: PubKeyHash) = {
+    val newValue = ownOutput.value
+    // both parties must sign the transaction,
+    // thus it's validated by them, so no need to check anything else
+    // NOTE: this allows parties to change the channel funds by mutual agreement
+    txSignedBy(signatories, clientPkh, "no client sig") && txSignedBy(signatories, exchangePkh, "no exchange sig")
+     && expectNewState(ownOutput, ownInputAddress, state, newValue)
+  }
+
+  def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
+    import ScriptPurpose.*
+    import Action.*
+    import OnChainChannelState.*
+    ctx match
+      case ScriptContext(txInfo, purpose) =>
+        purpose match
+          case Minting(curSymbol) => throw new Exception("Minting not supported")
+          case Rewarding(stakingCred) => throw new Exception("Rewarding not supported")
+          case Certifying(cert) => throw new Exception("Certifying not supported")
+          case Spending(spendingTxOutRef) => findOwnInputAndIndex(txInfo.inputs, spendingTxOutRef) match
+            case (ownTxInInfo, ownIndex) => 
+              params match
+                case ExchangeParams(exchangePkh, exchangePubKey, contestationPeriodInMilliseconds)  =>
+                  state match
+                    case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+                      channelState match
+                        case OpenState => action match
+                          case Update => 
+                            val ownOutput = txInfo.outputs !! ownIndex
+                            handleUpdate(ownTxInInfo.resolved.address, ownOutput, state, txInfo.signatories, clientPkh, exchangePkh)
+                          case ClientAbort =>
+                          case Close(party, signedSnapshot) =>
+                          case Trades(actionTrades, actionCancelOthers) =>
+                          case Payout =>
+                          case Transfer(txOutIndex, value) =>
+                          case Timeout =>
+                        
+
+                        case SnapshotContestState(contestSnapshot, contestSnapshotStart, contestInitiator, contestChannelTxOutRef) =>
+                        case TradesContestState(latestTradingState, tradeContestStart) =>
+                        case PayoutState(clientBalance, exchangeBalance) =>
+                      
+                  
+
+    
+
+    false
   }
 
   def assetClassValue(assetClass: AssetClass, i: BigInt): Value =
@@ -198,7 +324,7 @@ object CosmexContract {
       })
   }
 
-  def validRange(interval: Interval[POSIXTime]): (POSIXTime, POSIXTime) =
+  def validRange(interval: Interval[POSIXTime]): (POSIXTime, POSIXTime) = {
     interval match
       case Interval(lower, upper) => lower match
         case LowerBound(start, l) => start match
@@ -209,6 +335,7 @@ object CosmexContract {
               case Extended.NegInf => throw new RuntimeException("UBNI")
               case Extended.PosInf => throw new RuntimeException("UBPI")
               case Finite(end) => (start, end)
+  }
 
 }
 
