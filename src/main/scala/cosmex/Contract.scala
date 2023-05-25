@@ -182,10 +182,11 @@ object CosmexContract {
           case TxOutRef(bTxId, bTxOutIndex) =>
             aTxOutIndex === bTxOutIndex && Builtins.equalsByteString(aTxId.hash, bTxId.hash)
 
+  def isEmpty[A](lst: List[A]): Boolean = lst match
+    case List.Nil        => true
+    case List.Cons(_, _) => false
+
   def validator(redeemer: Data, datum: Data, ctxData: Data): Unit = {
-    val a = validRange(_)
-    val b = applyTrade(_, _)
-    val c = handlePendingTx(_, _, _)
     val ctx = fromData[ScriptContext](ctxData)
     val d = cosmexValidator(_, _, _, ctx)
     ()
@@ -333,24 +334,78 @@ object CosmexContract {
             && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
   }
 
+  // handleContestClose(contestSnapshot, contestSnapshotStart, contestInitiator, contestChannelTxOutRef, party, newSignedSnapshot)
+  def handleContestClose(
+      params: ExchangeParams,
+      txInfo: TxInfo,
+      state: OnChainState,
+      contestSnapshot: Snapshot,
+      contestSnapshotStart: POSIXTime,
+      contestInitiator: Party,
+      contestChannelTxOutRef: TxOutRef,
+      party: Party,
+      newSignedSnapshot: SignedSnapshot,
+      ownInputAddress: Address,
+      ownInputValue: Value,
+      ownOutput: TxOut
+  ): Boolean = contestSnapshot match {
+    case Snapshot(snapshotTradingState, snapshotPendingTx, oldVersion) =>
+      state match
+        case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+          val validParty = contestInitiator match
+            case Party.Client =>
+              party match
+                case Party.Client   => throw new Exception("Invalid party")
+                case Party.Exchange => txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
+            case Party.Exchange =>
+              party match
+                case Party.Client   => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
+                case Party.Exchange => throw new Exception("Invalid party")
+
+          val (_, tradeContestStart) = validRange(txInfo.validRange)
+          val latestTradingState = handlePendingTx(contestChannelTxOutRef, snapshotPendingTx, snapshotTradingState)
+          latestTradingState match
+            case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+              val newChannelState =
+                if isEmpty(tsOrders.inner) then
+                  new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                else
+                  new OnChainChannelState.TradesContestState(
+                    latestTradingState = latestTradingState,
+                    tradeContestStart = tradeContestStart
+                  )
+
+              val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+              val isNewerSnapshot =
+                if oldVersion <= newSignedSnapshot.signedSnapshot.snapshotVersion then true
+                else throw new Exception("Older snapshot")
+              validParty && isNewerSnapshot && balancedSnapshot(latestTradingState, ownInputValue) &&
+              validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, params.exchangePubKey) &&
+              expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+  }
+
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
     import ScriptPurpose.*
 
     def cosmexSpending(txInfo: TxInfo, spendingTxOutRef: TxOutRef): Boolean = {
       import Action.*
       import OnChainChannelState.*
-      
+
       def findOwnInputAndIndex(i: BigInt, txIns: List[TxInInfo]): (TxOut, BigInt) = txIns match
         case List.Nil => throw new Exception("Own input not found")
-        case List.Cons(txInInfo, tail) => txInInfo match
-          case TxInInfo(txOutRef, resolved) =>
-            if txInInfo.outRef === spendingTxOutRef then (resolved, i)
-            else findOwnInputAndIndex(i + 1, tail)
+        case List.Cons(txInInfo, tail) =>
+          txInInfo match
+            case TxInInfo(txOutRef, resolved) =>
+              if txInInfo.outRef === spendingTxOutRef then (resolved, i)
+              else findOwnInputAndIndex(i + 1, tail)
 
       findOwnInputAndIndex(0, txInfo.inputs) match
         case (ownTxInResolvedTxOut, ownIndex) =>
           state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+              val signedByClient = () => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
+              val signedByExchange = () => txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
+
               channelState match
                 case OpenState =>
                   action match
@@ -394,9 +449,10 @@ object CosmexContract {
                         ownOutput
                       )
                     case Trades(actionTrades, actionCancelOthers) =>
-                    case Payout                                   =>
-                    case Transfer(txOutIndex, value)              =>
-                    case Timeout                                  =>
+                      throw new Exception("Trades not supported in OpenState")
+                    case Payout                      => throw new Exception("Payout not supported in OpenState")
+                    case Transfer(txOutIndex, value) => throw new Exception("Transfer not supported in OpenState")
+                    case Timeout                     => throw new Exception("Timeout not supported in OpenState")
 
                 case SnapshotContestState(
                       contestSnapshot,
@@ -404,8 +460,54 @@ object CosmexContract {
                       contestInitiator,
                       contestChannelTxOutRef
                     ) =>
+                  action match
+                    case Close(party, newSignedSnapshot) =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleContestClose(
+                        params,
+                        txInfo,
+                        state,
+                        contestSnapshot,
+                        contestSnapshotStart,
+                        contestInitiator,
+                        contestChannelTxOutRef,
+                        party,
+                        newSignedSnapshot,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        ownOutput
+                      )
+                    case Timeout     =>
+                    case Update      => throw new Exception("Update not supported in SnapshotContestState")
+                    case ClientAbort => throw new Exception("ClientAbort not supported in SnapshotContestState")
+                    case Trades(actionTrades, actionCancelOthers) =>
+                      throw new Exception("Trades not supported in SnapshotContestState")
+                    case Payout => throw new Exception("Payout not supported in SnapshotContestState")
+                    case Transfer(txOutIndex, value) =>
+                      throw new Exception("Transfer not supported in SnapshotContestState")
                 case TradesContestState(latestTradingState, tradeContestStart) =>
-                case PayoutState(clientBalance, exchangeBalance)               =>
+                  action match
+                    case Timeout                                  =>
+                    case Trades(actionTrades, actionCancelOthers) =>
+                    case Update      => throw new Exception("Update not supported in TradesContestState")
+                    case ClientAbort => throw new Exception("ClientAbort not supported in TradesContestState")
+                    case Close(party, signedSnapshot) =>
+                      throw new Exception("Close not supported in TradesContestState")
+                    case Payout => throw new Exception("Payout not supported in TradesContestState")
+                    case Transfer(txOutIndex, value) =>
+                      throw new Exception("Transfer not supported in TradesContestState")
+
+                case PayoutState(clientBalance, exchangeBalance) =>
+                  action match
+                    case Transfer(txOutIndex, value)  =>
+                    case Payout                       =>
+                    case Update                       => throw new Exception("Update not supported in PayoutState")
+                    case ClientAbort                  => throw new Exception("ClientAbort not supported in PayoutState")
+                    case Close(party, signedSnapshot) => throw new Exception("Close not supported in PayoutState")
+                    case Trades(actionTrades, actionCancelOthers) =>
+                      throw new Exception("Trades not supported in PayoutState")
+                    case Timeout => throw new Exception("Timeout not supported in PayoutState")
+
       false
     }
 
@@ -531,7 +633,7 @@ object CosmexContract {
 
 object CosmexValidator {
   val compiledValidator = Compiler.compile(CosmexContract.validator)
-  val validator = new SimpleSirToUplcLowering(generateErrorTraces = true).lower(compiledValidator)
+  val validator = new SimpleSirToUplcLowering(generateErrorTraces = false).lower(compiledValidator)
   val flatEncodedValidator = ProgramFlatCodec.encodeFlat(Program((2, 0, 0), validator))
   val cborEncodedValidator = Cbor.encode(flatEncodedValidator).toByteArray
   val doubleCborEncodedValidator = Cbor.encode(cborEncodedValidator).toByteArray
