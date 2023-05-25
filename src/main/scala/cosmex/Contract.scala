@@ -5,6 +5,7 @@ import scalus.ledger.api.v1.POSIXTime
 import scalus.ledger.api.v2.*
 import scalus.Compile
 import scalus.uplc.Data
+import scalus.uplc.Data.fromData
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v1.LowerBound
@@ -26,12 +27,14 @@ import scalus.sir.SimpleSirToUplcLowering
 import scalus.uplc.ProgramFlatCodec
 import scalus.uplc.Program
 import io.bullet.borer.Cbor
+import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.utils.Hex
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
 type OrderId = BigInt
 type AssetClass = (CurrencySymbol, TokenName)
+type PubKey = ByteString
 
 case class Trade(orderId: OrderId, tradeAmount: BigInt, tradePrice: BigInt)
 
@@ -168,7 +171,8 @@ object CosmexContract {
     val a = validRange(_)
     val b = applyTrade(_, _)
     val c = handlePendingTx(_, _, _)
-    val d = cosmexValidator(_, _, _, _)
+    val ctx = fromData[ScriptContext](ctxData)
+    val d = cosmexValidator(_, _, _, ctx)
     ()
   }
 
@@ -217,6 +221,59 @@ object CosmexContract {
               && expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
   }
 
+  def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
+    List.foldLeft(orders.inner, Value.zero) { (acc, pair) => pair match
+      case (orderId, order) => order match
+        case LimitOrder(pair, orderAmount, orderPrice) => pair match
+          case (base, quote) =>
+            val orderValue = if (orderAmount < 0) {
+              assetClassValue(base, orderAmount) // Sell base asset
+            } else {
+              assetClassValue(quote, orderAmount * orderPrice) // Buy quote asset
+            }
+            acc + orderValue
+    }
+  }
+
+  def validSignedSnapshot(signedSnapshot: SignedSnapshot, clientTxOutRef: TxOutRef, clientPubKey: PubKey, exchangePubKey: PubKey): Boolean = {
+    signedSnapshot match
+      case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
+        val signedInfo = (clientTxOutRef, signedSnapshot)
+        val msg = Builtins.serialiseData(Builtins.mkI(42)) // FIXME: Builtins.mkPairData(clientTxOutRef, signedSnapshot.signedSnapshot)
+        val validExchangeSig = Builtins.verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
+        val validClientSig = Builtins.verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
+        validClientSig && validExchangeSig
+  }
+
+  def balancedSnapshot(ts: TradingState, locked: Value): Boolean = {
+    ts match
+      case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+        val allFunds = tsClientBalance + tsExchangeBalance + lockedInOrders(tsOrders)
+        allFunds === locked
+  }
+
+  def handleClose(initiator: Party,ownInputAddress: Address, ownInputValue: Value, txInfo: TxInfo, exchangePkh: PubKeyHash, exchangePubKey: PubKey, state: OnChainState, newSignedSnapshot: SignedSnapshot, spendingTxOutRef: TxOutRef, ownOutput: TxOut) = {
+    val contestSnapshotStart = validRange(txInfo.validRange)._2
+    state match
+      case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+        val validInitiator = initiator match
+          case Party.Client => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
+          case Party.Exchange => txSignedBy(txInfo.signatories, exchangePkh, "no exchange sig")
+        newSignedSnapshot match
+          case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
+
+            val newChannelState =
+                  new OnChainChannelState.SnapshotContestState(contestSnapshot = signedSnapshot, contestSnapshotStart = contestSnapshotStart, contestInitiator = initiator, 
+                  // save the channel tx out ref so that we can check it in the contest
+                  contestChannelTxOutRef = spendingTxOutRef)
+                  
+            val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+            validInitiator
+              && balancedSnapshot(signedSnapshot.snapshotTradingState, ownInputValue)
+              && validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, exchangePubKey)
+              && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+  }
+
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
     import ScriptPurpose.*
     import Action.*
@@ -248,6 +305,7 @@ object CosmexContract {
                             val ownOutput = txInfo.outputs !! ownIndex
                             handleClientAbort(ownTxInInfo.resolved.address, ownTxInInfo.resolved.value, txInfo, state, spendingTxOutRef, ownOutput)
                           case Close(party, signedSnapshot) =>
+                            handleClose(party, ownTxInInfo.resolved.address, ownTxInInfo.resolved.value, txInfo, exchangePkh, exchangePubKey, state, signedSnapshot, spendingTxOutRef, txInfo.outputs !! ownIndex)
                           case Trades(actionTrades, actionCancelOthers) =>
                           case Payout =>
                           case Transfer(txOutIndex, value) =>
