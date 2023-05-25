@@ -367,8 +367,7 @@ object CosmexContract {
           latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
               val newChannelState =
-                if isEmpty(tsOrders.inner) then
-                  new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                if isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                 else
                   new OnChainChannelState.TradesContestState(
                     latestTradingState = latestTradingState,
@@ -382,6 +381,39 @@ object CosmexContract {
               validParty && isNewerSnapshot && balancedSnapshot(latestTradingState, ownInputValue) &&
               validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, params.exchangePubKey) &&
               expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+  }
+
+  def handleContestTimeout(
+      params: ExchangeParams,
+      contestSnapshotStart: POSIXTime,
+      contestationPeriodInMilliseconds: POSIXTime,
+      txInfoValidRange: (POSIXTime, POSIXTime),
+      contestChannelTxOutRef: TxOutRef,
+      contestSnapshot: Snapshot,
+      state: OnChainState,
+      ownInputAddress: Address,
+      ownInputValue: Value,
+      ownOutput: TxOut
+  ): Boolean = {
+    val (start, tradeContestStart) = txInfoValidRange
+    val timeoutPassed = {
+      val timeoutTime = contestSnapshotStart + params.contestationPeriodInMilliseconds
+      timeoutTime < start
+    }
+
+    val latestTradingState =
+      handlePendingTx(contestChannelTxOutRef, contestSnapshot.snapshotPendingTx, contestSnapshot.snapshotTradingState)
+
+    latestTradingState match
+      case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+        val newChannelState =
+          if isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+          else new OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart)
+
+        state match
+          case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+            val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+            timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
   }
 
   def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
@@ -477,7 +509,20 @@ object CosmexContract {
                         ownTxInResolvedTxOut.value,
                         ownOutput
                       )
-                    case Timeout     =>
+                    case Timeout =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handleContestTimeout(
+                        params,
+                        contestSnapshotStart,
+                        params.contestationPeriodInMilliseconds,
+                        validRange(txInfo.validRange),
+                        contestChannelTxOutRef,
+                        contestSnapshot,
+                        state,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        ownOutput
+                      )
                     case Update      => throw new Exception("Update not supported in SnapshotContestState")
                     case ClientAbort => throw new Exception("ClientAbort not supported in SnapshotContestState")
                     case Trades(actionTrades, actionCancelOthers) =>
