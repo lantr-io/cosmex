@@ -117,66 +117,6 @@ object CosmexContract {
 
   given Eq[Value] = (a: Value, b: Value) => false // FIXME
 
-  given Eq[PubKeyHash] = (a: PubKeyHash, b: PubKeyHash) => Builtins.equalsByteString(a.hash, b.hash)
-
-  given Eq[Credential] = (a: Credential, b: Credential) =>
-    a match
-      case Credential.PubKeyCredential(hash) =>
-        b match
-          case Credential.PubKeyCredential(hash2) => hash === hash2
-          case Credential.ScriptCredential(hash)  => false
-      case Credential.ScriptCredential(hash) =>
-        b match
-          case Credential.PubKeyCredential(hash2) => false
-          case Credential.ScriptCredential(hash2) => hash === hash2
-
-  given Eq[StakingCredential] = (lhs: StakingCredential, rhs: StakingCredential) =>
-    lhs match
-      case StakingCredential.StakingHash(cred) =>
-        rhs match
-          case StakingCredential.StakingHash(cred2)  => cred === cred2
-          case StakingCredential.StakingPtr(a, b, c) => false
-      case StakingCredential.StakingPtr(a, b, c) =>
-        rhs match
-          case StakingCredential.StakingHash(cred2)     => false
-          case StakingCredential.StakingPtr(a2, b2, c2) => a === a2 && b === b2 && c === c2
-
-  given Eq[Address] = (a: Address, b: Address) =>
-    a match
-      case Address(credentials, stakingCredential) =>
-        b match
-          case Address(credentials2, stakingCredential2) =>
-            credentials === credentials2 && stakingCredential === stakingCredential2
-
-  given Eq[OutputDatum] = (a: OutputDatum, b: OutputDatum) =>
-    a match
-      case OutputDatum.NoOutputDatum =>
-        b match
-          case OutputDatum.NoOutputDatum              => true
-          case OutputDatum.OutputDatumHash(datumHash) => false
-          case OutputDatum.OutputDatum(datum)         => false
-      case OutputDatum.OutputDatumHash(datumHash) =>
-        b match
-          case OutputDatum.NoOutputDatum               => false
-          case OutputDatum.OutputDatumHash(datumHash2) => datumHash === datumHash2
-          case OutputDatum.OutputDatum(datum)          => false
-      case OutputDatum.OutputDatum(datum) =>
-        b match
-          case OutputDatum.NoOutputDatum              => false
-          case OutputDatum.OutputDatumHash(datumHash) => false
-          case OutputDatum.OutputDatum(datum2)        => false // FIXME: datum === datum2
-
-  given Eq[TxOutRef] = (a: TxOutRef, b: TxOutRef) =>
-    a match
-      case TxOutRef(aTxId, aTxOutIndex) =>
-        b match
-          case TxOutRef(bTxId, bTxOutIndex) =>
-            aTxOutIndex === bTxOutIndex && Builtins.equalsByteString(aTxId.hash, bTxId.hash)
-
-  def isEmpty[A](lst: List[A]): Boolean = lst match
-    case List.Nil        => true
-    case List.Cons(_, _) => false
-
   def validator(cosmexValidator: (ExchangeParams, Action, OnChainState, ScriptContext) => Boolean, redeemer: Data, datum: Data, ctxData: Data): Unit = {
     val ctx = fromData[ScriptContext](ctxData)
     val d = cosmexValidator(_, _, _, ctx)
@@ -358,7 +298,7 @@ object CosmexContract {
           latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
               val newChannelState =
-                if isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                if List.isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                 else
                   new OnChainChannelState.TradesContestState(
                     latestTradingState = latestTradingState,
@@ -398,7 +338,7 @@ object CosmexContract {
     latestTradingState match
       case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
         val newChannelState =
-          if isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+          if List.isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
           else new OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart)
 
         state match
@@ -445,7 +385,7 @@ object CosmexContract {
     val newTradeingState = List.foldLeft(actionTrades, latestTradingState)(applyTrade)
     val newChannelState = newTradeingState match
       case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
-        if actionCancelOthers || isEmpty(tsOrders.inner) then
+        if actionCancelOthers || List.isEmpty(tsOrders.inner) then
           new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
         else new OnChainChannelState.TradesContestState(newTradeingState, tradeContestStart)
 
