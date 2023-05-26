@@ -5,6 +5,7 @@ import scalus.Compile
 import scalus.Compiler
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
+import scalus.uplc.DataInstances.given
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Extended.Finite
@@ -13,6 +14,7 @@ import scalus.ledger.api.v1.POSIXTime
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v1.UpperBound
 import scalus.ledger.api.v1.Value.{*, given}
+import scalus.ledger.api.v1.FromDataInstances.given
 import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
@@ -30,6 +32,7 @@ import scalus.uplc.ProgramFlatCodec
 import scalus.utils.Hex
 
 import java.util.Currency
+import scalus.uplc.FromData
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -114,7 +117,209 @@ case class ExchangeParams(
 @Compile
 object CosmexContract {
 
-  def validator(cosmexValidator: (ExchangeParams, Action, OnChainState, ScriptContext) => Boolean, redeemer: Data, datum: Data, ctxData: Data): Unit = {
+  given Eq[DCert] = (x: DCert, y: DCert) =>
+    x match
+      case DCert.DelegRegKey(cred) =>
+        y match
+          case DCert.DelegRegKey(cred)              => cred === cred
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => false
+
+      case DCert.DelegDeRegKey(cred) =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => cred === cred
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => false
+      case DCert.DelegDelegate(cred, delegatee) =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => cred === cred && delegatee === delegatee
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => false
+      case DCert.PoolRegister(poolId, vrf) =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => poolId === poolId && vrf === vrf
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => false
+      case DCert.PoolRetire(poolId, epoch) =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => poolId === poolId && epoch === epoch
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => false
+      case DCert.Genesis =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => true
+          case DCert.Mir                            => false
+      case DCert.Mir =>
+        y match
+          case DCert.DelegRegKey(cred)              => false
+          case DCert.DelegDeRegKey(cred)            => false
+          case DCert.DelegDelegate(cred, delegatee) => false
+          case DCert.PoolRegister(poolId, vrf)      => false
+          case DCert.PoolRetire(poolId, epoch)      => false
+          case DCert.Genesis                        => false
+          case DCert.Mir                            => true
+
+  given Eq[ScriptPurpose] = (x: ScriptPurpose, y: ScriptPurpose) =>
+    x match
+      case ScriptPurpose.Minting(curSymbol) =>
+        y match
+          case ScriptPurpose.Minting(curSymbol)     => curSymbol === curSymbol
+          case ScriptPurpose.Spending(txOutRef)     => false
+          case ScriptPurpose.Rewarding(stakingCred) => false
+          case ScriptPurpose.Certifying(cert)       => false
+      case ScriptPurpose.Spending(txOutRef) =>
+        y match
+          case ScriptPurpose.Minting(curSymbol)     => false
+          case ScriptPurpose.Spending(txOutRef)     => txOutRef === txOutRef
+          case ScriptPurpose.Rewarding(stakingCred) => false
+          case ScriptPurpose.Certifying(cert)       => false
+      case ScriptPurpose.Rewarding(stakingCred) =>
+        y match
+          case ScriptPurpose.Minting(curSymbol)     => false
+          case ScriptPurpose.Spending(txOutRef)     => false
+          case ScriptPurpose.Rewarding(stakingCred) => stakingCred === stakingCred
+          case ScriptPurpose.Certifying(cert)       => false
+      case ScriptPurpose.Certifying(cert) =>
+        y match
+          case ScriptPurpose.Minting(curSymbol)     => false
+          case ScriptPurpose.Spending(txOutRef)     => false
+          case ScriptPurpose.Rewarding(stakingCred) => false
+          case ScriptPurpose.Certifying(cert)       => cert === cert
+
+  given Data.FromData[Party] = (d: Data) =>
+    val tag = Builtins.unsafeDataAsConstr(d).fst
+    if tag === BigInt(0) then Party.Client
+    else if tag === BigInt(1) then Party.Exchange
+    else throw new Exception(s"Unknown Party tag: $tag")
+
+  given Data.FromData[LimitOrder] = (d: Data) =>
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new LimitOrder(
+      fromData[Pair](args.head),
+      fromData[BigInt](args.tail.head),
+      fromData[BigInt](args.tail.tail.head)
+    )
+
+  given Data.FromData[TradingState] = (d: Data) =>
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new TradingState(
+      fromData[Value](args.head),
+      fromData[Value](args.tail.head),
+      fromData[AssocMap[OrderId, LimitOrder]](args.tail.tail.head)
+    )
+
+  given Data.FromData[PendingTxType] = (d: Data) =>
+    val pair = Builtins.unsafeDataAsConstr(d)
+    val tag = pair.fst
+    val args = pair.snd
+    if tag === BigInt(0) then PendingTxType.PendingIn
+    else if tag === BigInt(1) then new PendingTxType.PendingOut(fromData[TxOutIndex](args.head))
+    else if tag === BigInt(2) then new PendingTxType.PendingTransfer(fromData[TxOutIndex](args.head))
+    else throw new Exception(s"Unknown PendingTxType tag: $tag")
+
+  given Data.FromData[PendingTx] = (d: Data) =>
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new PendingTx(
+      fromData[Value](args.head),
+      fromData[PendingTxType](args.tail.head),
+      fromData[TxOutRef](args.tail.tail.head)
+    )
+
+  given Data.FromData[Snapshot] = (d: Data) =>
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new Snapshot(
+      fromData[TradingState](args.head),
+      fromData[Maybe[PendingTx]](args.tail.head),
+      fromData[BigInt](args.tail.tail.head)
+    )
+
+  given Data.FromData[SignedSnapshot] = (d: Data) =>
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new SignedSnapshot(
+      fromData[Snapshot](args.head),
+      fromData[ByteString](args.tail.head),
+      fromData[ByteString](args.tail.tail.head)
+    )
+
+  given Data.FromData[OnChainChannelState] = (d: Data) =>
+    val pair = Builtins.unsafeDataAsConstr(d)
+    val tag = pair.fst
+    val args = pair.snd
+    if tag === BigInt(0) then OnChainChannelState.OpenState
+    else if tag === BigInt(1) then
+      new OnChainChannelState.SnapshotContestState(
+        fromData[Snapshot](args.head),
+        fromData[POSIXTime](args.tail.head),
+        fromData[Party](args.tail.tail.head),
+        fromData[TxOutRef](args.tail.tail.tail.head)
+      )
+    else if tag === BigInt(2) then
+      new OnChainChannelState.TradesContestState(
+        fromData[TradingState](args.head),
+        fromData[POSIXTime](args.tail.head)
+      )
+    else if tag === BigInt(3) then
+      new OnChainChannelState.PayoutState(
+        fromData[Value](args.head),
+        fromData[Value](args.tail.head)
+      )
+    else throw new Exception(s"Unknown OnChainChannelState tag: $tag")
+
+  given Data.FromData[Trade] = (d: Data) => {
+    val args = Builtins.unsafeDataAsConstr(d).snd
+    new Trade(
+      fromData[OrderId](args.head),
+      fromData[BigInt](args.tail.head),
+      fromData[BigInt](args.tail.tail.head)
+    )
+  }
+
+  given Data.FromData[Action] = (d: Data) =>
+    val pair = Builtins.unsafeDataAsConstr(d)
+    val tag = pair.fst
+    val args = pair.snd
+    if tag === BigInt(0) then Action.Update
+    else if tag === BigInt(1) then Action.ClientAbort
+    else if tag === BigInt(2) then
+      new Action.Close(fromData[Party](args.head), fromData[SignedSnapshot](args.tail.head))
+    else if tag === BigInt(3) then
+      new Action.Trades(fromData[List[Trade]](args.head), fromData[Boolean](args.tail.head))
+    else if tag === BigInt(4) then Action.Payout
+    else if tag === BigInt(5) then new Action.Transfer(fromData[TxOutIndex](args.head), fromData[Value](args.tail.head))
+    else if tag === BigInt(6) then Action.Timeout
+    else throw new Exception(s"Unknown Action tag: $tag")
+
+  def validator(
+      cosmexValidator: (ExchangeParams, Action, OnChainState, ScriptContext) => Boolean,
+      redeemer: Data,
+      datum: Data,
+      ctxData: Data
+  ): Unit = {
     val ctx = fromData[ScriptContext](ctxData)
     val d = cosmexValidator(_, _, _, ctx)
     ()
@@ -295,7 +500,8 @@ object CosmexContract {
           latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
               val newChannelState =
-                if List.isEmpty(tsOrders.inner) then new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                if List.isEmpty(tsOrders.inner) then
+                  new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                 else
                   new OnChainChannelState.TradesContestState(
                     latestTradingState = latestTradingState,
@@ -397,7 +603,108 @@ object CosmexContract {
         )
   }
 
-  def cosmexValidator(params: ExchangeParams, state: OnChainState, action: Action, ctx: ScriptContext): Boolean = {
+  /*  The clientBalance and exchangeBalance can be fulfilled partially, meaning that
+      the exchange may owe the client some money.
+      This state allows a client to withdraw the money that the exchange owes him
+      from other TxOuts where exchangeBalance is available.
+
+      client1: {A: 1000, $: 0} exchange: {A: 0, $: 0} locked: {A: 1000, $: 0}
+      client2: {A: 0, $: 1000} exchange: {A: 0, $: 0} locked: {A: 0, $: 1000}
+      ==> Trade ADA/DJED SELL A 400 @ 0.3
+      client1: {A: 600, $: 120} exchange: {A: 400, $: 0} locked: {A: 1000, $: 0}
+      client2: {A: 400, $: 880} exchange: {A: 0, $: 120} locked: {A: 0, $: 1000}
+      ==> Payout if the exchange is offline
+      client1 can withdraw $120 from client2's locked funds
+      client2 can withdraw A400 from client1's locked funds
+      even in a single transaction
+      client1--|-----|--client1
+      client2--| Tx  |--client2
+              |-----|
+   */
+  def handlePayoutTransfer(
+      params: ExchangeParams,
+      state: OnChainState,
+      txInfo: TxInfo,
+      ownIdx: BigInt,
+      transferValue: Value,
+      clientBalance: Value,
+      exchangeBalance: Value,
+      ownInputAddress: Address,
+      ownInputValue: Value,
+      ownOutput: TxOut
+  ): Boolean = {
+    import ScriptPurpose.*
+    import Action.*
+    import OnChainChannelState.*
+
+    val (locked, cosmexScriptHash) = ownOutput match
+      case TxOut(address, txOutValue, _, _) =>
+        address match
+          case Address(cred, _) =>
+            cred match
+              case Credential.ScriptCredential(sh) => (txOutValue, sh)
+              case Credential.PubKeyCredential(_)  => throw new Exception("Invalid output")
+
+    val transferValueIsPositive = transferValue > Value.zero
+
+    def cosmexInputTransferAmountToTxOutIdx(txInInfo: TxInInfo): Value = txInInfo match
+      case TxInInfo(txOutRef, resolved) =>
+        resolved match
+          case TxOut(address, txOutValue, _, _) =>
+            address match
+              case Address(cred, _) =>
+                cred match
+                  case Credential.ScriptCredential(sh) =>
+                    if sh === cosmexScriptHash then
+                      val action = {
+                        AssocMap.lookup(txInfo.redeemers)(new Spending(txOutRef)) match
+                          case Nothing     => throw new Exception("No redeemer")
+                          case Just(value) => fromData[Action](value)
+                      }
+                      action match
+                        case Transfer(targetIdx, amount) =>
+                          if targetIdx === ownIdx then amount
+                          else Value.zero
+                        case Update                                   => throw new Exception("Invalid action")
+                        case ClientAbort                              => throw new Exception("Invalid action")
+                        case Close(party, signedSnapshot)             => throw new Exception("Invalid action")
+                        case Trades(actionTrades, actionCancelOthers) => throw new Exception("Invalid action")
+                        case Payout                                   => throw new Exception("Invalid action")
+                        case Timeout                                  => throw new Exception("Invalid action")
+                    else Value.zero
+                  case Credential.PubKeyCredential(_) => Value.zero
+
+    val transferedToMe = List.foldLeft(txInfo.inputs, Value.zero) { (acc, input) =>
+      acc + cosmexInputTransferAmountToTxOutIdx(input)
+    }
+    val diff = transferedToMe - transferValue
+    val newOutputValue = locked - diff
+    val newExchangeBalance = exchangeBalance - diff
+    state match
+      case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+        val newChannelState = new PayoutState(clientBalance, newExchangeBalance)
+        val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+        transferValueIsPositive && expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
+  }
+
+  def cosmexValidator(
+      handlePayoutTransfer: (
+          params: ExchangeParams,
+          state: OnChainState,
+          txInfo: TxInfo,
+          ownIdx: BigInt,
+          transferValue: Value,
+          clientBalance: Value,
+          exchangeBalance: Value,
+          ownInputAddress: Address,
+          ownInputValue: Value,
+          ownOutput: TxOut
+      ) => Boolean,
+      params: ExchangeParams,
+      state: OnChainState,
+      action: Action,
+      ctx: ScriptContext
+  ): Boolean = {
     import ScriptPurpose.*
 
     def cosmexSpending(txInfo: TxInfo, spendingTxOutRef: TxOutRef): Boolean = {
@@ -549,8 +856,21 @@ object CosmexContract {
 
                 case PayoutState(clientBalance, exchangeBalance) =>
                   action match
-                    case Transfer(txOutIndex, value)  =>
-                    case Payout                       =>
+                    case Transfer(txOutIndex, value) =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handlePayoutTransfer(
+                        params,
+                        state,
+                        txInfo,
+                        txOutIndex,
+                        value,
+                        clientBalance,
+                        exchangeBalance,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        ownOutput
+                      )
+                    case Payout                       => // handlePayoutPayout(txInfo, clientBalance, exchangeBalance)
                     case Update                       => throw new Exception("Update not supported in PayoutState")
                     case ClientAbort                  => throw new Exception("ClientAbort not supported in PayoutState")
                     case Close(party, signedSnapshot) => throw new Exception("Close not supported in PayoutState")
@@ -638,7 +958,7 @@ object CosmexContract {
                           val exchangeBalance1 = tsExchangeBalance - baseAssetValue + quoteAssetValue
                           val orderAmountLeft = orderAmount - tradeAmount
                           val newOrders =
-                            if orderAmountLeft == BigInt(0) then AssocMap.delete(tsOrders)(orderId)
+                            if orderAmountLeft === BigInt(0) then AssocMap.delete(tsOrders)(orderId)
                             else
                               AssocMap.insert(tsOrders)(
                                 orderId,
@@ -682,12 +1002,13 @@ object CosmexContract {
 }
 
 object CosmexValidator {
-  // Split the validator into two parts to avoid 
+  // Split the validator into two parts to avoid
   // Generated bytecode for method 'cosmex.CosmexValidator$.<clinit>' is too large. Limit is 64KB
   import scalus.sir.SirDSL.{*, given}
+  def compiledhandlePayoutTransfer = Compiler.compile(CosmexContract.handlePayoutTransfer)
   def compiledWrapperValidator = Compiler.compile(CosmexContract.validator)
   def compiledTypedValidator = Compiler.compile(CosmexContract.cosmexValidator)
-  val compiledValidator = compiledWrapperValidator $ compiledTypedValidator
+  val compiledValidator = compiledWrapperValidator $ (compiledTypedValidator $ compiledhandlePayoutTransfer)
   val validator = new SimpleSirToUplcLowering(generateErrorTraces = false).lower(compiledValidator)
   val flatEncodedValidator = ProgramFlatCodec.encodeFlat(Program((2, 0, 0), validator))
   val cborEncodedValidator = Cbor.encode(flatEncodedValidator).toByteArray
