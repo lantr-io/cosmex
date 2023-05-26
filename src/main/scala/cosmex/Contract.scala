@@ -1,34 +1,36 @@
 package cosmex
-import scalus.builtins.ByteString
-import scalus.Compiler
-import scalus.ledger.api.v1.POSIXTime
-import scalus.ledger.api.v2.*
-import scalus.Compile
-import scalus.uplc.Data
-import scalus.uplc.Data.fromData
-import scalus.ledger.api.v1.CurrencySymbol
-import scalus.ledger.api.v1.TokenName
-import scalus.ledger.api.v1.LowerBound
-import scalus.ledger.api.v1.Extended.Finite
-import scalus.ledger.api.v1.UpperBound
-import scalus.ledger.api.v1.Extended
-import scalus.ledger.api.v1.Value.{+, -}
 import dotty.tools.dotc.Run
+import io.bullet.borer.Cbor
+import scalus.Compile
+import scalus.Compiler
+import scalus.builtins.Builtins
+import scalus.builtins.ByteString
+import scalus.ledger.api.v1.CurrencySymbol
+import scalus.ledger.api.v1.Extended
+import scalus.ledger.api.v1.Extended.Finite
+import scalus.ledger.api.v1.LowerBound
+import scalus.ledger.api.v1.POSIXTime
+import scalus.ledger.api.v1.TokenName
+import scalus.ledger.api.v1.UpperBound
+import scalus.ledger.api.v1.Value.+
+import scalus.ledger.api.v1.Value.-
+import scalus.ledger.api.v2.FromDataInstances.given
+import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
 import scalus.prelude.List
 import scalus.prelude.Maybe
 import scalus.prelude.Maybe.*
-import scalus.prelude.Prelude.given
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.Eq
-import java.util.Currency
-import scalus.builtins.Builtins
+import scalus.prelude.Prelude.given
 import scalus.sir.SimpleSirToUplcLowering
-import scalus.uplc.ProgramFlatCodec
+import scalus.uplc.Data
+import scalus.uplc.Data.fromData
 import scalus.uplc.Program
-import io.bullet.borer.Cbor
-import scalus.ledger.api.v2.FromDataInstances.given
+import scalus.uplc.ProgramFlatCodec
 import scalus.utils.Hex
+
+import java.util.Currency
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -114,17 +116,6 @@ case class ExchangeParams(
 object CosmexContract {
 
   given Eq[Value] = (a: Value, b: Value) => false // FIXME
-
-  given maybeEq[A](using eq: Eq[A]): Eq[Maybe[A]] = (a: Maybe[A], b: Maybe[A]) =>
-    a match
-      case Nothing =>
-        b match
-          case Nothing => true
-          case Just(a) => false
-      case Just(value) =>
-        b match
-          case Nothing      => false
-          case Just(value2) => value === value2
 
   given Eq[PubKeyHash] = (a: PubKeyHash, b: PubKeyHash) => Builtins.equalsByteString(a.hash, b.hash)
 
