@@ -12,8 +12,7 @@ import scalus.ledger.api.v1.LowerBound
 import scalus.ledger.api.v1.POSIXTime
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v1.UpperBound
-import scalus.ledger.api.v1.Value.+
-import scalus.ledger.api.v1.Value.-
+import scalus.ledger.api.v1.Value.{*, given}
 import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
@@ -114,8 +113,6 @@ case class ExchangeParams(
 
 @Compile
 object CosmexContract {
-
-  given Eq[Value] = (a: Value, b: Value) => false // FIXME
 
   def validator(cosmexValidator: (ExchangeParams, Action, OnChainState, ScriptContext) => Boolean, redeemer: Data, datum: Data, ctxData: Data): Unit = {
     val ctx = fromData[ScriptContext](ctxData)
