@@ -687,6 +687,44 @@ object CosmexContract {
         transferValueIsPositive && expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
   }
 
+  def handlePayoutPayout(
+      params: ExchangeParams,
+      state: OnChainState,
+      clientBalance: Value,
+      exchangeBalance: Value,
+      ownInputAddress: Address,
+      ownInputValue: Value,
+      ownOutput: TxOut
+  ): Boolean = {
+    import ScriptPurpose.*
+    import OnChainChannelState.*
+
+    val isFilled = clientBalance === ownInputValue && exchangeBalance === Value.zero
+    if isFilled then
+      ownOutput match
+        case TxOut(address, txOutValue, _, _) =>
+          address.credential match
+            case Credential.PubKeyCredential(hash) =>
+              if hash === params.exchangePkh && txOutValue === ownInputValue then true
+              else throw new RuntimeException("Invalid payout")
+            case Credential.ScriptCredential(hash) =>
+              throw new RuntimeException("Invalid payout")
+    else
+      val min = (a: BigInt, b: BigInt) => if a < b then a else b
+      val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
+      val newOutputValue = ownInputValue - availableForPayment
+      val newClientBalance = clientBalance - availableForPayment
+      state match
+        case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+          val newState = new OnChainState(
+            clientPkh,
+            clientPubKey,
+            clientTxOutRef,
+            new PayoutState(newClientBalance, exchangeBalance)
+          )
+          expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
+  }
+
   def cosmexValidator(
       handlePayoutTransfer: (
           params: ExchangeParams,
@@ -870,15 +908,23 @@ object CosmexContract {
                         ownTxInResolvedTxOut.value,
                         ownOutput
                       )
-                    case Payout                       => // handlePayoutPayout(txInfo, clientBalance, exchangeBalance)
+                    case Payout =>
+                      val ownOutput = txInfo.outputs !! ownIndex
+                      handlePayoutPayout(
+                        params,
+                        state,
+                        clientBalance,
+                        exchangeBalance,
+                        ownTxInResolvedTxOut.address,
+                        ownTxInResolvedTxOut.value,
+                        ownOutput
+                      )
                     case Update                       => throw new Exception("Update not supported in PayoutState")
                     case ClientAbort                  => throw new Exception("ClientAbort not supported in PayoutState")
                     case Close(party, signedSnapshot) => throw new Exception("Close not supported in PayoutState")
                     case Trades(actionTrades, actionCancelOthers) =>
                       throw new Exception("Trades not supported in PayoutState")
                     case Timeout => throw new Exception("Timeout not supported in PayoutState")
-
-      false
     }
 
     ctx match
