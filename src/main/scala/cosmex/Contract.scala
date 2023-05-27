@@ -5,7 +5,7 @@ import scalus.Compile
 import scalus.Compiler
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
-import scalus.uplc.DataInstances.given
+import scalus.uplc.FromDataInstances.given
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Extended.Finite
