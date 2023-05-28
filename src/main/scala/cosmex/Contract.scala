@@ -489,12 +489,16 @@ object CosmexContract {
       clientPubKey: PubKey,
       exchangePubKey: PubKey
   ): Boolean = {
+    import scalus.uplc.Data.toData
+    import scalus.uplc.ToDataInstances.given
+    import scalus.ledger.api.v1.ToDataInstances.given
+    import CosmexToDataInstances.given
     signedSnapshot match
       case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
         val signedInfo = (clientTxOutRef, signedSnapshot)
         val msg = Builtins.serialiseData(
-          Builtins.mkI(42)
-        ) // FIXME: Builtins.mkPairData(clientTxOutRef, signedSnapshot.signedSnapshot)
+          signedInfo.toData
+        )
         val validExchangeSig = Builtins.verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
         val validClientSig = Builtins.verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
         validClientSig && validExchangeSig
