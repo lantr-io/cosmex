@@ -3,6 +3,7 @@ import dotty.tools.dotc.Run
 import io.bullet.borer.Cbor
 import scalus.Compile
 import scalus.Compiler
+import scalus.builtins
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
 import scalus.uplc.FromDataInstances.given
@@ -114,6 +115,172 @@ case class ExchangeParams(
     contestationPeriodInMilliseconds: DiffMilliSeconds
 )
 
+@Compile
+object CosmexToDataInstances {
+  import scalus.uplc.Data.toData
+  import scalus.uplc.ToDataInstances.given
+  import scalus.ledger.api.v1.ToDataInstances.given
+  given Data.ToData[Party] = (p: Party) =>
+    Builtins.mkConstr(
+      (p match
+        case Party.Client   => BigInt(0)
+        case Party.Exchange => BigInt(1)
+      ),
+      Builtins.mkNilData
+    )
+
+  given Data.ToData[LimitOrder] = (o: LimitOrder) =>
+    o match
+      case LimitOrder(
+            orderPair,
+            orderAmount,
+            orderPrice
+          ) =>
+        Builtins.mkConstr(
+          BigInt(0),
+          Builtins.mkCons(
+            orderPair.toData,
+            Builtins.mkCons(
+              orderAmount.toData,
+              Builtins.mkCons(orderPrice.toData, Builtins.mkNilData)
+            )
+          )
+        )
+  given Data.ToData[TradingState] = (o: TradingState) =>
+    o match
+      case TradingState(
+            tsClientBalance,
+            tsExchangeBalance,
+            tsOrders
+          ) =>
+        Builtins.mkConstr(
+          BigInt(0),
+          Builtins.mkCons(
+            tsClientBalance.toData,
+            Builtins.mkCons(
+              tsExchangeBalance.toData,
+              Builtins.mkCons(
+                tsOrders.toData,
+                Builtins.mkNilData
+              )
+            )
+          )
+        )
+
+  given Data.ToData[PendingTxType] = (o: PendingTxType) =>
+    o match
+      case PendingTxType.PendingIn => Builtins.mkConstr(BigInt(0), Builtins.mkNilData)
+      case PendingTxType.PendingOut(txOutIndex) =>
+        Builtins.mkConstr(BigInt(1), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData))
+      case PendingTxType.PendingTransfer(txOutIndex) =>
+        Builtins.mkConstr(BigInt(2), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData))
+
+  given Data.ToData[PendingTx] = (o: PendingTx) =>
+    o match
+      case PendingTx(
+            pendingTxValue,
+            pendingTxType,
+            pendingTxSpentTxOutRef
+          ) =>
+        Builtins.mkConstr(
+          BigInt(0),
+          Builtins.mkCons(
+            pendingTxValue.toData,
+            Builtins.mkCons(
+              pendingTxType.toData,
+              Builtins.mkCons(
+                pendingTxSpentTxOutRef.toData,
+                Builtins.mkNilData
+              )
+            )
+          )
+        )
+  given Data.ToData[Snapshot] = (o: Snapshot) =>
+    o match
+      case Snapshot(
+            snapshotTradingState,
+            snapshotPendingTx,
+            snapshotVersion
+          ) =>
+        Builtins.mkConstr(
+          BigInt(0),
+          Builtins.mkCons(
+            snapshotTradingState.toData,
+            Builtins.mkCons(
+              snapshotPendingTx.toData,
+              Builtins.mkCons(snapshotVersion.toData, Builtins.mkNilData)
+            )
+          )
+        )
+
+  given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
+    o match
+      case OnChainChannelState.OpenState =>
+        Builtins.mkConstr(BigInt(0), Builtins.mkNilData)
+      case OnChainChannelState.SnapshotContestState(
+            contestSnapshot,
+            contestSnapshotStart,
+            contestInitiator,
+            contestChannelTxOutRef
+          ) =>
+        Builtins.mkConstr(
+          BigInt(1),
+          Builtins.mkCons(
+            contestSnapshot.toData,
+            Builtins.mkCons(
+              contestSnapshotStart.toData,
+              Builtins.mkCons(
+                contestInitiator.toData,
+                Builtins.mkCons(
+                  contestChannelTxOutRef.toData,
+                  Builtins.mkNilData
+                )
+              )
+            )
+          )
+        )
+      case OnChainChannelState.TradesContestState(
+            latestTradingState,
+            tradeContestStart
+          ) =>
+        Builtins.mkConstr(
+          BigInt(2),
+          Builtins.mkCons(
+            latestTradingState.toData,
+            Builtins.mkCons(tradeContestStart.toData, Builtins.mkNilData)
+          )
+        )
+      case OnChainChannelState.PayoutState(clientBalance, exchangeBalance) =>
+        Builtins.mkConstr(
+          BigInt(3),
+          Builtins.mkCons(
+            clientBalance.toData,
+            Builtins.mkCons(exchangeBalance.toData, Builtins.mkNilData)
+          )
+        )
+
+  given Data.ToData[OnChainState] = (o: OnChainState) =>
+    o match
+      case OnChainState(
+            clientPkh,
+            clientPubKey,
+            clientTxOutRef,
+            channelState
+          ) =>
+        Builtins.mkConstr(
+          BigInt(0),
+          Builtins.mkCons(
+            clientPkh.toData,
+            Builtins.mkCons(
+              clientPubKey.toData,
+              Builtins.mkCons(
+                clientTxOutRef.toData,
+                Builtins.mkCons(channelState.toData, Builtins.mkNilData)
+              )
+            )
+          )
+        )
+}
 @Compile
 object CosmexContract {
 
@@ -242,9 +409,11 @@ object CosmexContract {
   }
 
   def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
+    import scalus.uplc.Data.toData
+    import CosmexToDataInstances.given
     ownOutput match
       case TxOut(address, value, datum, referenceScript) =>
-        val newStateData = Builtins.mkI(1) // FIXME: use newState.toData
+        val newStateData = newState.toData
         datum === new OutputDatum.OutputDatum(newStateData) &&
         address === ownInputAddress &&
         value === newValue
