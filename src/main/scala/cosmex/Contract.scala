@@ -744,12 +744,7 @@ object CosmexContract {
                         case Transfer(targetIdx, amount) =>
                           if targetIdx === ownIdx then amount
                           else Value.zero
-                        case Update                                   => throw new Exception("Invalid action")
-                        case ClientAbort                              => throw new Exception("Invalid action")
-                        case Close(party, signedSnapshot)             => throw new Exception("Invalid action")
-                        case Trades(actionTrades, actionCancelOthers) => throw new Exception("Invalid action")
-                        case Payout                                   => throw new Exception("Invalid action")
-                        case Timeout                                  => throw new Exception("Invalid action")
+                        case _ => throw new Exception("Invalid action")
                     else Value.zero
                   case Credential.PubKeyCredential(_) => Value.zero
 
@@ -785,9 +780,9 @@ object CosmexContract {
           address.credential match
             case Credential.PubKeyCredential(hash) =>
               if hash === params.exchangePkh && txOutValue === ownInputValue then true
-              else throw new RuntimeException("Invalid payout")
+              else throw new Exception("Invalid payout")
             case Credential.ScriptCredential(hash) =>
-              throw new RuntimeException("Invalid payout")
+              throw new Exception("Invalid payout")
     else
       val min = (a: BigInt, b: BigInt) => if a < b then a else b
       val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
@@ -885,11 +880,7 @@ object CosmexContract {
                         spendingTxOutRef,
                         ownOutput
                       )
-                    case Trades(actionTrades, actionCancelOthers) =>
-                      throw new Exception("Trades not supported in OpenState")
-                    case Payout                      => throw new Exception("Payout not supported in OpenState")
-                    case Transfer(txOutIndex, value) => throw new Exception("Transfer not supported in OpenState")
-                    case Timeout                     => throw new Exception("Timeout not supported in OpenState")
+                    case _ => throw new Exception("Invalid action")
 
                 case SnapshotContestState(
                       contestSnapshot,
@@ -928,13 +919,7 @@ object CosmexContract {
                         ownTxInResolvedTxOut.value,
                         ownOutput
                       )
-                    case Update      => throw new Exception("Update not supported in SnapshotContestState")
-                    case ClientAbort => throw new Exception("ClientAbort not supported in SnapshotContestState")
-                    case Trades(actionTrades, actionCancelOthers) =>
-                      throw new Exception("Trades not supported in SnapshotContestState")
-                    case Payout => throw new Exception("Payout not supported in SnapshotContestState")
-                    case Transfer(txOutIndex, value) =>
-                      throw new Exception("Transfer not supported in SnapshotContestState")
+                    case _ => throw new Exception("Invalid action")
                 case TradesContestState(latestTradingState, tradeContestStart) =>
                   action match
                     case Timeout =>
@@ -963,13 +948,7 @@ object CosmexContract {
                         ownTxInResolvedTxOut.value,
                         ownOutput
                       )
-                    case Update      => throw new Exception("Update not supported in TradesContestState")
-                    case ClientAbort => throw new Exception("ClientAbort not supported in TradesContestState")
-                    case Close(party, signedSnapshot) =>
-                      throw new Exception("Close not supported in TradesContestState")
-                    case Payout => throw new Exception("Payout not supported in TradesContestState")
-                    case Transfer(txOutIndex, value) =>
-                      throw new Exception("Transfer not supported in TradesContestState")
+                    case _ => throw new Exception("Invalid action")
 
                 case PayoutState(clientBalance, exchangeBalance) =>
                   action match
@@ -998,21 +977,14 @@ object CosmexContract {
                         ownTxInResolvedTxOut.value,
                         ownOutput
                       )
-                    case Update                       => throw new Exception("Update not supported in PayoutState")
-                    case ClientAbort                  => throw new Exception("ClientAbort not supported in PayoutState")
-                    case Close(party, signedSnapshot) => throw new Exception("Close not supported in PayoutState")
-                    case Trades(actionTrades, actionCancelOthers) =>
-                      throw new Exception("Trades not supported in PayoutState")
-                    case Timeout => throw new Exception("Timeout not supported in PayoutState")
+                    case _ => throw new Exception("Invalid action")
     }
 
     ctx match
       case ScriptContext(txInfo, purpose) =>
         purpose match
-          case Minting(curSymbol)         => throw new Exception("Minting not supported")
-          case Rewarding(stakingCred)     => throw new Exception("Rewarding not supported")
-          case Certifying(cert)           => throw new Exception("Certifying not supported")
           case Spending(spendingTxOutRef) => cosmexSpending(txInfo, spendingTxOutRef)
+          case _                          => throw new Exception("Spending expected")
 
     false
   }
@@ -1090,8 +1062,8 @@ object CosmexContract {
                                 new LimitOrder(pair, orderAmount = orderAmountLeft, orderPrice = orderPrice)
                               )
                           new TradingState(clientBalance1, exchangeBalance1, newOrders)
-                        else throw new RuntimeException("Invalid trade")
-              case Maybe.Nothing => throw new RuntimeException("Invalid order")
+                        else throw new Exception("Invalid trade")
+              case Maybe.Nothing => throw new Exception("Invalid order")
             }
   }
 
@@ -1113,14 +1085,14 @@ object CosmexContract {
         lower match
           case LowerBound(start, closure) =>
             start match
-              case Extended.NegInf => throw new RuntimeException("LBNI")
-              case Extended.PosInf => throw new RuntimeException("LBPI")
+              case Extended.NegInf => throw new Exception("LBNI")
+              case Extended.PosInf => throw new Exception("LBPI")
               case Finite(start) =>
                 upper match
                   case UpperBound(upper, closure) =>
                     upper match
-                      case Extended.NegInf => throw new RuntimeException("UBNI")
-                      case Extended.PosInf => throw new RuntimeException("UBPI")
+                      case Extended.NegInf => throw new Exception("UBNI")
+                      case Extended.PosInf => throw new Exception("UBPI")
                       case Finite(e)       => (start, e)
   }
 
