@@ -126,7 +126,7 @@ object CosmexToDataInstances {
         case Party.Client   => BigInt(0)
         case Party.Exchange => BigInt(1)
       ),
-      Builtins.mkNilData
+      Builtins.mkNilData()
     )
 
   given Data.ToData[LimitOrder] = (o: LimitOrder) =>
@@ -142,7 +142,7 @@ object CosmexToDataInstances {
             orderPair.toData,
             Builtins.mkCons(
               orderAmount.toData,
-              Builtins.mkCons(orderPrice.toData, Builtins.mkNilData)
+              Builtins.mkCons(orderPrice.toData, Builtins.mkNilData())
             )
           )
         )
@@ -161,7 +161,7 @@ object CosmexToDataInstances {
               tsExchangeBalance.toData,
               Builtins.mkCons(
                 tsOrders.toData,
-                Builtins.mkNilData
+                Builtins.mkNilData()
               )
             )
           )
@@ -169,11 +169,11 @@ object CosmexToDataInstances {
 
   given Data.ToData[PendingTxType] = (o: PendingTxType) =>
     o match
-      case PendingTxType.PendingIn => Builtins.mkConstr(BigInt(0), Builtins.mkNilData)
+      case PendingTxType.PendingIn => Builtins.mkConstr(BigInt(0), Builtins.mkNilData())
       case PendingTxType.PendingOut(txOutIndex) =>
-        Builtins.mkConstr(BigInt(1), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData))
+        Builtins.mkConstr(BigInt(1), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData()))
       case PendingTxType.PendingTransfer(txOutIndex) =>
-        Builtins.mkConstr(BigInt(2), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData))
+        Builtins.mkConstr(BigInt(2), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData()))
 
   given Data.ToData[PendingTx] = (o: PendingTx) =>
     o match
@@ -190,7 +190,7 @@ object CosmexToDataInstances {
               pendingTxType.toData,
               Builtins.mkCons(
                 pendingTxSpentTxOutRef.toData,
-                Builtins.mkNilData
+                Builtins.mkNilData()
               )
             )
           )
@@ -208,7 +208,7 @@ object CosmexToDataInstances {
             snapshotTradingState.toData,
             Builtins.mkCons(
               snapshotPendingTx.toData,
-              Builtins.mkCons(snapshotVersion.toData, Builtins.mkNilData)
+              Builtins.mkCons(snapshotVersion.toData, Builtins.mkNilData())
             )
           )
         )
@@ -216,7 +216,7 @@ object CosmexToDataInstances {
   given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
     o match
       case OnChainChannelState.OpenState =>
-        Builtins.mkConstr(BigInt(0), Builtins.mkNilData)
+        Builtins.mkConstr(BigInt(0), Builtins.mkNilData())
       case OnChainChannelState.SnapshotContestState(
             contestSnapshot,
             contestSnapshotStart,
@@ -233,7 +233,7 @@ object CosmexToDataInstances {
                 contestInitiator.toData,
                 Builtins.mkCons(
                   contestChannelTxOutRef.toData,
-                  Builtins.mkNilData
+                  Builtins.mkNilData()
                 )
               )
             )
@@ -247,7 +247,7 @@ object CosmexToDataInstances {
           BigInt(2),
           Builtins.mkCons(
             latestTradingState.toData,
-            Builtins.mkCons(tradeContestStart.toData, Builtins.mkNilData)
+            Builtins.mkCons(tradeContestStart.toData, Builtins.mkNilData())
           )
         )
       case OnChainChannelState.PayoutState(clientBalance, exchangeBalance) =>
@@ -255,7 +255,7 @@ object CosmexToDataInstances {
           BigInt(3),
           Builtins.mkCons(
             clientBalance.toData,
-            Builtins.mkCons(exchangeBalance.toData, Builtins.mkNilData)
+            Builtins.mkCons(exchangeBalance.toData, Builtins.mkNilData())
           )
         )
 
@@ -275,7 +275,7 @@ object CosmexToDataInstances {
               clientPubKey.toData,
               Builtins.mkCons(
                 clientTxOutRef.toData,
-                Builtins.mkCons(channelState.toData, Builtins.mkNilData)
+                Builtins.mkCons(channelState.toData, Builtins.mkNilData())
               )
             )
           )
