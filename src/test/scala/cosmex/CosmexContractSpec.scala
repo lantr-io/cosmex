@@ -12,6 +12,7 @@ import scalus.builtins.ByteString.given
 import scalus.ledger.api.v2.*
 import scalus.prelude.*
 import scalus.pretty
+import scalus.sir.SIR
 import scalus.sir.SimpleSirToUplcLowering
 import scalus.uplc.Data.FromData
 import scalus.uplc.Data.ToData
@@ -19,8 +20,8 @@ import scalus.uplc.Data.fromData
 import scalus.uplc.Data.toData
 import scalus.uplc.TermDSL.{_, given}
 import scalus.uplc.*
+
 import scala.reflect.ClassTag
-import scalus.sir.SIR
 
 enum Expected {
   case Success(value: Term)
@@ -31,13 +32,23 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
   import Expected.*
 
   given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
+  given Arbitrary[LimitOrder] = Arbitrary {
+    for
+      pair <- Gen.const((hex"aa", hex"bb"), (hex"bb", hex"aa")) // FIXME: use real generator
+      amount <- Arbitrary.arbitrary[BigInt]
+      price <- Arbitrary.arbitrary[BigInt]
+    yield LimitOrder(pair, amount, price)
 
-  test("Pretty print CosmexContract") {
-    // println(CosmexValidator.compiledValidator.pretty.render(100))
-    // println(s"Size: ${CosmexValidator.flatEncodedValidator.size}")
   }
 
-  def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](sir: SIR) = {
+  test("Pretty print CosmexContract") {
+    println(CosmexValidator.compiledValidator.pretty.render(100))
+    println(s"Size: ${CosmexValidator.flatEncodedValidator.size}")
+  }
+
+  inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
+    val sir = compile { (d: Data) => fromData[A](d).toData }
+    // println(sir.pretty.render(100))
     val term = new SimpleSirToUplcLowering().lower(sir)
     test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
       forAll { (a: A) =>
@@ -46,7 +57,8 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     }
   }
 
-  testSerialization[Party](compile { (d: Data) => fromData[Party](d).toData })
+  testSerialization[Party]
+  testSerialization[LimitOrder]
 
   def assertEval(p: Program, expected: Expected) = {
     val result = PlutusUplcEval.evalFlat(p)
