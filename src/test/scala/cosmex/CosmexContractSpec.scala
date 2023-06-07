@@ -38,7 +38,16 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
       amount <- Arbitrary.arbitrary[BigInt]
       price <- Arbitrary.arbitrary[BigInt]
     yield LimitOrder(pair, amount, price)
-
+  }
+  given Arbitrary[PendingTxType] = Arbitrary {
+    for
+      txOutIndex <- Gen.choose[BigInt](0, 1000)
+      t <- Gen.oneOf(
+        PendingTxType.PendingIn,
+        PendingTxType.PendingOut(txOutIndex),
+        PendingTxType.PendingTransfer(txOutIndex)
+      )
+    yield t
   }
 
   test("Pretty print CosmexContract") {
@@ -59,6 +68,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
 
   testSerialization[Party]
   testSerialization[LimitOrder]
+  testSerialization[PendingTxType]
 
   def assertEval(p: Program, expected: Expected) = {
     val result = PlutusUplcEval.evalFlat(p)
