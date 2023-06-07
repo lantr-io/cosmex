@@ -290,21 +290,9 @@ object CosmexContract {
     else if tag === BigInt(1) then Party.Exchange
     else throw new Exception(s"Unknown Party tag: $tag")
 
-  given Data.FromData[LimitOrder] = (d: Data) =>
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new LimitOrder(
-      fromData[Pair](args.head),
-      fromData[BigInt](args.tail.head),
-      fromData[BigInt](args.tail.tail.head)
-    )
+  given Data.FromData[LimitOrder] = FromData.derived
 
-  given Data.FromData[TradingState] = (d: Data) =>
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new TradingState(
-      fromData[Value](args.head),
-      fromData[Value](args.tail.head),
-      fromData[AssocMap[OrderId, LimitOrder]](args.tail.tail.head)
-    )
+  given Data.FromData[TradingState] = FromData.derived
 
   given Data.FromData[PendingTxType] = (d: Data) =>
     val pair = Builtins.unsafeDataAsConstr(d)
@@ -315,62 +303,23 @@ object CosmexContract {
     else if tag === BigInt(2) then new PendingTxType.PendingTransfer(fromData[TxOutIndex](args.head))
     else throw new Exception(s"Unknown PendingTxType tag: $tag")
 
-  given Data.FromData[PendingTx] = (d: Data) =>
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new PendingTx(
-      fromData[Value](args.head),
-      fromData[PendingTxType](args.tail.head),
-      fromData[TxOutRef](args.tail.tail.head)
-    )
+  given Data.FromData[PendingTx] = FromData.derived
 
-  given Data.FromData[Snapshot] = (d: Data) =>
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new Snapshot(
-      fromData[TradingState](args.head),
-      fromData[Maybe[PendingTx]](args.tail.head),
-      fromData[BigInt](args.tail.tail.head)
-    )
+  given Data.FromData[Snapshot] = FromData.derived
 
-  given Data.FromData[SignedSnapshot] = (d: Data) =>
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new SignedSnapshot(
-      fromData[Snapshot](args.head),
-      fromData[ByteString](args.tail.head),
-      fromData[ByteString](args.tail.tail.head)
-    )
+  given Data.FromData[SignedSnapshot] = FromData.derived
 
   given Data.FromData[OnChainChannelState] = (d: Data) =>
     val pair = Builtins.unsafeDataAsConstr(d)
     val tag = pair.fst
     val args = pair.snd
     if tag === BigInt(0) then OnChainChannelState.OpenState
-    else if tag === BigInt(1) then
-      new OnChainChannelState.SnapshotContestState(
-        fromData[Snapshot](args.head),
-        fromData[POSIXTime](args.tail.head),
-        fromData[Party](args.tail.tail.head),
-        fromData[TxOutRef](args.tail.tail.tail.head)
-      )
-    else if tag === BigInt(2) then
-      new OnChainChannelState.TradesContestState(
-        fromData[TradingState](args.head),
-        fromData[POSIXTime](args.tail.head)
-      )
-    else if tag === BigInt(3) then
-      new OnChainChannelState.PayoutState(
-        fromData[Value](args.head),
-        fromData[Value](args.tail.head)
-      )
+    else if tag === BigInt(1) then FromData.deriveConstructor[OnChainChannelState.SnapshotContestState](args)
+    else if tag === BigInt(2) then FromData.deriveConstructor[OnChainChannelState.TradesContestState](args)
+    else if tag === BigInt(3) then FromData.deriveConstructor[OnChainChannelState.PayoutState](args)
     else throw new Exception(s"Unknown OnChainChannelState tag: $tag")
 
-  given Data.FromData[Trade] = (d: Data) => {
-    val args = Builtins.unsafeDataAsConstr(d).snd
-    new Trade(
-      fromData[OrderId](args.head),
-      fromData[BigInt](args.tail.head),
-      fromData[BigInt](args.tail.tail.head)
-    )
-  }
+  given Data.FromData[Trade] = FromData.derived
 
   given Data.FromData[Action] = (d: Data) =>
     val pair = Builtins.unsafeDataAsConstr(d)
