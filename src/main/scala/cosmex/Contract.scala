@@ -34,6 +34,7 @@ import scalus.utils.Hex
 
 import java.util.Currency
 import scalus.uplc.FromData
+import scalus.uplc.ToData
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -129,43 +130,8 @@ object CosmexToDataInstances {
       Builtins.mkNilData()
     )
 
-  given Data.ToData[LimitOrder] = (o: LimitOrder) =>
-    o match
-      case LimitOrder(
-            orderPair,
-            orderAmount,
-            orderPrice
-          ) =>
-        Builtins.mkConstr(
-          BigInt(0),
-          Builtins.mkCons(
-            orderPair.toData,
-            Builtins.mkCons(
-              orderAmount.toData,
-              Builtins.mkCons(orderPrice.toData, Builtins.mkNilData())
-            )
-          )
-        )
-  given Data.ToData[TradingState] = (o: TradingState) =>
-    o match
-      case TradingState(
-            tsClientBalance,
-            tsExchangeBalance,
-            tsOrders
-          ) =>
-        Builtins.mkConstr(
-          BigInt(0),
-          Builtins.mkCons(
-            tsClientBalance.toData,
-            Builtins.mkCons(
-              tsExchangeBalance.toData,
-              Builtins.mkCons(
-                tsOrders.toData,
-                Builtins.mkNilData()
-              )
-            )
-          )
-        )
+  given Data.ToData[LimitOrder] = ToData.deriveCaseClass[LimitOrder](0)
+  given Data.ToData[TradingState] = ToData.deriveCaseClass[TradingState](0)
 
   given Data.ToData[PendingTxType] = (o: PendingTxType) =>
     o match
@@ -175,43 +141,8 @@ object CosmexToDataInstances {
       case PendingTxType.PendingTransfer(txOutIndex) =>
         Builtins.mkConstr(BigInt(2), Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData()))
 
-  given Data.ToData[PendingTx] = (o: PendingTx) =>
-    o match
-      case PendingTx(
-            pendingTxValue,
-            pendingTxType,
-            pendingTxSpentTxOutRef
-          ) =>
-        Builtins.mkConstr(
-          BigInt(0),
-          Builtins.mkCons(
-            pendingTxValue.toData,
-            Builtins.mkCons(
-              pendingTxType.toData,
-              Builtins.mkCons(
-                pendingTxSpentTxOutRef.toData,
-                Builtins.mkNilData()
-              )
-            )
-          )
-        )
-  given Data.ToData[Snapshot] = (o: Snapshot) =>
-    o match
-      case Snapshot(
-            snapshotTradingState,
-            snapshotPendingTx,
-            snapshotVersion
-          ) =>
-        Builtins.mkConstr(
-          BigInt(0),
-          Builtins.mkCons(
-            snapshotTradingState.toData,
-            Builtins.mkCons(
-              snapshotPendingTx.toData,
-              Builtins.mkCons(snapshotVersion.toData, Builtins.mkNilData())
-            )
-          )
-        )
+  given Data.ToData[PendingTx] = ToData.deriveCaseClass[PendingTx](0)
+  given Data.ToData[Snapshot] = ToData.deriveCaseClass[Snapshot](0)
 
   given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
     o match
@@ -259,67 +190,40 @@ object CosmexToDataInstances {
           )
         )
 
-  given Data.ToData[OnChainState] = (o: OnChainState) =>
-    o match
-      case OnChainState(
-            clientPkh,
-            clientPubKey,
-            clientTxOutRef,
-            channelState
-          ) =>
-        Builtins.mkConstr(
-          BigInt(0),
-          Builtins.mkCons(
-            clientPkh.toData,
-            Builtins.mkCons(
-              clientPubKey.toData,
-              Builtins.mkCons(
-                clientTxOutRef.toData,
-                Builtins.mkCons(channelState.toData, Builtins.mkNilData())
-              )
-            )
-          )
-        )
+  given Data.ToData[OnChainState] = ToData.deriveCaseClass[OnChainState](0)
 }
 @Compile
 object CosmexContract {
 
-  given Data.FromData[Party] = (d: Data) =>
-    val tag = Builtins.unsafeDataAsConstr(d).fst
-    if tag === BigInt(0) then Party.Client
-    else if tag === BigInt(1) then Party.Exchange
-    else throw new Exception(s"Unknown Party tag: $tag")
+  given Data.FromData[Party] = FromData.deriveEnum[Party] {
+    case 0 => _ => Party.Client
+    case 1 => _ => Party.Exchange
+  }
 
-  given Data.FromData[LimitOrder] = FromData.derived
+  given Data.FromData[LimitOrder] = FromData.deriveCaseClass
 
-  given Data.FromData[TradingState] = FromData.derived
+  given Data.FromData[TradingState] = FromData.deriveCaseClass
 
-  given Data.FromData[PendingTxType] = (d: Data) =>
-    val pair = Builtins.unsafeDataAsConstr(d)
-    val tag = pair.fst
-    val args = pair.snd
-    if tag === BigInt(0) then PendingTxType.PendingIn
-    else if tag === BigInt(1) then new PendingTxType.PendingOut(fromData[TxOutIndex](args.head))
-    else if tag === BigInt(2) then new PendingTxType.PendingTransfer(fromData[TxOutIndex](args.head))
-    else throw new Exception(s"Unknown PendingTxType tag: $tag")
+  given Data.FromData[PendingTxType] = FromData.deriveEnum[PendingTxType] {
+    case 0 => _ => PendingTxType.PendingIn
+    case 1 => FromData.deriveConstructor[PendingTxType.PendingOut]
+    case 2 => FromData.deriveConstructor[PendingTxType.PendingTransfer]
+  }
 
-  given Data.FromData[PendingTx] = FromData.derived
+  given Data.FromData[PendingTx] = FromData.deriveCaseClass
 
-  given Data.FromData[Snapshot] = FromData.derived
+  given Data.FromData[Snapshot] = FromData.deriveCaseClass
 
-  given Data.FromData[SignedSnapshot] = FromData.derived
+  given Data.FromData[SignedSnapshot] = FromData.deriveCaseClass
 
-  given Data.FromData[OnChainChannelState] = (d: Data) =>
-    val pair = Builtins.unsafeDataAsConstr(d)
-    val tag = pair.fst
-    val args = pair.snd
-    if tag === BigInt(0) then OnChainChannelState.OpenState
-    else if tag === BigInt(1) then FromData.deriveConstructor[OnChainChannelState.SnapshotContestState](args)
-    else if tag === BigInt(2) then FromData.deriveConstructor[OnChainChannelState.TradesContestState](args)
-    else if tag === BigInt(3) then FromData.deriveConstructor[OnChainChannelState.PayoutState](args)
-    else throw new Exception(s"Unknown OnChainChannelState tag: $tag")
+  given Data.FromData[OnChainChannelState] = FromData.deriveEnum[OnChainChannelState] {
+    case 0 => _ => OnChainChannelState.OpenState
+    case 1 => FromData.deriveConstructor[OnChainChannelState.SnapshotContestState]
+    case 2 => FromData.deriveConstructor[OnChainChannelState.TradesContestState]
+    case 3 => FromData.deriveConstructor[OnChainChannelState.PayoutState]
+  }
 
-  given Data.FromData[Trade] = FromData.derived
+  given Data.FromData[Trade] = FromData.deriveCaseClass
 
   given Data.FromData[Action] = (d: Data) =>
     val pair = Builtins.unsafeDataAsConstr(d)
