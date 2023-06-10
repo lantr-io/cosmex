@@ -1,6 +1,7 @@
 package cosmex
 import dotty.tools.dotc.Run
 import io.bullet.borer.Cbor
+import scalus.*
 import scalus.Compile
 import scalus.Compiler
 import scalus.builtins
@@ -959,9 +960,6 @@ object CosmexValidator {
   def compiledWrapperValidator = Compiler.compile(CosmexContract.validator)
   def compiledTypedValidator = Compiler.compile(CosmexContract.cosmexValidator)
   val compiledValidator = compiledWrapperValidator $ (compiledTypedValidator $ compiledhandlePayoutTransfer)
-  val validator = new SimpleSirToUplcLowering(generateErrorTraces = false).lower(compiledValidator)
-  val flatEncodedValidator = ProgramFlatCodec.encodeFlat(Program((2, 0, 0), validator))
-  val cborEncodedValidator = Cbor.encode(flatEncodedValidator).toByteArray
-  val doubleCborEncodedValidator = Cbor.encode(cborEncodedValidator).toByteArray
-  val doubleCborEncodedValidatorHex = Hex.bytesToHex(doubleCborEncodedValidator)
+  val validator = compiledValidator.toUplc()
+  val programV2 = Program((2, 0, 0), validator)
 }

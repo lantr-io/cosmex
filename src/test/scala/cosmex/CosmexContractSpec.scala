@@ -20,6 +20,7 @@ import scalus.uplc.Data.fromData
 import scalus.uplc.Data.toData
 import scalus.uplc.TermDSL.{_, given}
 import scalus.uplc.*
+import scalus.*
 
 import scala.reflect.ClassTag
 
@@ -52,13 +53,13 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
 
   test("Pretty print CosmexContract") {
     println(CosmexValidator.compiledValidator.pretty.render(100))
-    println(s"Size: ${CosmexValidator.flatEncodedValidator.size}")
+    println(s"Size: ${CosmexValidator.programV2.flatEncoded.length}")
   }
 
   inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
     val sir = compile { (d: Data) => fromData[A](d).toData }
     // println(sir.pretty.render(100))
-    val term = new SimpleSirToUplcLowering().lower(sir)
+    val term = sir.toUplc()
     test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
       forAll { (a: A) =>
         assertEval(Program((2, 0, 0), term $ a.toData), Success(a.toData))
