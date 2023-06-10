@@ -52,8 +52,12 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
   }
 
   test("Pretty print CosmexContract") {
-    println(CosmexValidator.compiledValidator.pretty.render(100))
-    println(s"Size: ${CosmexValidator.programV2.flatEncoded.length}")
+    val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
+    println(program.term.pretty.render(100))
+    val uplcProgram = Program(program.version, program.term.toUplc())
+    println(s"Size: ${uplcProgram.cborEncoded.length}")
+    // println(s"CBOR: ${uplcProgram.doubleCborHex}")
+
   }
 
   inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
