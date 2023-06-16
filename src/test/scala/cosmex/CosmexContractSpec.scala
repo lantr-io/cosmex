@@ -22,62 +22,62 @@ import scalus.*
 import scala.reflect.ClassTag
 
 enum Expected {
-  case Success(value: Term)
-  case Failure(reason: String)
+    case Success(value: Term)
+    case Failure(reason: String)
 }
 
 class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
-  import Expected.*
+    import Expected.*
 
-  given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
-  given Arbitrary[LimitOrder] = Arbitrary {
-    for
-      pair <- Gen.const((hex"aa", hex"bb"), (hex"bb", hex"aa")) // FIXME: use real generator
-      amount <- Arbitrary.arbitrary[BigInt]
-      price <- Arbitrary.arbitrary[BigInt]
-    yield LimitOrder(pair, amount, price)
-  }
-  given Arbitrary[PendingTxType] = Arbitrary {
-    for
-      txOutIndex <- Gen.choose[BigInt](0, 1000)
-      t <- Gen.oneOf(
-        PendingTxType.PendingIn,
-        PendingTxType.PendingOut(txOutIndex),
-        PendingTxType.PendingTransfer(txOutIndex)
-      )
-    yield t
-  }
-
-  test("Pretty print CosmexContract") {
-    val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
-    println(program.term.pretty.render(100))
-    val uplcProgram = Program(program.version, program.term.toUplc())
-    println(s"Size: ${uplcProgram.cborEncoded.length}")
-    // println(s"CBOR: ${uplcProgram.doubleCborHex}")
-
-  }
-
-  inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
-    val sir = compile { (d: Data) => fromData[A](d).toData }
-    // println(sir.pretty.render(100))
-    val term = sir.toUplc()
-    test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
-      forAll { (a: A) =>
-        assertEval(Program((2, 0, 0), term $ a.toData), Success(a.toData))
-      }
+    given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
+    given Arbitrary[LimitOrder] = Arbitrary {
+        for
+            pair <- Gen.const((hex"aa", hex"bb"), (hex"bb", hex"aa")) // FIXME: use real generator
+            amount <- Arbitrary.arbitrary[BigInt]
+            price <- Arbitrary.arbitrary[BigInt]
+        yield LimitOrder(pair, amount, price)
     }
-  }
+    given Arbitrary[PendingTxType] = Arbitrary {
+        for
+            txOutIndex <- Gen.choose[BigInt](0, 1000)
+            t <- Gen.oneOf(
+              PendingTxType.PendingIn,
+              PendingTxType.PendingOut(txOutIndex),
+              PendingTxType.PendingTransfer(txOutIndex)
+            )
+        yield t
+    }
 
-  testSerialization[Party]
-  testSerialization[LimitOrder]
-  testSerialization[PendingTxType]
+    test("Pretty print CosmexContract") {
+        val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
+        println(program.term.pretty.render(100))
+        val uplcProgram = Program(program.version, program.term.toUplc())
+        println(s"Size: ${uplcProgram.cborEncoded.length}")
+        // println(s"CBOR: ${uplcProgram.doubleCborHex}")
 
-  def assertEval(p: Program, expected: Expected) = {
-    val result = PlutusUplcEval.evalFlat(p)
-    (result, expected) match
-      case (UplcEvalResult.Success(result), Expected.Success(expected)) =>
-        assert(result == expected)
-      case (UplcEvalResult.UplcFailure(code, error), Expected.Failure(expected)) =>
-      case _ => fail(s"Unexpected result: $result, expected: $expected")
-  }
+    }
+
+    inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
+        val sir = compile { (d: Data) => fromData[A](d).toData }
+        // println(sir.pretty.render(100))
+        val term = sir.toUplc()
+        test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
+            forAll { (a: A) =>
+                assertEval(Program((2, 0, 0), term $ a.toData), Success(a.toData))
+            }
+        }
+    }
+
+    testSerialization[Party]
+    testSerialization[LimitOrder]
+    testSerialization[PendingTxType]
+
+    def assertEval(p: Program, expected: Expected) = {
+        val result = PlutusUplcEval.evalFlat(p)
+        (result, expected) match
+            case (UplcEvalResult.Success(result), Expected.Success(expected)) =>
+                assert(result == expected)
+            case (UplcEvalResult.UplcFailure(code, error), Expected.Failure(expected)) =>
+            case _ => fail(s"Unexpected result: $result, expected: $expected")
+    }
 }
