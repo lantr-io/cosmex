@@ -568,7 +568,8 @@ object CosmexContract {
     inline def handlePayoutTransfer(
         params: ExchangeParams,
         state: OnChainState,
-        txInfo: TxInfo,
+        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        inputs: List[TxInInfo],
         ownIdx: BigInt,
         transferValue: Value,
         clientBalance: Value,
@@ -600,7 +601,7 @@ object CosmexContract {
                                     case Credential.ScriptCredential(sh) =>
                                         if sh === cosmexScriptHash then
                                             val action = {
-                                                AssocMap.lookup(txInfo.redeemers)(new Spending(txOutRef)) match
+                                                AssocMap.lookup(redeemers)(new Spending(txOutRef)) match
                                                     case Nothing     => throw new Exception("No redeemer")
                                                     case Just(value) => fromData[Action](value)
                                             }
@@ -612,7 +613,7 @@ object CosmexContract {
                                         else Value.zero
                                     case Credential.PubKeyCredential(_) => Value.zero
 
-        val transferedToMe = List.foldLeft(txInfo.inputs, Value.zero) { (acc, input) =>
+        val transferedToMe = List.foldLeft(inputs, Value.zero) { (acc, input) =>
             acc + cosmexInputTransferAmountToTxOutIdx(input)
         }
         val diff = transferedToMe - transferValue
@@ -674,7 +675,8 @@ object CosmexContract {
         params: ExchangeParams,
         spendingTxOutRef: TxOutRef,
         state: OnChainState,
-        txInfo: TxInfo
+        signatories: List[PubKeyHash],
+        range: POSIXTimeRange
     ): Boolean =
         import Action.*
         action match
@@ -683,7 +685,7 @@ object CosmexContract {
                   ownTxInResolvedTxOut.address,
                   ownOutput,
                   state,
-                  txInfo.signatories,
+                  signatories,
                   params.exchangePkh
                 )
             case ClientAbort =>
@@ -693,22 +695,22 @@ object CosmexContract {
         Note: this allows the client to claim all locked funds in the channel,
         hence the exchange MUST contest with a valid snapshot if needed.
         Consider penalizing the client for this. */
-                val contestSnapshotStart = validRange(txInfo.validRange)._2
+                val contestSnapshotStart = validRange(range)._2
                 handleClientAbort(
                   ownTxInResolvedTxOut,
                   contestSnapshotStart,
-                  txInfo.signatories,
+                  signatories,
                   state,
                   spendingTxOutRef,
                   ownOutput
                 )
             case Close(party, signedSnapshot) =>
-                val contestSnapshotStart = validRange(txInfo.validRange)._2
+                val contestSnapshotStart = validRange(range)._2
                 handleClose(
                   party,
                   ownTxInResolvedTxOut,
                   contestSnapshotStart,
-                  txInfo.signatories,
+                  signatories,
                   params,
                   state,
                   signedSnapshot,
@@ -727,16 +729,17 @@ object CosmexContract {
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
-        txInfo: TxInfo
+        signatories: List[PubKeyHash],
+        range: POSIXTimeRange
     ): Boolean =
         import Action.*
         action match
             case Close(party, newSignedSnapshot) =>
-                val (_, tradeContestStart) = validRange(txInfo.validRange)
+                val (_, tradeContestStart) = validRange(range)
                 handleContestClose(
                   params,
                   tradeContestStart,
-                  txInfo.signatories,
+                  signatories,
                   state,
                   contestSnapshot,
                   contestSnapshotStart,
@@ -751,7 +754,7 @@ object CosmexContract {
                 handleContestTimeout(
                   contestSnapshotStart,
                   params.contestationPeriodInMilliseconds,
-                  validRange(txInfo.validRange),
+                  validRange(range),
                   contestChannelTxOutRef,
                   contestSnapshot,
                   state,
@@ -768,12 +771,13 @@ object CosmexContract {
         params: ExchangeParams,
         state: OnChainState,
         tradeContestStart: POSIXTime,
-        txInfo: TxInfo
+        signatories: List[PubKeyHash],
+        range: POSIXTimeRange
     ): Boolean =
         import Action.*
         action match
             case Timeout =>
-                val (start, _) = validRange(txInfo.validRange)
+                val (start, _) = validRange(range)
                 handleTradesContestTimeout(
                   params,
                   start,
@@ -786,7 +790,7 @@ object CosmexContract {
             case Trades(actionTrades, actionCancelOthers) =>
                 handleContestTrades(
                   params,
-                  txInfo.signatories,
+                  signatories,
                   actionTrades,
                   tradeContestStart,
                   actionCancelOthers,
@@ -804,8 +808,9 @@ object CosmexContract {
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
-        state: OnChainState,
-        txInfo: TxInfo
+        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        inputs: List[TxInInfo],
+        state: OnChainState
     ): Boolean =
         import Action.*
         action match
@@ -813,7 +818,8 @@ object CosmexContract {
                 handlePayoutTransfer(
                   params,
                   state,
-                  txInfo,
+                  redeemers,
+                  inputs,
                   txOutIndex,
                   value,
                   clientBalance,
@@ -849,62 +855,68 @@ object CosmexContract {
                         if txInInfo.outRef === spendingTxOutRef then (resolved, i)
                         else findOwnInputAndIndex(i + 1, tail)
 
-        findOwnInputAndIndex(0, txInfo.inputs) match
-            case (ownTxInResolvedTxOut, ownIndex) =>
-                val ownOutput = txInfo.outputs !! ownIndex
-                state.channelState match
-                    case OpenState =>
-                        handleOpenState(
-                          action,
-                          ownOutput,
-                          ownTxInResolvedTxOut,
-                          params,
-                          spendingTxOutRef,
-                          state,
-                          txInfo
-                        )
+        txInfo match
+            case TxInfo(inputs, _, outputs, _, _, _, _, validRange, signatories, redeemers, _, _) =>
+                findOwnInputAndIndex(0, inputs) match
+                    case (ownTxInResolvedTxOut, ownIndex) =>
+                        val ownOutput = outputs !! ownIndex
+                        state.channelState match
+                            case OpenState =>
+                                handleOpenState(
+                                  action,
+                                  ownOutput,
+                                  ownTxInResolvedTxOut,
+                                  params,
+                                  spendingTxOutRef,
+                                  state,
+                                  signatories,
+                                  validRange
+                                )
 
-                    case SnapshotContestState(
-                          contestSnapshot,
-                          contestSnapshotStart,
-                          contestInitiator,
-                          contestChannelTxOutRef
-                        ) =>
-                        handleSnapshotContestState(
-                          action,
-                          contestChannelTxOutRef,
-                          contestInitiator,
-                          contestSnapshot,
-                          contestSnapshotStart,
-                          ownOutput,
-                          ownTxInResolvedTxOut,
-                          params,
-                          state,
-                          txInfo
-                        )
-                    case TradesContestState(latestTradingState, tradeContestStart) =>
-                        handleTradesContestState(
-                          action,
-                          latestTradingState,
-                          ownOutput,
-                          ownTxInResolvedTxOut,
-                          params,
-                          state,
-                          tradeContestStart,
-                          txInfo
-                        )
+                            case SnapshotContestState(
+                                  contestSnapshot,
+                                  contestSnapshotStart,
+                                  contestInitiator,
+                                  contestChannelTxOutRef
+                                ) =>
+                                handleSnapshotContestState(
+                                  action,
+                                  contestChannelTxOutRef,
+                                  contestInitiator,
+                                  contestSnapshot,
+                                  contestSnapshotStart,
+                                  ownOutput,
+                                  ownTxInResolvedTxOut,
+                                  params,
+                                  state,
+                                  signatories,
+                                  validRange
+                                )
+                            case TradesContestState(latestTradingState, tradeContestStart) =>
+                                handleTradesContestState(
+                                  action,
+                                  latestTradingState,
+                                  ownOutput,
+                                  ownTxInResolvedTxOut,
+                                  params,
+                                  state,
+                                  tradeContestStart,
+                                  signatories,
+                                  validRange
+                                )
 
-                    case PayoutState(clientBalance, exchangeBalance) =>
-                        handlePayoutState(
-                          action,
-                          clientBalance,
-                          exchangeBalance,
-                          ownOutput,
-                          ownTxInResolvedTxOut,
-                          params,
-                          state,
-                          txInfo
-                        )
+                            case PayoutState(clientBalance, exchangeBalance) =>
+                                handlePayoutState(
+                                  action,
+                                  clientBalance,
+                                  exchangeBalance,
+                                  ownOutput,
+                                  ownTxInResolvedTxOut,
+                                  params,
+                                  redeemers,
+                                  inputs,
+                                  state
+                                )
     }
 
     inline def cosmexValidator(
