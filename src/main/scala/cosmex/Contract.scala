@@ -256,7 +256,7 @@ object CosmexContract {
             case Just(a) => true
             case Nothing => throw new Exception(msg)
 
-    def handleUpdate(
+    inline def handleUpdate(
         ownInputAddress: Address,
         ownOutput: TxOut,
         state: OnChainState,
@@ -349,7 +349,7 @@ object CosmexContract {
                 allFunds === locked
     }
 
-    def handleClose(
+    inline def handleClose(
         initiator: Party,
         ownTxInResolvedTxOut: TxOut,
         contestSnapshotStart: POSIXTime,
@@ -489,14 +489,14 @@ object CosmexContract {
 
     inline def handleTradesContestTimeout(
         params: ExchangeParams,
-        txInfo: TxInfo,
+        start: POSIXTime,
         tradeContestStart: POSIXTime,
         state: OnChainState,
         latestTradingState: TradingState,
         ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ) = {
-        val (start, _) = validRange(txInfo.validRange)
+
         val timeoutPassed =
             val timeoutTime = tradeContestStart + params.contestationPeriodInMilliseconds
             timeoutTime < start
@@ -514,9 +514,9 @@ object CosmexContract {
                         timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    def handleContestTrades(
+    inline def handleContestTrades(
         params: ExchangeParams,
-        txInfo: TxInfo,
+        signatories: List[PubKeyHash],
         actionTrades: List[Trade],
         tradeContestStart: POSIXTime,
         actionCancelOthers: Boolean,
@@ -537,7 +537,7 @@ object CosmexContract {
                 val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                        txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig") && expectNewState(
+                        txSignedBy(signatories, params.exchangePkh, "no exchange sig") && expectNewState(
                           ownOutput,
                           ownInputAddress,
                           newState,
@@ -775,9 +775,10 @@ object CosmexContract {
                                 action match
                                     case Timeout =>
                                         val ownOutput = txInfo.outputs !! ownIndex
+                                        val (start, _) = validRange(txInfo.validRange)
                                         handleTradesContestTimeout(
                                           params,
-                                          txInfo,
+                                          start,
                                           tradeContestStart,
                                           state,
                                           latestTradingState,
@@ -788,7 +789,7 @@ object CosmexContract {
                                         val ownOutput = txInfo.outputs !! ownIndex
                                         handleContestTrades(
                                           params,
-                                          txInfo,
+                                          txInfo.signatories,
                                           actionTrades,
                                           tradeContestStart,
                                           actionCancelOthers,
