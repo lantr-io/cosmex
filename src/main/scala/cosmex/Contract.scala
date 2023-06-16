@@ -273,8 +273,7 @@ object CosmexContract {
     }
 
     inline def handleClientAbort(
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         contestSnapshotStart: POSIXTime,
         signatories: List[PubKeyHash],
         state: OnChainState,
@@ -299,8 +298,10 @@ object CosmexContract {
                 )
                 val snapshotContestState =
                     new OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
-                txSignedBy(signatories, clientPkh, "no client sig")
-                && expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
+                ownTxInResolvedTxOut match
+                    case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                        txSignedBy(signatories, clientPkh, "no client sig")
+                        && expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
     }
 
     def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
@@ -350,21 +351,20 @@ object CosmexContract {
 
     def handleClose(
         initiator: Party,
-        ownInputAddress: Address,
-        ownInputValue: Value,
-        txInfo: TxInfo,
+        ownTxInResolvedTxOut: TxOut,
+        contestSnapshotStart: POSIXTime,
+        signatories: List[PubKeyHash],
         params: ExchangeParams,
         state: OnChainState,
         newSignedSnapshot: SignedSnapshot,
         spendingTxOutRef: TxOutRef,
         ownOutput: TxOut
     ) = {
-        val contestSnapshotStart = validRange(txInfo.validRange)._2
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                 val validInitiator = initiator match
-                    case Party.Client   => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
-                    case Party.Exchange => txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
+                    case Party.Client   => txSignedBy(signatories, clientPkh, "no client sig")
+                    case Party.Exchange => txSignedBy(signatories, params.exchangePkh, "no exchange sig")
                 newSignedSnapshot match
                     case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                         val newChannelState =
@@ -377,15 +377,23 @@ object CosmexContract {
                             )
 
                         val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                        validInitiator
-                        && balancedSnapshot(signedSnapshot.snapshotTradingState, ownInputValue)
-                        && validSignedSnapshot(newSignedSnapshot, clientTxOutRef, clientPubKey, params.exchangePubKey)
-                        && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+                        ownTxInResolvedTxOut match
+                            case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                                validInitiator
+                                && balancedSnapshot(signedSnapshot.snapshotTradingState, ownInputValue)
+                                && validSignedSnapshot(
+                                  newSignedSnapshot,
+                                  clientTxOutRef,
+                                  clientPubKey,
+                                  params.exchangePubKey
+                                )
+                                && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    def handleContestClose(
+    inline def handleContestClose(
         params: ExchangeParams,
-        txInfo: TxInfo,
+        tradeContestStart: POSIXTime,
+        signatories: List[PubKeyHash],
         state: OnChainState,
         contestSnapshot: Snapshot,
         contestSnapshotStart: POSIXTime,
@@ -393,8 +401,7 @@ object CosmexContract {
         contestChannelTxOutRef: TxOutRef,
         party: Party,
         newSignedSnapshot: SignedSnapshot,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = contestSnapshot match {
         case Snapshot(snapshotTradingState, snapshotPendingTx, oldVersion) =>
@@ -405,13 +412,12 @@ object CosmexContract {
                             party match
                                 case Party.Client => throw new Exception("Invalid party")
                                 case Party.Exchange =>
-                                    txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
+                                    txSignedBy(signatories, params.exchangePkh, "no exchange sig")
                         case Party.Exchange =>
                             party match
-                                case Party.Client   => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
+                                case Party.Client   => txSignedBy(signatories, clientPkh, "no client sig")
                                 case Party.Exchange => throw new Exception("Invalid party")
 
-                    val (_, tradeContestStart) = validRange(txInfo.validRange)
                     val latestTradingState =
                         handlePendingTx(contestChannelTxOutRef, snapshotPendingTx, snapshotTradingState)
                     latestTradingState match
@@ -429,17 +435,20 @@ object CosmexContract {
                             val isNewerSnapshot =
                                 if oldVersion <= newSignedSnapshot.signedSnapshot.snapshotVersion then true
                                 else throw new Exception("Older snapshot")
-                            validParty && isNewerSnapshot && balancedSnapshot(latestTradingState, ownInputValue) &&
-                            validSignedSnapshot(
-                              newSignedSnapshot,
-                              clientTxOutRef,
-                              clientPubKey,
-                              params.exchangePubKey
-                            ) &&
-                            expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+                            ownTxInResolvedTxOut match
+                                case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                                    validParty && isNewerSnapshot && balancedSnapshot(
+                                      latestTradingState,
+                                      ownInputValue
+                                    ) && validSignedSnapshot(
+                                      newSignedSnapshot,
+                                      clientTxOutRef,
+                                      clientPubKey,
+                                      params.exchangePubKey
+                                    ) && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    def handleContestTimeout(
+    inline def handleContestTimeout(
         params: ExchangeParams,
         contestSnapshotStart: POSIXTime,
         contestationPeriodInMilliseconds: POSIXTime,
@@ -447,8 +456,7 @@ object CosmexContract {
         contestChannelTxOutRef: TxOutRef,
         contestSnapshot: Snapshot,
         state: OnChainState,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
         val (start, tradeContestStart) = txInfoValidRange
@@ -474,17 +482,18 @@ object CosmexContract {
                 state match
                     case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                         val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                        timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+                        ownTxInResolvedTxOut match
+                            case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                                timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    def handleTradesContestTimeout(
+    inline def handleTradesContestTimeout(
         params: ExchangeParams,
         txInfo: TxInfo,
         tradeContestStart: POSIXTime,
         state: OnChainState,
         latestTradingState: TradingState,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ) = {
         val (start, _) = validRange(txInfo.validRange)
@@ -500,7 +509,9 @@ object CosmexContract {
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                 val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
+                ownTxInResolvedTxOut match
+                    case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                        timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
     def handleContestTrades(
@@ -511,8 +522,7 @@ object CosmexContract {
         actionCancelOthers: Boolean,
         latestTradingState: TradingState,
         state: OnChainState,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ) = {
         val newTradeingState = List.foldLeft(actionTrades, latestTradingState)(applyTrade)
@@ -525,12 +535,14 @@ object CosmexContract {
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                 val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig") && expectNewState(
-                  ownOutput,
-                  ownInputAddress,
-                  newState,
-                  ownInputValue
-                )
+                ownTxInResolvedTxOut match
+                    case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                        txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig") && expectNewState(
+                          ownOutput,
+                          ownInputAddress,
+                          newState,
+                          ownInputValue
+                        )
     }
 
     /*  The clientBalance and exchangeBalance can be fulfilled partially, meaning that
@@ -551,7 +563,7 @@ object CosmexContract {
       client2--| Tx  |--client2
               |-----|
      */
-    def handlePayoutTransfer(
+    inline def handlePayoutTransfer(
         params: ExchangeParams,
         state: OnChainState,
         txInfo: TxInfo,
@@ -559,8 +571,7 @@ object CosmexContract {
         transferValue: Value,
         clientBalance: Value,
         exchangeBalance: Value,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
         import ScriptPurpose.*
@@ -609,44 +620,49 @@ object CosmexContract {
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                 val newChannelState = new PayoutState(clientBalance, newExchangeBalance)
                 val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                transferValueIsPositive && expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
+                transferValueIsPositive && expectNewState(
+                  ownOutput,
+                  ownTxInResolvedTxOut.address,
+                  newState,
+                  newOutputValue
+                )
     }
 
-    def handlePayoutPayout(
+    inline def handlePayoutPayout(
         params: ExchangeParams,
         state: OnChainState,
         clientBalance: Value,
         exchangeBalance: Value,
-        ownInputAddress: Address,
-        ownInputValue: Value,
+        ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
         import OnChainChannelState.*
-
-        val isFilled = clientBalance === ownInputValue && exchangeBalance === Value.zero
-        if isFilled then
-            ownOutput match
-                case TxOut(address, txOutValue, _, _) =>
-                    address.credential match
-                        case Credential.PubKeyCredential(hash) =>
-                            if hash === params.exchangePkh && txOutValue === ownInputValue then true
-                            else throw new Exception("Invalid payout")
-                        case Credential.ScriptCredential(hash) =>
-                            throw new Exception("Invalid payout")
-        else
-            val min = (a: BigInt, b: BigInt) => if a < b then a else b
-            val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
-            val newOutputValue = ownInputValue - availableForPayment
-            val newClientBalance = clientBalance - availableForPayment
-            state match
-                case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                    val newState = new OnChainState(
-                      clientPkh,
-                      clientPubKey,
-                      clientTxOutRef,
-                      new PayoutState(newClientBalance, exchangeBalance)
-                    )
-                    expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
+        ownTxInResolvedTxOut match
+            case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                val isFilled = clientBalance === ownInputValue && exchangeBalance === Value.zero
+                if isFilled then
+                    ownOutput match
+                        case TxOut(address, txOutValue, _, _) =>
+                            address.credential match
+                                case Credential.PubKeyCredential(hash) =>
+                                    if hash === params.exchangePkh && txOutValue === ownInputValue then true
+                                    else throw new Exception("Invalid payout")
+                                case Credential.ScriptCredential(hash) =>
+                                    throw new Exception("Invalid payout")
+                else
+                    val min = (a: BigInt, b: BigInt) => if a < b then a else b
+                    val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
+                    val newOutputValue = ownInputValue - availableForPayment
+                    val newClientBalance = clientBalance - availableForPayment
+                    state match
+                        case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+                            val newState = new OnChainState(
+                              clientPkh,
+                              clientPubKey,
+                              clientTxOutRef,
+                              new PayoutState(newClientBalance, exchangeBalance)
+                            )
+                            expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
     }
 
     inline def cosmexSpending(
@@ -694,8 +710,7 @@ object CosmexContract {
                                         val ownOutput = txInfo.outputs !! ownIndex
                                         val contestSnapshotStart = validRange(txInfo.validRange)._2
                                         handleClientAbort(
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           contestSnapshotStart,
                                           txInfo.signatories,
                                           state,
@@ -704,11 +719,12 @@ object CosmexContract {
                                         )
                                     case Close(party, signedSnapshot) =>
                                         val ownOutput = txInfo.outputs !! ownIndex
+                                        val contestSnapshotStart = validRange(txInfo.validRange)._2
                                         handleClose(
                                           party,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
-                                          txInfo,
+                                          ownTxInResolvedTxOut,
+                                          contestSnapshotStart,
+                                          txInfo.signatories,
                                           params,
                                           state,
                                           signedSnapshot,
@@ -726,9 +742,11 @@ object CosmexContract {
                                 action match
                                     case Close(party, newSignedSnapshot) =>
                                         val ownOutput = txInfo.outputs !! ownIndex
+                                        val (_, tradeContestStart) = validRange(txInfo.validRange)
                                         handleContestClose(
                                           params,
-                                          txInfo,
+                                          tradeContestStart,
+                                          txInfo.signatories,
                                           state,
                                           contestSnapshot,
                                           contestSnapshotStart,
@@ -736,8 +754,7 @@ object CosmexContract {
                                           contestChannelTxOutRef,
                                           party,
                                           newSignedSnapshot,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case Timeout =>
@@ -750,8 +767,7 @@ object CosmexContract {
                                           contestChannelTxOutRef,
                                           contestSnapshot,
                                           state,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case _ => throw new Exception("Invalid action")
@@ -765,8 +781,7 @@ object CosmexContract {
                                           tradeContestStart,
                                           state,
                                           latestTradingState,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case Trades(actionTrades, actionCancelOthers) =>
@@ -779,8 +794,7 @@ object CosmexContract {
                                           actionCancelOthers,
                                           latestTradingState,
                                           state,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case _ => throw new Exception("Invalid action")
@@ -797,8 +811,7 @@ object CosmexContract {
                                           value,
                                           clientBalance,
                                           exchangeBalance,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case Payout =>
@@ -808,8 +821,7 @@ object CosmexContract {
                                           state,
                                           clientBalance,
                                           exchangeBalance,
-                                          ownTxInResolvedTxOut.address,
-                                          ownTxInResolvedTxOut.value,
+                                          ownTxInResolvedTxOut,
                                           ownOutput
                                         )
                                     case _ => throw new Exception("Invalid action")
