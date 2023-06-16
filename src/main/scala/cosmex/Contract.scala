@@ -261,14 +261,17 @@ object CosmexContract {
         ownOutput: TxOut,
         state: OnChainState,
         signatories: List[PubKeyHash],
-        clientPkh: PubKeyHash,
         exchangePkh: PubKeyHash
     ) = {
         val newValue = ownOutput.value
         // both parties must sign the transaction,
         // thus it's validated by them, so no need to check anything else
         // NOTE: this allows parties to change the channel funds by mutual agreement
-        txSignedBy(signatories, clientPkh, "no client sig") && txSignedBy(signatories, exchangePkh, "no exchange sig")
+        txSignedBy(signatories, state.clientPkh, "no client sig") && txSignedBy(
+          signatories,
+          exchangePkh,
+          "no exchange sig"
+        )
         && expectNewState(ownOutput, ownInputAddress, state, newValue)
     }
 
@@ -449,7 +452,6 @@ object CosmexContract {
     }
 
     inline def handleContestTimeout(
-        params: ExchangeParams,
         contestSnapshotStart: POSIXTime,
         contestationPeriodInMilliseconds: POSIXTime,
         txInfoValidRange: (POSIXTime, POSIXTime),
@@ -461,7 +463,7 @@ object CosmexContract {
     ): Boolean = {
         val (start, tradeContestStart) = txInfoValidRange
         val timeoutPassed = {
-            val timeoutTime = contestSnapshotStart + params.contestationPeriodInMilliseconds
+            val timeoutTime = contestSnapshotStart + contestationPeriodInMilliseconds
             timeoutTime < start
         }
 
@@ -685,147 +687,143 @@ object CosmexContract {
 
         findOwnInputAndIndex(0, txInfo.inputs) match
             case (ownTxInResolvedTxOut, ownIndex) =>
-                state match
-                    case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                        channelState match
-                            case OpenState =>
-                                action match
-                                    case Update =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        handleUpdate(
-                                          ownTxInResolvedTxOut.address,
-                                          ownOutput,
-                                          state,
-                                          txInfo.signatories,
-                                          clientPkh,
-                                          params.exchangePkh
-                                        )
-                                    case ClientAbort =>
-                                        /*  This should only be called by the client on channel open
+                state.channelState match
+                    case OpenState =>
+                        action match
+                            case Update =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                handleUpdate(
+                                  ownTxInResolvedTxOut.address,
+                                  ownOutput,
+                                  state,
+                                  txInfo.signatories,
+                                  params.exchangePkh
+                                )
+                            case ClientAbort =>
+                                /*  This should only be called by the client on channel open
                           in case the exchange doesn't respond to the initial snapshot
                           hence, the currentSnapshot must be version 0, with only the client's balance
                           Note: this allows the client to claim all locked funds in the channel,
                           hence the exchange MUST contest with a valid snapshot if needed.
                           Consider penalizing the client for this. */
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        val contestSnapshotStart = validRange(txInfo.validRange)._2
-                                        handleClientAbort(
-                                          ownTxInResolvedTxOut,
-                                          contestSnapshotStart,
-                                          txInfo.signatories,
-                                          state,
-                                          spendingTxOutRef,
-                                          ownOutput
-                                        )
-                                    case Close(party, signedSnapshot) =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        val contestSnapshotStart = validRange(txInfo.validRange)._2
-                                        handleClose(
-                                          party,
-                                          ownTxInResolvedTxOut,
-                                          contestSnapshotStart,
-                                          txInfo.signatories,
-                                          params,
-                                          state,
-                                          signedSnapshot,
-                                          spendingTxOutRef,
-                                          ownOutput
-                                        )
-                                    case _ => throw new Exception("Invalid action")
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                val contestSnapshotStart = validRange(txInfo.validRange)._2
+                                handleClientAbort(
+                                  ownTxInResolvedTxOut,
+                                  contestSnapshotStart,
+                                  txInfo.signatories,
+                                  state,
+                                  spendingTxOutRef,
+                                  ownOutput
+                                )
+                            case Close(party, signedSnapshot) =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                val contestSnapshotStart = validRange(txInfo.validRange)._2
+                                handleClose(
+                                  party,
+                                  ownTxInResolvedTxOut,
+                                  contestSnapshotStart,
+                                  txInfo.signatories,
+                                  params,
+                                  state,
+                                  signedSnapshot,
+                                  spendingTxOutRef,
+                                  ownOutput
+                                )
+                            case _ => throw new Exception("Invalid action")
 
-                            case SnapshotContestState(
+                    case SnapshotContestState(
+                          contestSnapshot,
+                          contestSnapshotStart,
+                          contestInitiator,
+                          contestChannelTxOutRef
+                        ) =>
+                        action match
+                            case Close(party, newSignedSnapshot) =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                val (_, tradeContestStart) = validRange(txInfo.validRange)
+                                handleContestClose(
+                                  params,
+                                  tradeContestStart,
+                                  txInfo.signatories,
+                                  state,
                                   contestSnapshot,
                                   contestSnapshotStart,
                                   contestInitiator,
-                                  contestChannelTxOutRef
-                                ) =>
-                                action match
-                                    case Close(party, newSignedSnapshot) =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        val (_, tradeContestStart) = validRange(txInfo.validRange)
-                                        handleContestClose(
-                                          params,
-                                          tradeContestStart,
-                                          txInfo.signatories,
-                                          state,
-                                          contestSnapshot,
-                                          contestSnapshotStart,
-                                          contestInitiator,
-                                          contestChannelTxOutRef,
-                                          party,
-                                          newSignedSnapshot,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case Timeout =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        handleContestTimeout(
-                                          params,
-                                          contestSnapshotStart,
-                                          params.contestationPeriodInMilliseconds,
-                                          validRange(txInfo.validRange),
-                                          contestChannelTxOutRef,
-                                          contestSnapshot,
-                                          state,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case _ => throw new Exception("Invalid action")
-                            case TradesContestState(latestTradingState, tradeContestStart) =>
-                                action match
-                                    case Timeout =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        val (start, _) = validRange(txInfo.validRange)
-                                        handleTradesContestTimeout(
-                                          params,
-                                          start,
-                                          tradeContestStart,
-                                          state,
-                                          latestTradingState,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case Trades(actionTrades, actionCancelOthers) =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        handleContestTrades(
-                                          params,
-                                          txInfo.signatories,
-                                          actionTrades,
-                                          tradeContestStart,
-                                          actionCancelOthers,
-                                          latestTradingState,
-                                          state,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case _ => throw new Exception("Invalid action")
+                                  contestChannelTxOutRef,
+                                  party,
+                                  newSignedSnapshot,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case Timeout =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                handleContestTimeout(
+                                  contestSnapshotStart,
+                                  params.contestationPeriodInMilliseconds,
+                                  validRange(txInfo.validRange),
+                                  contestChannelTxOutRef,
+                                  contestSnapshot,
+                                  state,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case _ => throw new Exception("Invalid action")
+                    case TradesContestState(latestTradingState, tradeContestStart) =>
+                        action match
+                            case Timeout =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                val (start, _) = validRange(txInfo.validRange)
+                                handleTradesContestTimeout(
+                                  params,
+                                  start,
+                                  tradeContestStart,
+                                  state,
+                                  latestTradingState,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case Trades(actionTrades, actionCancelOthers) =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                handleContestTrades(
+                                  params,
+                                  txInfo.signatories,
+                                  actionTrades,
+                                  tradeContestStart,
+                                  actionCancelOthers,
+                                  latestTradingState,
+                                  state,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case _ => throw new Exception("Invalid action")
 
-                            case PayoutState(clientBalance, exchangeBalance) =>
-                                action match
-                                    case Transfer(txOutIndex, value) =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        handlePayoutTransfer(
-                                          params,
-                                          state,
-                                          txInfo,
-                                          txOutIndex,
-                                          value,
-                                          clientBalance,
-                                          exchangeBalance,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case Payout =>
-                                        val ownOutput = txInfo.outputs !! ownIndex
-                                        handlePayoutPayout(
-                                          params,
-                                          state,
-                                          clientBalance,
-                                          exchangeBalance,
-                                          ownTxInResolvedTxOut,
-                                          ownOutput
-                                        )
-                                    case _ => throw new Exception("Invalid action")
+                    case PayoutState(clientBalance, exchangeBalance) =>
+                        action match
+                            case Transfer(txOutIndex, value) =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                handlePayoutTransfer(
+                                  params,
+                                  state,
+                                  txInfo,
+                                  txOutIndex,
+                                  value,
+                                  clientBalance,
+                                  exchangeBalance,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case Payout =>
+                                val ownOutput = txInfo.outputs !! ownIndex
+                                handlePayoutPayout(
+                                  params,
+                                  state,
+                                  clientBalance,
+                                  exchangeBalance,
+                                  ownTxInResolvedTxOut,
+                                  ownOutput
+                                )
+                            case _ => throw new Exception("Invalid action")
     }
 
     inline def cosmexValidator(
