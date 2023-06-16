@@ -364,7 +364,7 @@ object CosmexContract {
         ownOutput: TxOut
     ) = {
         state match
-            case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
+            case OnChainState(clientPkh, clientPubKey, clientTxOutRef, _) =>
                 val validInitiator = initiator match
                     case Party.Client   => txSignedBy(signatories, clientPkh, "no client sig")
                     case Party.Exchange => txSignedBy(signatories, params.exchangePkh, "no exchange sig")
@@ -669,7 +669,7 @@ object CosmexContract {
 
     inline def handleOpenState(
         action: Action,
-        ownIndex: BigInt,
+        ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         spendingTxOutRef: TxOutRef,
@@ -679,7 +679,6 @@ object CosmexContract {
         import Action.*
         action match
             case Update =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 handleUpdate(
                   ownTxInResolvedTxOut.address,
                   ownOutput,
@@ -694,7 +693,6 @@ object CosmexContract {
         Note: this allows the client to claim all locked funds in the channel,
         hence the exchange MUST contest with a valid snapshot if needed.
         Consider penalizing the client for this. */
-                val ownOutput = txInfo.outputs !! ownIndex
                 val contestSnapshotStart = validRange(txInfo.validRange)._2
                 handleClientAbort(
                   ownTxInResolvedTxOut,
@@ -705,7 +703,6 @@ object CosmexContract {
                   ownOutput
                 )
             case Close(party, signedSnapshot) =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 val contestSnapshotStart = validRange(txInfo.validRange)._2
                 handleClose(
                   party,
@@ -726,7 +723,7 @@ object CosmexContract {
         contestInitiator: Party,
         contestSnapshot: Snapshot,
         contestSnapshotStart: POSIXTime,
-        ownIndex: BigInt,
+        ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
@@ -735,7 +732,6 @@ object CosmexContract {
         import Action.*
         action match
             case Close(party, newSignedSnapshot) =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 val (_, tradeContestStart) = validRange(txInfo.validRange)
                 handleContestClose(
                   params,
@@ -752,7 +748,6 @@ object CosmexContract {
                   ownOutput
                 )
             case Timeout =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 handleContestTimeout(
                   contestSnapshotStart,
                   params.contestationPeriodInMilliseconds,
@@ -768,7 +763,7 @@ object CosmexContract {
     inline def handleTradesContestState(
         action: Action,
         latestTradingState: TradingState,
-        ownIndex: BigInt,
+        ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
@@ -778,7 +773,6 @@ object CosmexContract {
         import Action.*
         action match
             case Timeout =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 val (start, _) = validRange(txInfo.validRange)
                 handleTradesContestTimeout(
                   params,
@@ -790,7 +784,6 @@ object CosmexContract {
                   ownOutput
                 )
             case Trades(actionTrades, actionCancelOthers) =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 handleContestTrades(
                   params,
                   txInfo.signatories,
@@ -808,7 +801,7 @@ object CosmexContract {
         action: Action,
         clientBalance: Value,
         exchangeBalance: Value,
-        ownIndex: BigInt,
+        ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
@@ -817,7 +810,6 @@ object CosmexContract {
         import Action.*
         action match
             case Transfer(txOutIndex, value) =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 handlePayoutTransfer(
                   params,
                   state,
@@ -830,7 +822,6 @@ object CosmexContract {
                   ownOutput
                 )
             case Payout =>
-                val ownOutput = txInfo.outputs !! ownIndex
                 handlePayoutPayout(
                   params,
                   state,
@@ -860,9 +851,18 @@ object CosmexContract {
 
         findOwnInputAndIndex(0, txInfo.inputs) match
             case (ownTxInResolvedTxOut, ownIndex) =>
+                val ownOutput = txInfo.outputs !! ownIndex
                 state.channelState match
                     case OpenState =>
-                        handleOpenState(action, ownIndex, ownTxInResolvedTxOut, params, spendingTxOutRef, state, txInfo)
+                        handleOpenState(
+                          action,
+                          ownOutput,
+                          ownTxInResolvedTxOut,
+                          params,
+                          spendingTxOutRef,
+                          state,
+                          txInfo
+                        )
 
                     case SnapshotContestState(
                           contestSnapshot,
@@ -876,7 +876,7 @@ object CosmexContract {
                           contestInitiator,
                           contestSnapshot,
                           contestSnapshotStart,
-                          ownIndex,
+                          ownOutput,
                           ownTxInResolvedTxOut,
                           params,
                           state,
@@ -886,7 +886,7 @@ object CosmexContract {
                         handleTradesContestState(
                           action,
                           latestTradingState,
-                          ownIndex,
+                          ownOutput,
                           ownTxInResolvedTxOut,
                           params,
                           state,
@@ -899,7 +899,7 @@ object CosmexContract {
                           action,
                           clientBalance,
                           exchangeBalance,
-                          ownIndex,
+                          ownOutput,
                           ownTxInResolvedTxOut,
                           params,
                           state,
