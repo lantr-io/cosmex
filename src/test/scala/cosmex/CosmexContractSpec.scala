@@ -10,10 +10,7 @@ import scalus.Compiler.compile
 import scalus.builtins.ByteString
 import scalus.builtins.ByteString.given
 import scalus.ledger.api.v2.*
-import scalus.prelude.*
 import scalus.pretty
-import scalus.sir.SIR
-import scalus.sir.SimpleSirToUplcLowering
 import scalus.uplc.Data.FromData
 import scalus.uplc.Data.ToData
 import scalus.uplc.Data.fromData

@@ -1,6 +1,4 @@
 package cosmex
-import dotty.tools.dotc.Run
-import io.bullet.borer.Cbor
 import scalus.Compile
 import scalus.Compiler
 import scalus.*
@@ -23,20 +21,13 @@ import scalus.prelude.List
 import scalus.prelude.Maybe
 import scalus.prelude.Maybe.*
 import scalus.prelude.Prelude.===
-import scalus.prelude.Prelude.Eq
 import scalus.prelude.Prelude.given
 import scalus.sir.Program
-import scalus.sir.SIR
-import scalus.sir.SimpleSirToUplcLowering
 import scalus.uplc.Data
 import scalus.uplc.Data.fromData
 import scalus.uplc.FromData
 import scalus.uplc.FromDataInstances.given
-import scalus.uplc.ProgramFlatCodec
 import scalus.uplc.ToData
-import scalus.utils.Hex
-
-import java.util.Currency
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -616,7 +607,6 @@ object CosmexContract {
       ownInputValue: Value,
       ownOutput: TxOut
   ): Boolean = {
-    import ScriptPurpose.*
     import OnChainChannelState.*
 
     val isFilled = clientBalance === ownInputValue && exchangeBalance === Value.zero
@@ -669,9 +659,6 @@ object CosmexContract {
         case (ownTxInResolvedTxOut, ownIndex) =>
           state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-              val signedByClient = () => txSignedBy(txInfo.signatories, clientPkh, "no client sig")
-              val signedByExchange = () => txSignedBy(txInfo.signatories, params.exchangePkh, "no exchange sig")
-
               channelState match
                 case OpenState =>
                   action match
