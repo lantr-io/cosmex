@@ -3,7 +3,7 @@ ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
 resolvers +=
-  "Sonatype OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots"
+    "Sonatype OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots"
 
 name := "scalus"
 
@@ -11,11 +11,11 @@ version := "0.1.0-SNAPSHOT"
 
 scalaVersion := scala3Version
 
-addCompilerPlugin("org.scalus" %% "scalus-plugin" % "0.2.0")
+addCompilerPlugin("org.scalus" %% "scalus-plugin" % "0.3.0-SNAPSHOT")
 
 scalacOptions += "-Wunused:all"
 
-libraryDependencies += "org.scalus" %% "scalus" % "0.2.0"
+libraryDependencies += "org.scalus" %% "scalus" % "0.3.0-SNAPSHOT"
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.16" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-16" % "3.2.14.0" % "test"

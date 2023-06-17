@@ -310,17 +310,11 @@ object CosmexContract {
     def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
         List.foldLeft(orders.inner, Value.zero) { (acc, pair) =>
             pair match
-                case (orderId, order) =>
-                    order match
-                        case LimitOrder(pair, orderAmount, orderPrice) =>
-                            pair match
-                                case (base, quote) =>
-                                    val orderValue = if (orderAmount < 0) {
-                                        assetClassValue(base, orderAmount) // Sell base asset
-                                    } else {
-                                        assetClassValue(quote, orderAmount * orderPrice) // Buy quote asset
-                                    }
-                                    acc + orderValue
+                case (orderId, LimitOrder((base, quote), orderAmount, orderPrice)) =>
+                    val orderValue =
+                        if orderAmount < 0 then assetClassValue(base, orderAmount) // Sell base asset
+                        else assetClassValue(quote, orderAmount * orderPrice) // Buy quote asset
+                    acc + orderValue
         }
     }
 
@@ -582,36 +576,30 @@ object CosmexContract {
         import OnChainChannelState.*
 
         val (locked, cosmexScriptHash) = ownOutput match
-            case TxOut(address, txOutValue, _, _) =>
-                address match
-                    case Address(cred, _) =>
-                        cred match
-                            case Credential.ScriptCredential(sh) => (txOutValue, sh)
-                            case Credential.PubKeyCredential(_)  => throw new Exception("Invalid output")
+            case TxOut(Address(cred, _), txOutValue, _, _) =>
+                cred match
+                    case Credential.ScriptCredential(sh) => (txOutValue, sh)
+                    case Credential.PubKeyCredential(_)  => throw new Exception("Invalid output")
 
         val transferValueIsPositive = transferValue > Value.zero
 
         def cosmexInputTransferAmountToTxOutIdx(txInInfo: TxInInfo): Value = txInInfo match
-            case TxInInfo(txOutRef, resolved) =>
-                resolved match
-                    case TxOut(address, txOutValue, _, _) =>
-                        address match
-                            case Address(cred, _) =>
-                                cred match
-                                    case Credential.ScriptCredential(sh) =>
-                                        if sh === cosmexScriptHash then
-                                            val action = {
-                                                AssocMap.lookup(redeemers)(new Spending(txOutRef)) match
-                                                    case Nothing     => throw new Exception("No redeemer")
-                                                    case Just(value) => fromData[Action](value)
-                                            }
-                                            action match
-                                                case Transfer(targetIdx, amount) =>
-                                                    if targetIdx === ownIdx then amount
-                                                    else Value.zero
-                                                case _ => throw new Exception("Invalid action")
-                                        else Value.zero
-                                    case Credential.PubKeyCredential(_) => Value.zero
+            case TxInInfo(txOutRef, TxOut(Address(cred, _), txOutValue, _, _)) =>
+                cred match
+                    case Credential.ScriptCredential(sh) =>
+                        if sh === cosmexScriptHash then
+                            val action = {
+                                AssocMap.lookup(redeemers)(new Spending(txOutRef)) match
+                                    case Nothing     => throw new Exception("No redeemer")
+                                    case Just(value) => fromData[Action](value)
+                            }
+                            action match
+                                case Transfer(targetIdx, amount) =>
+                                    if targetIdx === ownIdx then amount
+                                    else Value.zero
+                                case _ => throw new Exception("Invalid action")
+                        else Value.zero
+                    case Credential.PubKeyCredential(_) => Value.zero
 
         val transferedToMe = List.foldLeft(inputs, Value.zero) { (acc, input) =>
             acc + cosmexInputTransferAmountToTxOutIdx(input)
@@ -849,11 +837,9 @@ object CosmexContract {
 
         def findOwnInputAndIndex(i: BigInt, txIns: List[TxInInfo]): (TxOut, BigInt) = txIns match
             case List.Nil => throw new Exception("Own input not found")
-            case List.Cons(txInInfo, tail) =>
-                txInInfo match
-                    case TxInInfo(txOutRef, resolved) =>
-                        if txInInfo.outRef === spendingTxOutRef then (resolved, i)
-                        else findOwnInputAndIndex(i + 1, tail)
+            case List.Cons(TxInInfo(txOutRef, resolved), tail) =>
+                if txOutRef === spendingTxOutRef then (resolved, i)
+                else findOwnInputAndIndex(i + 1, tail)
 
         txInfo match
             case TxInfo(inputs, _, outputs, _, _, _, _, validRange, signatories, redeemers, _, _) =>
@@ -945,32 +931,30 @@ object CosmexContract {
     ): TradingState = {
         snapshotPendingTx match
             case Nothing => snapshotTradingState
-            case Just(pendingTx) =>
-                pendingTx match
-                    case PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef) =>
-                        snapshotTradingState match
-                            case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
-                                if pendingTxSpentTxOutRef === contestChannelTxOutRef then
-                                    pendingTxType match
-                                        case PendingTxType.PendingIn =>
-                                            new TradingState(
-                                              tsClientBalance + pendingTxValue,
-                                              tsExchangeBalance,
-                                              tsOrders
-                                            )
-                                        case PendingTxType.PendingOut(a) =>
-                                            new TradingState(
-                                              tsClientBalance - pendingTxValue,
-                                              tsExchangeBalance,
-                                              tsOrders
-                                            )
-                                        case PendingTxType.PendingTransfer(a) =>
-                                            new TradingState(
-                                              tsClientBalance,
-                                              tsExchangeBalance - pendingTxValue,
-                                              tsOrders
-                                            )
-                                else snapshotTradingState
+            case Just(PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef)) =>
+                snapshotTradingState match
+                    case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+                        if pendingTxSpentTxOutRef === contestChannelTxOutRef then
+                            pendingTxType match
+                                case PendingTxType.PendingIn =>
+                                    new TradingState(
+                                      tsClientBalance + pendingTxValue,
+                                      tsExchangeBalance,
+                                      tsOrders
+                                    )
+                                case PendingTxType.PendingOut(a) =>
+                                    new TradingState(
+                                      tsClientBalance - pendingTxValue,
+                                      tsExchangeBalance,
+                                      tsOrders
+                                    )
+                                case PendingTxType.PendingTransfer(a) =>
+                                    new TradingState(
+                                      tsClientBalance,
+                                      tsExchangeBalance - pendingTxValue,
+                                      tsOrders
+                                    )
+                        else snapshotTradingState
     }
 
     /*
@@ -1000,34 +984,29 @@ object CosmexContract {
                 tradingState match
                     case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                         AssocMap.lookup(tsOrders)(orderId) match {
-                            case Maybe.Just(order) =>
-                                order match
-                                    case LimitOrder(pair, orderAmount, orderPrice) =>
-                                        pair match
-                                            case (baseAsset, quoteAsset) =>
-                                                if validTrade(orderAmount, orderPrice, tradeAmount, tradePrice) then
-                                                    val quoteAmount = tradeAmount * tradePrice
-                                                    val baseAssetValue = assetClassValue(baseAsset, tradeAmount)
-                                                    val quoteAssetValue = assetClassValue(quoteAsset, quoteAmount)
-                                                    val clientBalance1 =
-                                                        tsClientBalance + baseAssetValue - quoteAssetValue
-                                                    val exchangeBalance1 =
-                                                        tsExchangeBalance - baseAssetValue + quoteAssetValue
-                                                    val orderAmountLeft = orderAmount - tradeAmount
-                                                    val newOrders =
-                                                        if orderAmountLeft === BigInt(0) then
-                                                            AssocMap.delete(tsOrders)(orderId)
-                                                        else
-                                                            AssocMap.insert(tsOrders)(
-                                                              orderId,
-                                                              new LimitOrder(
-                                                                pair,
-                                                                orderAmount = orderAmountLeft,
-                                                                orderPrice = orderPrice
-                                                              )
-                                                            )
-                                                    new TradingState(clientBalance1, exchangeBalance1, newOrders)
-                                                else throw new Exception("Invalid trade")
+                            case Maybe.Just(LimitOrder(pair @ (baseAsset, quoteAsset), orderAmount, orderPrice)) =>
+                                if validTrade(orderAmount, orderPrice, tradeAmount, tradePrice) then
+                                    val quoteAmount = tradeAmount * tradePrice
+                                    val baseAssetValue = assetClassValue(baseAsset, tradeAmount)
+                                    val quoteAssetValue = assetClassValue(quoteAsset, quoteAmount)
+                                    val clientBalance1 =
+                                        tsClientBalance + baseAssetValue - quoteAssetValue
+                                    val exchangeBalance1 =
+                                        tsExchangeBalance - baseAssetValue + quoteAssetValue
+                                    val orderAmountLeft = orderAmount - tradeAmount
+                                    val newOrders =
+                                        if orderAmountLeft === BigInt(0) then AssocMap.delete(tsOrders)(orderId)
+                                        else
+                                            AssocMap.insert(tsOrders)(
+                                              orderId,
+                                              new LimitOrder(
+                                                pair,
+                                                orderAmount = orderAmountLeft,
+                                                orderPrice = orderPrice
+                                              )
+                                            )
+                                    new TradingState(clientBalance1, exchangeBalance1, newOrders)
+                                else throw new Exception("Invalid trade")
                             case Maybe.Nothing => throw new Exception("Invalid order")
                         }
     }
@@ -1037,26 +1016,19 @@ object CosmexContract {
     def validTrade(orderAmount: BigInt, orderPrice: BigInt, tradeAmount: BigInt, tradePrice: BigInt): Boolean = {
         (0 < orderPrice) && (0 < tradePrice) && (orderAmount != BigInt(0)) && (tradeAmount != BigInt(0)) &&
         (abs(tradeAmount) <= abs(orderAmount)) &&
-        (if (0 < orderAmount) {
-             (0 < tradeAmount) && (tradePrice <= orderPrice)
-         } else {
-             (tradeAmount < 0) && (orderPrice <= tradePrice)
-         })
+        (if 0 < orderAmount then (0 < tradeAmount) && (tradePrice <= orderPrice)
+         else (tradeAmount < 0) && (orderPrice <= tradePrice))
     }
 
     def validRange(interval: Interval[POSIXTime]): (POSIXTime, POSIXTime) = {
         interval match
-            case Interval(lower, upper) =>
+            case Interval(LowerBound(lower, _), UpperBound(upper, _)) =>
                 lower match
-                    case LowerBound(start, closure) =>
-                        start match
-                            case Finite(start) =>
-                                upper match
-                                    case UpperBound(upper, closure) =>
-                                        upper match
-                                            case Finite(e) => (start, e)
-                                            case _         => throw new Exception("UBI")
-                            case _ => throw new Exception("LBI")
+                    case Finite(start) =>
+                        upper match
+                            case Finite(end) => (start, end)
+                            case _           => throw new Exception("UBI")
+                    case _ => throw new Exception("LBI")
     }
 
     def validator(params: ExchangeParams)(datum: Data, redeemer: Data, ctxData: Data): Unit = {
