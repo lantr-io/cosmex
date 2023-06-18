@@ -118,7 +118,13 @@ case class CosmexTxInfo(
     redeemers: AssocMap[ScriptPurpose, Redeemer]
 )
 
-case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: ScriptPurpose)
+enum CosmexScriptPurpose:
+    case Spending(txOutRef: TxOutRef)
+    case Minting
+    case Rewarding
+    case Certifying
+
+case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpose)
 
 @Compile
 object CosmexToDataInstances {
@@ -252,6 +258,16 @@ object CosmexContract {
           redeemers = fromData(seven.tail.tail.head)
         )
     }
+    given Data.FromData[CosmexScriptPurpose] = (d: Data) =>
+        val pair = Builtins.unsafeDataAsConstr(d)
+        val tag = pair.fst
+        val args = pair.snd
+        if tag === BigInt(0) then CosmexScriptPurpose.Minting
+        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(fromData[TxOutRef](args.head))
+        else if tag === BigInt(2) then CosmexScriptPurpose.Rewarding
+        else if tag === BigInt(3) then CosmexScriptPurpose.Certifying
+        else throw new Exception(s"Unknown ScriptPurpose")
+
     given Data.FromData[CosmexScriptContext] = FromData.deriveCaseClass
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
@@ -935,12 +951,12 @@ object CosmexContract {
         action: Action,
         ctx: CosmexScriptContext
     ): Boolean = {
-        import ScriptPurpose.*
         ctx match
             case CosmexScriptContext(txInfo, purpose) =>
                 purpose match
-                    case Spending(spendingTxOutRef) => cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
-                    case _                          => throw new Exception("Spending expected")
+                    case CosmexScriptPurpose.Spending(spendingTxOutRef) =>
+                        cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
+                    case _ => throw new Exception("Spending expected")
 
         false
     }

@@ -1,0 +1,2236 @@
+data OnChainState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState)
+data PubKeyHash = PubKeyHash(hash)
+data TxOutRef = TxOutRef(id, idx)
+data TxId = TxId(hash)
+data OnChainChannelState = OpenState
+                         | PayoutState(clientBalance, exchangeBalance)
+                         | SnapshotContestState(
+                             contestSnapshot,
+                             contestSnapshotStart,
+                             contestInitiator,
+                             contestChannelTxOutRef
+                           )
+                         | TradesContestState(latestTradingState, tradeContestStart)
+data Snapshot = Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
+data TradingState = TradingState(tsClientBalance, tsExchangeBalance, tsOrders)
+data List = Cons(head, tail) | Nil
+data Tuple2 = Tuple2(_1, _2)
+data AssocMap = AssocMap(inner)
+data LimitOrder = LimitOrder(orderPair, orderAmount, orderPrice)
+data Maybe = Just(value) | Nothing
+data PendingTx = PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef)
+data PendingTxType = PendingIn | PendingOut(txOutIndex) | PendingTransfer(txOutIndex)
+data Party = Client | Exchange
+data Action = ClientAbort
+            | Close(party, signedSnapshot)
+            | Payout
+            | Timeout
+            | Trades(actionTrades, actionCancelOthers)
+            | Transfer(txOutIndex, value)
+            | Update
+data SignedSnapshot = SignedSnapshot(
+                        signedSnapshot,
+                        snapshotClientSignature,
+                        snapshotExchangeSignature
+                      )
+data Trade = Trade(orderId, tradeAmount, tradePrice)
+data CosmexScriptContext = CosmexScriptContext(txInfo, purpose)
+data CosmexTxInfo = CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers)
+data TxInInfo = TxInInfo(outRef, resolved)
+data TxOut = TxOut(address, value, datum, referenceScript)
+data Address = Address(credential, stakingCredential)
+data Credential = PubKeyCredential(hash) | ScriptCredential(hash)
+data StakingCredential = StakingHash(cred) | StakingPtr(a, b, c)
+data OutputDatum = NoOutputDatum | OutputDatum(datum) | OutputDatumHash(datumHash)
+data Interval = Interval(from, to)
+data LowerBound = LowerBound(extended, closure)
+data Extended = Finite(a) | NegInf | PosInf
+data UpperBound = UpperBound(upper, closure)
+data ScriptPurpose = Certifying(cert)
+                   | Minting(curSymbol)
+                   | Rewarding(stakingCred)
+                   | Spending(txOutRef)
+data DCert = DelegDeRegKey(cred)
+           | DelegDelegate(cred, delegatee)
+           | DelegRegKey(cred)
+           | Genesis
+           | Mir
+           | PoolRegister(poolId, vrf)
+           | PoolRetire(poolId, epoch)
+data These = That(b) | These(a, b) | This(a)
+fun scalus.uplc.FromDataInstances$.given_FromData_ByteString d = unBData(d)
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash d =
+       let hash = scalus.uplc.FromDataInstances$.given_FromData_ByteString(d) in
+       PubKeyHash(hash)
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxId d =
+       let hash =
+         scalus.uplc.FromDataInstances$.given_FromData_ByteString(
+           headList(sndPair(unConstrData(d)))
+         )
+       in
+       TxId(hash)
+in fun scalus.uplc.FromDataInstances$.given_FromData_BigInt d = unIData(d)
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef d =
+       let args = sndPair(unConstrData(d)) in
+       let txidx = tailList(args) in
+       TxOutRef(
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxId(headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(txidx))
+       )
+in fun scalus.prelude.AssocMap$.fromList lst = AssocMap(lst)
+in fun scalus.uplc.FromDataInstances$.AssocMapFromData evidence$2 evidence$3 d =
+       let ls = unMapData(d) in
+       fun loop ls =
+           if nullList(ls) then Nil()
+           else
+               let pair = headList(ls) in
+               Cons(
+                 Tuple2(evidence$2(fstPair(pair)), evidence$3(sndPair(pair))),
+                 loop(tailList(ls))
+               )
+       in scalus.prelude.AssocMap$.fromList(loop(ls))
+in fun scalus.uplc.FromDataInstances$.unsafeTupleFromData fromA fromB d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       Tuple2(fromA(headList(args)), fromB(headList(tailList(args))))
+in fun cosmex.CosmexContract$.given_FromData_LimitOrder d =
+       let args = sndPair(unConstrData(d)) in
+       LimitOrder(
+         scalus.uplc.FromDataInstances$.unsafeTupleFromData(
+           scalus.uplc.FromDataInstances$.unsafeTupleFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString
+           ),
+           scalus.uplc.FromDataInstances$.unsafeTupleFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString
+           ),
+           headList(args)
+         ),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(args))),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(tailList(args))))
+       )
+in fun cosmex.CosmexContract$.given_FromData_TradingState d =
+       let args = sndPair(unConstrData(d)) in
+       TradingState(
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+           scalus.uplc.FromDataInstances$.AssocMapFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+           ),
+           headList(args)
+         ),
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+           scalus.uplc.FromDataInstances$.AssocMapFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+           ),
+           headList(tailList(args))
+         ),
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_BigInt,
+           cosmex.CosmexContract$.given_FromData_LimitOrder,
+           headList(tailList(tailList(args)))
+         )
+       )
+in fun scalus.prelude.Prelude$.given_Eq_BigInt x y = equalsInteger(x, y)
+in fun scalus.uplc.FromDataInstances$.MaybeFromData evidence$4 d =
+       let pair = unConstrData(d) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(fstPair(pair), 0)
+       then
+           Just(evidence$4(headList(sndPair(pair)))) else Nothing()
+in fun cosmex.CosmexContract$.given_FromData_PendingTxType d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if equalsInteger(tag, 0) then PendingIn()
+       else
+           if equalsInteger(tag, 1)
+           then
+               PendingOut(scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(args)))
+           else
+               if equalsInteger(tag, 2)
+               then
+                   PendingTransfer(
+                     scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(args))
+                   ) else ERROR 'Invalid tag'
+in fun cosmex.CosmexContract$.given_FromData_PendingTx d =
+       let args = sndPair(unConstrData(d)) in
+       PendingTx(
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+           scalus.uplc.FromDataInstances$.AssocMapFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+           ),
+           headList(args)
+         ),
+         cosmex.CosmexContract$.given_FromData_PendingTxType(headList(tailList(args))),
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(
+           headList(tailList(tailList(args)))
+         )
+       )
+in fun cosmex.CosmexContract$.given_FromData_Snapshot d =
+       let args = sndPair(unConstrData(d)) in
+       Snapshot(
+         cosmex.CosmexContract$.given_FromData_TradingState(headList(args)),
+         scalus.uplc.FromDataInstances$.MaybeFromData(
+           cosmex.CosmexContract$.given_FromData_PendingTx,
+           headList(tailList(args))
+         ),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(tailList(args))))
+       )
+in fun cosmex.CosmexContract$.given_FromData_Party d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if equalsInteger(tag, 0) then Client()
+       else
+           if equalsInteger(tag, 1) then Exchange() else ERROR 'Invalid tag'
+in fun cosmex.CosmexContract$.given_FromData_OnChainChannelState d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if equalsInteger(tag, 0) then OpenState()
+       else
+           if equalsInteger(tag, 1)
+           then
+               SnapshotContestState(
+                 cosmex.CosmexContract$.given_FromData_Snapshot(headList(args)),
+                 scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(args))),
+                 cosmex.CosmexContract$.given_FromData_Party(headList(tailList(tailList(args)))),
+                 scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(
+                   headList(tailList(tailList(tailList(args))))
+                 )
+               )
+           else
+               if equalsInteger(tag, 2)
+               then
+                   TradesContestState(
+                     cosmex.CosmexContract$.given_FromData_TradingState(headList(args)),
+                     scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(args)))
+                   )
+               else
+                   if equalsInteger(tag, 3)
+                   then
+                       PayoutState(
+                         scalus.uplc.FromDataInstances$.AssocMapFromData(
+                           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                           scalus.uplc.FromDataInstances$.AssocMapFromData(
+                             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+                           ),
+                           headList(args)
+                         ),
+                         scalus.uplc.FromDataInstances$.AssocMapFromData(
+                           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                           scalus.uplc.FromDataInstances$.AssocMapFromData(
+                             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+                           ),
+                           headList(tailList(args))
+                         )
+                       ) else ERROR 'Invalid tag'
+in fun cosmex.CosmexContract$.given_FromData_OnChainState d =
+       let args = sndPair(unConstrData(d)) in
+       5;21mOnChainState(
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(tailList(args))),
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(
+           headList(tailList(tailList(args)))
+         ),
+         cosmex.CosmexContract$.given_FromData_OnChainChannelState(
+           headList(tailList(tailList(tailList(args))))
+         )
+       )
+in fun cosmex.CosmexContract$.given_FromData_SignedSnapshot d =
+       let args = sndPair(unConstrData(d)) in
+       SignedSnapshot(
+         cosmex.CosmexContract$.given_FromData_Snapshot(headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(tailList(args))),
+         scalus.uplc.FromDataInstances$.given_FromData_ByteString(
+           headList(tailList(tailList(args)))
+         )
+       )
+in fun scalus.uplc.FromDataInstances$.ListFromData evidence$1 d =
+       let ls = unListData(d) in
+       fun loop ls =
+           if nullList(ls) then Nil() else Cons(evidence$1(headList(ls)), loop(tailList(ls)))
+       in loop(ls)
+in fun cosmex.CosmexContract$.given_FromData_Trade d =
+       let args = sndPair(unConstrData(d)) in
+       Trade(
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(args))),
+         scalus.uplc.FromDataInstances$.given_FromData_BigInt(headList(tailList(tailList(args))))
+       )
+in fun scalus.uplc.FromDataInstances$.given_FromData_Boolean d =
+       let pair = unConstrData(d) in
+       let constr = fstPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(constr, 0) then False
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(constr, 1) then True
+           else
+               ERROR 'Not a boolean'
+in fun cosmex.CosmexContract$.given_FromData_Action d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if equalsInteger(tag, 0) then Update()
+       else
+           if equalsInteger(tag, 1) then ClientAbort()
+           else
+               if equalsInteger(tag, 2)
+               then
+                   Close(
+                     cosmex.CosmexContract$.given_FromData_Party(headList(args)),
+                     cosmex.CosmexContract$.given_FromData_SignedSnapshot(headList(tailList(args)))
+                   )
+               else
+                   if equalsInteger(tag, 3)
+                   then
+                       Trades(
+                         scalus.uplc.FromDataInstances$.ListFromData(
+                           cosmex.CosmexContract$.given_FromData_Trade,
+                           headList(args)
+                         ),
+                         scalus.uplc.FromDataInstances$.given_FromData_Boolean(
+                           headList(tailList(args))
+                         )
+                       )
+                   else
+                       if equalsInteger(tag, 4) then Payout()
+                       else
+                           if equalsInteger(tag, 5)
+                           then
+                               Transfer(
+                                 scalus.uplc.FromDataInstances$.given_FromData_BigInt(
+                                   headList(args)
+                                 ),
+                                 scalus.uplc.FromDataInstances$.AssocMapFromData(
+                                   scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                                   scalus.uplc.FromDataInstances$.AssocMapFromData(
+                                     scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+                                     scalus.uplc.FromDataInstances$.given_FromData_BigInt
+                                   ),
+                                   headList(tailList(args))
+                                 )
+                               )
+                           else
+                               if equalsInteger(tag, 6) then Timeout() else ERROR 'Invalid tag'
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_Credential d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
+       then
+           PubKeyCredential(
+             scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(headList(args))
+           )
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               ScriptCredential(
+                 scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(args))
+               ) else ERROR 'error'
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
+       then
+           StakingHash(
+             scalus.ledger.api.v1.FromDataInstances$.given_FromData_Credential(
+               headList(sndPair(pair))
+             )
+           )
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               let fromBI = scalus.uplc.FromDataInstances$.given_FromData_BigInt in
+               let ptrs = sndPair(pair) in
+               StakingPtr(
+                 fromBI(headList(ptrs)),
+                 fromBI(headList(tailList(ptrs))),
+                 fromBI(headList(tailList(tailList(ptrs))))
+               ) else ERROR 'Invalid tag'
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_Address d =
+       let pair = unConstrData(d) in
+       Address(
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_Credential(headList(sndPair(pair))),
+         scalus.uplc.FromDataInstances$.MaybeFromData(
+           scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential,
+           headList(tailList(sndPair(pair)))
+         )
+       )
+in fun scalus.uplc.FromDataInstances$.given_FromData_Data d = d
+in fun scalus.ledger.api.v2.FromDataInstances$.given_FromData_OutputDatum d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0) then NoOutputDatum()
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               OutputDatumHash(
+                 scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(args))
+               )
+           else
+               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2)
+               then
+                   OutputDatum(scalus.uplc.FromDataInstances$.given_FromData_Data(headList(args)))
+               else
+                   ERROR 'PT1'
+in fun scalus.ledger.api.v2.FromDataInstances$.given_FromData_TxOut d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       TxOut(
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_Address(headList(args)),
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+           scalus.uplc.FromDataInstances$.AssocMapFromData(
+             scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+             scalus.uplc.FromDataInstances$.given_FromData_BigInt
+           ),
+           headList(tailList(args))
+         ),
+         scalus.ledger.api.v2.FromDataInstances$.given_FromData_OutputDatum(
+           headList(tailList(tailList(args)))
+         ),
+         scalus.uplc.FromDataInstances$.MaybeFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_ByteString,
+           headList(tailList(tailList(tailList(args))))
+         )
+       )
+in fun scalus.ledger.api.v2.FromDataInstances$.given_FromData_TxInInfo d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       TxInInfo(
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(headList(args)),
+         scalus.ledger.api.v2.FromDataInstances$.given_FromData_TxOut(headList(tailList(args)))
+       )
+in fun scalus.ledger.api.v1.FromDataInstances$.ExtendedFromData evidence$1 d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0) then NegInf()
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               Finite(evidence$1(headList(args)))
+           else
+               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2) then PosInf() else ERROR 'error'
+in fun scalus.ledger.api.v1.FromDataInstances$.LowerBoundFromData evidence$3 d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       LowerBound(
+         scalus.ledger.api.v1.FromDataInstances$.ExtendedFromData(evidence$3, headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_Boolean(headList(tailList(args)))
+       )
+in fun scalus.ledger.api.v1.FromDataInstances$.UpperBoundFromData evidence$2 d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       UpperBound(
+         scalus.ledger.api.v1.FromDataInstances$.ExtendedFromData(evidence$2, headList(args)),
+         scalus.uplc.FromDataInstances$.given_FromData_Boolean(headList(tailList(args)))
+       )
+in fun scalus.ledger.api.v1.FromDataInstances$.IntervalFromData evidence$4 d =
+       let pair = unConstrData(d) in
+       let args = sndPair(pair) in
+       Interval(
+         scalus.ledger.api.v1.FromDataInstances$.LowerBoundFromData(evidence$4, headList(args)),
+         scalus.ledger.api.v1.FromDataInstances$.UpperBoundFromData(
+           evidence$4,
+           headList(tailList(args))
+         )
+       )
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_DCert d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
+       then
+           DelegRegKey(
+             scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
+               headList(args)
+             )
+           )
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               DelegDeRegKey(
+                 scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
+                   headList(args)
+                 )
+               )
+           else
+               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2)
+               then
+                   DelegDelegate(
+                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
+                       headList(args)
+                     ),
+                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
+                       headList(tailList(args))
+                     )
+                   )
+               else
+                   if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 3)
+                   then
+                       PoolRegister(
+                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
+                           headList(args)
+                         ),
+                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
+                           headList(tailList(args))
+                         )
+                       )
+                   else
+                       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 4)
+                       then
+                           PoolRetire(
+                             scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
+                               headList(args)
+                             ),
+                             scalus.uplc.FromDataInstances$.given_FromData_BigInt(
+                               headList(tailList(args))
+                             )
+                           )
+                       else
+                           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 5) then Genesis()
+                           else
+                               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 6) then Mir()
+                               else
+                                   ERROR 'error'
+in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose d =
+       let pair = unConstrData(d) in
+       let tag = fstPair(pair) in
+       let args = sndPair(pair) in
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
+       then
+           Minting(scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(args)))
+       else
+           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
+           then
+               Spending(
+                 scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(headList(args))
+               )
+           else
+               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2)
+               then
+                   Rewarding(
+                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
+                       headList(args)
+                     )
+                   )
+               else
+                   if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 3)
+                   then
+                       Certifying(
+                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_DCert(
+                           headList(args)
+                         )
+                       ) else ERROR 'error'
+in fun cosmex.CosmexContract$.given_FromData_CosmexTxInfo d =
+       let args = sndPair(unConstrData(d)) in
+       let seven = tailList(tailList(tailList(tailList(tailList(tailList(tailList(args))))))) in
+       CosmexTxInfo(
+         scalus.uplc.FromDataInstances$.ListFromData(
+           scalus.ledger.api.v2.FromDataInstances$.given_FromData_TxInInfo,
+           headList(args)
+         ),
+         scalus.uplc.FromDataInstances$.ListFromData(
+           scalus.ledger.api.v2.FromDataInstances$.given_FromData_TxOut,
+           headList(tailList(tailList(args)))
+         ),
+         scalus.ledger.api.v1.FromDataInstances$.IntervalFromData(
+           scalus.uplc.FromDataInstances$.given_FromData_BigInt,
+           headList(seven)
+         ),
+         scalus.uplc.FromDataInstances$.ListFromData(
+           scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash,
+           headList(tailList(seven))
+         ),
+         scalus.uplc.FromDataInstances$.AssocMapFromData(
+           scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose,
+           scalus.uplc.FromDataInstances$.given_FromData_Data,
+           headList(tailList(tailList(seven)))
+         )
+       )
+in fun cosmex.CosmexContract$.given_FromData_CosmexScriptContext d =
+       let args = sndPair(unConstrData(d)) in
+       CosmexScriptContext(
+         cosmex.CosmexContract$.given_FromData_CosmexTxInfo(headList(args)),
+         scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose(
+           headList(tailList(args))
+         )
+       )
+in fun scalus.ledger.api.v1.TxId$.given_Eq_TxId a b =
+       equalsByteString(a({λ hash -> hash }), b({λ hash -> hash }))
+in fun scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef a b =
+       match a with
+         case TxOutRef(aTxId, aTxOutIndex) ->
+           match b with
+             case TxOutRef(bTxId, bTxOutIndex) ->
+               scalus.prelude.Prelude$.given_Eq_BigInt(aTxOutIndex, bTxOutIndex)
+               and
+               scalus.ledger.api.v1.TxId$.given_Eq_TxId(aTxId, bTxId)
+in fun scalus.prelude.List$.getByIndex lst idx =
+       fun go i lst =
+           match lst with
+             case Cons(head, tail) ->
+               if equalsInteger(i, idx) then head else go(addInteger(i, 1), tail)
+             case Nil -> ERROR 'Index out of bounds'
+       in go(0, lst)
+in fun scalus.prelude.AssocMap$.empty _ = AssocMap(Nil())
+in fun scalus.ledger.api.v1.Value$.zero  = scalus.prelude.AssocMap$.empty
+in fun scalus.prelude.List$.find lst p =
+       match lst with
+         case Cons(head, tail) -> if p(head) then Just(head) else scalus.prelude.List$.find(tail, p)
+         case Nil -> Nothing()
+in fun scalus.prelude.Prelude$.given_Eq_ByteString x y = equalsByteString(x, y)
+in fun cosmex.CosmexContract$.txSignedBy signatories k msg =
+       match scalus.prelude.List$.find(
+         signatories,
+         {λ _$9 ->
+           scalus.prelude.Prelude$.given_Eq_ByteString(k({λ hash -> hash }), _$9({λ hash -> hash }))
+         }
+       ) with
+         case Just(a) -> True
+         case Nothing -> ERROR 'error'
+in fun scalus.uplc.ToDataInstances$.given_ToData_ByteString a = bData(a)
+in fun scalus.ledger.api.v1.ToDataInstances$.given_ToData_PubKeyHash a =
+       scalus.uplc.ToDataInstances$.given_ToData_ByteString(a({λ hash -> hash }))
+in fun scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxId a =
+       constrData(
+         0,
+         mkCons(
+           scalus.uplc.ToDataInstances$.given_ToData_ByteString(a({λ hash -> hash })),
+           mkNilData(())
+         )
+       )
+in fun scalus.uplc.ToDataInstances$.given_ToData_BigInt a = iData(a)
+in fun scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxOutRef product =
+       match product with
+         case TxOutRef(id, idx) ->
+           constrData(
+             0,
+             mkCons(
+               scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxId(id),
+               mkCons(scalus.uplc.ToDataInstances$.given_ToData_BigInt(idx), mkNilData(()))
+             )
+           )
+in fun scalus.prelude.AssocMap$.toList map = map({λ inner -> inner })
+in fun scalus.uplc.ToDataInstances$.assocMapToData evidence$6 evidence$7 a =
+       fun go a =
+           match a with
+             case Cons(tuple, tail) ->
+               match tuple with
+                 case Tuple2(a, b) -> mkCons(mkPairData(evidence$6(a), evidence$7(b)), go(tail))
+             case Nil -> mkNilPairData(())
+       in mapData(go(scalus.prelude.AssocMap$.toList(a)))
+in fun scalus.uplc.ToDataInstances$.tupleToData evidence$8 evidence$9 a =
+       constrData(
+         0,
+         mkCons(
+           evidence$8(a({λ _1 _2 -> _1 })),
+           mkCons(evidence$9(a({λ _1 _2 -> _2 })), mkNilData(()))
+         )
+       )
+in fun cosmex.CosmexToDataInstances$.given_ToData_LimitOrder product =
+       match product with
+         case LimitOrder(orderPair, orderAmount, orderPrice) ->
+           constrData(
+             0,
+             mkCons(
+               scalus.uplc.ToDataInstances$.tupleToData(
+                 scalus.uplc.ToDataInstances$.tupleToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString
+                 ),
+                 scalus.uplc.ToDataInstances$.tupleToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString
+                 ),
+                 orderPair
+               ),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.given_ToData_BigInt(orderAmount),
+                 mkCons(scalus.uplc.ToDataInstances$.given_ToData_BigInt(orderPrice), mkNilData(()))
+               )
+             )
+           )
+in fun cosmex.CosmexToDataInstances$.given_ToData_TradingState product =
+       match product with
+         case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) ->
+           constrData(
+             0,
+             mkCons(
+               scalus.uplc.ToDataInstances$.assocMapToData(
+                 scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                 scalus.uplc.ToDataInstances$.assocMapToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.given_ToData_BigInt
+                 ),
+                 tsClientBalance
+               ),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.assocMapToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.assocMapToData(
+                     scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                     scalus.uplc.ToDataInstances$.given_ToData_BigInt
+                   ),
+                   tsExchangeBalance
+                 ),
+                 mkCons(
+                   scalus.uplc.ToDataInstances$.assocMapToData(
+                     scalus.uplc.ToDataInstances$.given_ToData_BigInt,
+                     cosmex.CosmexToDataInstances$.given_ToData_LimitOrder,
+                     tsOrders
+                   ),
+                   mkNilData(())
+                 )
+               )
+             )
+           )
+in fun scalus.uplc.ToDataInstances$.MaybeToData evidence$10 a =
+       match a with
+         case Just(v) -> constrData(0, mkCons(evidence$10(v), mkNilData(())))
+         case Nothing -> constrData(1, mkNilData(()))
+in fun cosmex.CosmexToDataInstances$.given_ToData_PendingTxType o =
+       match o with
+         case PendingIn -> constrData(0, mkNilData(()))
+         case PendingOut(txOutIndex) ->
+           constrData(
+             1,
+             mkCons(scalus.uplc.ToDataInstances$.given_ToData_BigInt(txOutIndex), mkNilData(()))
+           )
+         case PendingTransfer(txOutIndex) ->
+           constrData(
+             2,
+             mkCons(scalus.uplc.ToDataInstances$.given_ToData_BigInt(txOutIndex), mkNilData(()))
+           )
+in fun cosmex.CosmexToDataInstances$.given_ToData_PendingTx product =
+       match product with
+         case PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef) ->
+           constrData(
+             0,
+             mkCons(
+               scalus.uplc.ToDataInstances$.assocMapToData(
+                 scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                 scalus.uplc.ToDataInstances$.assocMapToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.given_ToData_BigInt
+                 ),
+                 pendingTxValue
+               ),
+               mkCons(
+                 cosmex.CosmexToDataInstances$.given_ToData_PendingTxType(pendingTxType),
+                 mkCons(
+                   scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxOutRef(
+                     pendingTxSpentTxOutRef
+                   ),
+                   mkNilData(())
+                 )
+               )
+             )
+           )
+in fun cosmex.CosmexToDataInstances$.given_ToData_Snapshot product =
+       match product with
+         case Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion) ->
+           constrData(
+             0,
+             mkCons(
+               cosmex.CosmexToDataInstances$.given_ToData_TradingState(snapshotTradingState),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.MaybeToData(
+                   cosmex.CosmexToDataInstances$.given_ToData_PendingTx,
+                   snapshotPendingTx
+                 ),
+                 mkCons(
+                   scalus.uplc.ToDataInstances$.given_ToData_BigInt(snapshotVersion),
+                   mkNilData(())
+                 )
+               )
+             )
+           )
+in fun cosmex.CosmexToDataInstances$.given_ToData_Party p =
+       constrData(match p with case Client -> 0 case Exchange -> 1, mkNilData(()))
+in fun cosmex.CosmexToDataInstances$.given_ToData_OnChainChannelState o =
+       match o with
+         case OpenState -> constrData(0, mkNilData(()))
+         case PayoutState(clientBalance, exchangeBalance) ->
+           constrData(
+             3,
+             mkCons(
+               let evidence$1$proxy1 =
+                 scalus.uplc.ToDataInstances$.assocMapToData(
+                   scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                   scalus.uplc.ToDataInstances$.assocMapToData(
+                     scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                     scalus.uplc.ToDataInstances$.given_ToData_BigInt
+                   )
+                 )
+               in
+               evidence$1$proxy1(clientBalance),
+               mkCons(
+                 let evidence$1$proxy2 =
+                   scalus.uplc.ToDataInstances$.assocMapToData(
+                     scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                     scalus.uplc.ToDataInstances$.assocMapToData(
+                       scalus.uplc.ToDataInstances$.given_ToData_ByteString,
+                       scalus.uplc.ToDataInstances$.given_ToData_BigInt
+                     )
+                   )
+                 in
+                 evidence$1$proxy2(exchangeBalance),
+                 mkNilData(())
+               )
+             )
+           )
+         case SnapshotContestState(
+           contestSnapshot,
+           contestSnapshotStart,
+           contestInitiator,
+           contestChannelTxOutRef
+         ) ->
+           constrData(
+             1,
+             mkCons(
+               cosmex.CosmexToDataInstances$.given_ToData_Snapshot(contestSnapshot),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.given_ToData_BigInt(contestSnapshotStart),
+                 mkCons(
+                   cosmex.CosmexToDataInstances$.given_ToData_Party(contestInitiator),
+                   mkCons(
+                     scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxOutRef(
+                       contestChannelTxOutRef
+                     ),
+                     mkNilData(())
+                   )
+                 )
+               )
+             )
+           )
+         case TradesContestState(latestTradingState, tradeContestStart) ->
+           constrData(
+             2,
+             mkCons(
+               cosmex.CosmexToDataInstances$.given_ToData_TradingState(latestTradingState),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.given_ToData_BigInt(tradeContestStart),
+                 mkNilData(())
+               )
+             )
+           )
+in fun cosmex.CosmexToDataInstances$.given_ToData_OnChainState product =
+       match product with
+         case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) ->
+           constrData(
+             0,
+             mkCons(
+               scalus.ledger.api.v1.ToDataInstances$.given_ToData_PubKeyHash(clientPkh),
+               mkCons(
+                 scalus.uplc.ToDataInstances$.given_ToData_ByteString(clientPubKey),
+                 mkCons(
+                   scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxOutRef(clientTxOutRef),
+                   mkCons(
+                     cosmex.CosmexToDataInstances$.given_ToData_OnChainChannelState(channelState),
+                     mkNilData(())
+                   )
+                 )
+               )
+             )
+           )
+in fun scalus.prelude.Prelude$.given_Eq_Data x y = equalsData(x, y)
+in fun scalus.ledger.api.v2.OutputDatum$.given_Eq_OutputDatum a b =
+       match a with
+         case NoOutputDatum ->
+           match b with
+             case NoOutputDatum -> True
+             case OutputDatum(_) -> False
+             case OutputDatumHash(_) -> False
+         case OutputDatum(datum) ->
+           match b with
+             case NoOutputDatum -> False
+             case OutputDatum(datum2) -> scalus.prelude.Prelude$.given_Eq_Data(datum, datum2)
+             case OutputDatumHash(_) -> False
+         case OutputDatumHash(datumHash) ->
+           match b with
+             case NoOutputDatum -> False
+             case OutputDatum(_) -> False
+             case OutputDatumHash(datumHash2) ->
+               scalus.prelude.Prelude$.given_Eq_ByteString(datumHash, datumHash2)
+in fun scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash a b =
+       equalsByteString(a({λ hash -> hash }), b({λ hash -> hash }))
+in fun scalus.ledger.api.v1.Credential$.given_Eq_Credential a b =
+       match a with
+         case PubKeyCredential(hash) ->
+           match b with
+             case PubKeyCredential(hash2) ->
+               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(hash, hash2)
+             case ScriptCredential(hash) -> False
+         case ScriptCredential(hash) ->
+           match b with
+             case PubKeyCredential(hash2) -> False
+             case ScriptCredential(hash2) ->
+               scalus.prelude.Prelude$.given_Eq_ByteString(hash, hash2)
+in fun scalus.prelude.Maybe$.maybeEq eq a b =
+       match a with
+         case Just(value) ->
+           match b with
+             case Just(value2) -> eq(value, value2)
+             case Nothing -> False
+         case Nothing -> match b with case Just(a) -> False0m case Nothing -> True
+in fun scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential lhs rhs =
+       match lhs with
+         case StakingHash(cred) ->
+           match rhs with
+             case StakingHash(cred2) ->
+               scalus.ledger.api.v1.Credential$.given_Eq_Credential(cred, cred2)
+             case StakingPtr(a, b, c) -> False
+         case StakingPtr(a, b, c) ->
+           match rhs with
+             case StakingHash(cred2) -> False
+             case StakingPtr(a2, b2, c2) ->
+               scalus.prelude.Prelude$.given_Eq_BigInt(a, a2)
+               and
+               scalus.prelude.Prelude$.given_Eq_BigInt(b, b2)
+               and
+               scalus.prelude.Prelude$.given_Eq_BigInt(c, c2)
+in fun scalus.ledger.api.v1.Address$.given_Eq_Address a b =
+       match a with
+         case Address(aCredential, aStakingCredential) ->
+           match b with
+             case Address(bCredential, bStakingCredential) ->
+               scalus.ledger.api.v1.Credential$.given_Eq_Credential(aCredential, bCredential)
+               and
+               scalus.prelude.Maybe$.maybeEq(
+                 scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential,
+                 aStakingCredential,
+                 bStakingCredential
+               )
+in fun scalus.prelude.List$.foldLeft lst z f =
+       match lst with
+         case Cons(head, tail) -> scalus.prelude.List$.foldLeft(tail, f(z, head), f)
+         case Nil -> z
+in fun scalus.prelude.List$.all lst f =
+       scalus.prelude.List$.foldLeft(lst, True, {λ acc x -> acc and f(x) })
+in fun scalus.prelude.AssocMap$.all map f = scalus.prelude.List$.all(map({λ inner -> inner }), f)
+in fun scalus.prelude.AssocMap$.lookup map key evidence$1 =
+       fun go lst =
+           match lst with
+             case Cons(pair, tail) ->
+               match pair with
+                 case Tuple2(k, v) -> if evidence$1(k, key) then Just(v) else go(tail)
+             case Nil -> Nothing()
+       in go(map({λ inner -> inner }))
+in fun scalus.prelude.List$.filter lst p =
+       match lst with
+         case Cons(head, tail) ->
+           if p(head) then Cons(head, scalus.prelude.List$.filter(tail, p))
+           else
+               scalus.prelude.List$.filter(tail, p)
+         case Nil -> Nil()
+in fun scalus.prelude.List$.exists lst p =
+       match scalus.prelude.List$.find(lst, p) with
+         case Just(a) -> True
+         case Nothing -> False
+in fun scalus.prelude.List$.map lst f =
+       match lst with
+         case Cons(head, tail) -> Cons(f(head), scalus.prelude.List$.map(tail, f))
+         case Nil -> Nil()
+in fun scalus.prelude.List$.append lst1 lst2 =
+       match lst1 with
+         case Cons(head, tail) -> Cons(head, scalus.prelude.List$.append(tail, lst2))
+         case Nil -> lst2
+in fun scalus.prelude.AssocMap$.union lhs rhs evidence$4 =
+       fun go lst =
+           match lst with
+             case Cons(pair, tail) ->
+               match pair with
+                 case Tuple2(k, v) ->
+                   let maybeR = scalus.prelude.AssocMap$.lookup(rhs, k, evidence$4) in
+                   let these =
+                     match maybeR with
+                       case Just(r) -> These(v, r)
+                       case Nothing -> This(v)
+                   in
+                   Cons(Tuple2(k, these), go(tail))
+             case Nil -> Nil()
+       in let lhs1 = go(lhs({λ inner -> inner })) in
+       let rhsNotInLhs =
+         scalus.prelude.List$.filter(
+           rhs({λ inner -> inner }),
+           {λ x$1 ->
+             match x$1 with
+               case Tuple2(a, c) ->
+                 not
+                 scalus.prelude.List$.exists(
+                   lhs({λ inner -> inner }),
+                   {λ p -> evidence$4(p({λ _1 _2 -> _1 }), a) }
+                 )
+           }
+         )
+       in
+       let rhsThat =
+         scalus.prelude.List$.map(
+           rhsNotInLhs,
+           {λ x$1 -> match x$1 with case Tuple2(k, v) -> Tuple2(k, That(v)) }
+         )
+       in
+       AssocMap(scalus.prelude.List$.append(lhs1, rhsThat))
+in fun scalus.prelude.AssocMap$.map map f = AssocMap(map(map({λ inner -> inner }), f))
+in fun scalus.ledger.api.v1.Value$.unionVal l r =
+       let combined =
+         scalus.prelude.AssocMap$.union(l, r, scalus.prelude.Prelude$.given_Eq_ByteString)
+       in
+       scalus.prelude.AssocMap$.map(
+         combined,
+         {λ x$1 ->
+           match x$1 with
+             case Tuple2(cs, these) ->
+               match these with
+                 case That(v2) ->
+                   Tuple2(
+                     cs,
+                     scalus.prelude.AssocMap$.map(
+                       v2,
+                       {λ x$1 -> match x$1 with case Tuple2(k, v) -> Tuple2(k, That(v)) }
+                     )
+                   )
+                 case These(v1, v2) ->
+                   Tuple2(
+                     cs,
+                     scalus.prelude.AssocMap$.union(
+                       v1,
+                       v2,
+                       scalus.prelude.Prelude$.given_Eq_ByteString
+                     )
+                   )
+                 case This(v1) ->
+                   Tuple2(
+                     cs,
+                     scalus.prelude.AssocMap$.map(
+                       v1,
+                       {λ x$1 -> match x$1 with case Tuple2(k, v) -> mTuple2(k, This(v)) }
+                     )
+                   )
+         }
+       )
+in fun scalus.ledger.api.v1.Value$.checkPred l r f =
+       fun inner m =
+           scalus.prelude.AssocMap$.all(
+             m,
+             {λ x$1 -> let _$1 = x$1({λ _1 _2 -> _1 }) in let v = x$1({λ _1 _2 -> _2 }) in f(v) }
+           )
+       in scalus.prelude.AssocMap$.all(
+         scalus.ledger.api.v1.Value$.unionVal(l, r),
+         {λ x$1 -> let _$2 = x$1({λ _1 _2 -> _1 }) in let v = x$1({λ _1 _2 -> _2 }) in inner(v) }
+       )
+in fun scalus.ledger.api.v1.Value$.checkBinRel op a b =
+       scalus.ledger.api.v1.Value$.checkPred(
+         a,
+         b,
+         {λ v ->
+           match v with
+             case That(v2) -> op(v2, 0)
+             case These(v1, v2) -> op(v1, v2)
+             case This(v1) -> op(v1, 0)
+         }
+       )
+in fun scalus.ledger.api.v1.Value$.eq a b =
+       scalus.ledger.api.v1.Value$.checkBinRel({λ i1 i2 -> equalsInteger(i1, i2) }, a, b)
+in fun scalus.ledger.api.v1.Value$.given_Eq_Value a b = scalus.ledger.api.v1.Value$.eq(a, b)
+in fun cosmex.CosmexContract$.expectNewState ownOutput ownInputAddress newState newValue =
+       match ownOutput with
+         case TxOut(address, value, datum, referenceScript) ->
+           let newStateData = cosmex.CosmexToDataInstances$.given_ToData_OnChainState(newState) in
+           scalus.ledger.api.v2.OutputDatum$.given_Eq_OutputDatum(datum, OutputDatum(newStateData))
+           and
+           scalus.ledger.api.v1.Address$.given_Eq_Address(address, ownInputAddress)
+           and
+           scalus.ledger.api.v1.Value$.given_Eq_Value(value, newValue)
+in fun scalus.ledger.api.v1.Value$.unionWith op a b =
+       let combined = scalus.ledger.api.v1.Value$.unionVal(a, b) in
+       let unThese =
+         {λ k ->
+           match k with
+             case That(v2) -> op(0, v2)
+             case These(v1, v2) -> op(v1, v2)
+             case This(v1) -> op(v1, 0)
+         }
+       in
+       scalus.prelude.AssocMap$.map(
+         combined,
+         {λ x$1 ->
+           match x$1 with
+             case Tuple2(cs, v) ->
+               Tuple2(
+                 cs,
+                 scalus.prelude.AssocMap$.map(
+                   v,
+                   {λ x$1 -> match x$1 with case Tuple2(tn, v) -> Tuple2(tn, unThese(v)) }
+                 )
+               )
+         }
+       )
+in fun scalus.ledger.api.v1.Value$.plus a b =
+       scalus.ledger.api.v1.Value$.unionWith({λ i1 i2 -> addInteger(i1, i2) }, a, b)
+in fun scalus.prelude.AssocMap$.singleton key value = AssocMap(Cons(Tuple2(key, value), Nil()))
+in fun scalus.ledger.api.v1.Value$.apply cs tn v =
+       scalus.prelude.AssocMap$.singleton(cs, scalus.prelude.AssocMap$.singleton(tn, v))
+in fun cosmex.CosmexContract$.assetClassValue assetClass i =
+       scalus.ledger.api.v1.Value$.apply(
+         assetClass({λ _1 _2 -> _1 }),
+         assetClass({λ _1 _2 -> _2 }),
+         i
+       )
+in fun cosmex.CosmexContract$.lockedInOrders orders =
+       scalus.prelude.List$.foldLeft(
+         orders({λ inner -> inner }),
+         scalus.ledger.api.v1.Value$.zero,
+         {λ acc pair ->
+           match pair with
+             case Tuple2(orderId, $pat1) ->
+               match $pat1 with
+                 case LimitOrder($pat2, orderAmount, orderPrice) ->
+                   match $pat2 with
+                     case Tuple2(base, quote) ->
+                       let orderValue =
+                         if lessThanInteger(orderAmount, 0)
+                         then
+                             cosmex.CosmexContract$.assetClassValue(base, orderAmount)
+                         else
+                             cosmex.CosmexContract$.assetClassValue(
+                               quote,
+                               multiplyInteger(orderAmount, orderPrice)
+                             )
+                       in
+                       scalus.ledger.api.v1.Value$.plus(acc, orderValue)
+         }
+       )
+in fun cosmex.CosmexContract$.balancedSnapshot ts locked =
+       match ts with
+         case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) ->
+           let allFunds =
+             let v$proxy1 = scalus.ledger.api.v1.Value$.plus(tsClientBalance, tsExchangeBalance) in
+             let other$proxy1 = cosmex.CosmexContract$.lockedInOrders(tsOrders) in
+             scalus.ledger.api.v1.Value$.plus(v$proxy1, other$proxy1)
+           in
+           scalus.ledger.api.v1.Value$.given_Eq_Value(allFunds, locked)
+in fun cosmex.CosmexContract$.validSignedSnapshot
+     signedSnapshot
+     clientTxOutRef
+     clientPubKey
+     exchangePubKey =
+       match signedSnapshot with
+         case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) ->
+           let signedInfo = Tuple2(clientTxOutRef, signedSnapshot) in
+           let msg =
+             serialiseData(
+               let evidence$1$proxy3 =
+                 scalus.uplc.ToDataInstances$.tupleToData(
+                   scalus.ledger.api.v1.ToDataInstances$.given_ToData_TxOutRef,
+                   cosmex.CosmexToDataInstances$.given_ToData_Snapshot
+                 )
+               in
+               evidence$1$proxy3(signedInfo)
+             )
+           in
+           let validExchangeSig =
+             verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
+           in
+           let validClientSig =
+             verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
+           in
+           validClientSig and validExchangeSig
+in fun scalus.ledger.api.v1.Value$.minus a b =
+       scalus.ledger.api.v1.Value$.unionWith({λ i1 i2 -> subtractInteger(i1, i2) }, a, b)
+in fun scalus.ledger.api.v1.Value$.gt a b =
+       scalus.ledger.api.v1.Value$.checkBinRel({λ i1 i2 -> lessThanInteger(i1, i2) }, b, a)
+in fun scalus.ledger.api.v1.DCert$.given_Eq_DCert x y =
+       match x with
+         case DelegDeRegKey(cred) ->
+           match y with
+             case DelegDeRegKey(cred) ->
+               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(_) -> False
+             case Genesis -> False
+             case Mir -> False
+             case PoolRegister(_, _) -> False
+             case PoolRetire(_, _) -> False
+         case DelegDelegate(cred, delegatee) ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(cred, delegatee) ->
+               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
+               and
+               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(delegatee, delegatee)
+             case DelegRegKey(_) -> False
+             case Genesis -> False
+             case Mir -> False
+             case PoolRegister(_, _) -> False
+             case PoolRetire(_, _) -> False
+         case DelegRegKey(cred) ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(cred) ->
+               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
+             case Genesis -> False
+             case Mir -> False
+             case PoolRegister(_, _) -> False
+             case PoolRetire(_, _) -> False
+         case Genesis ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(_) -> False
+             case Genesis -> True
+             case Mir -> False
+             case PoolRegister(_, _) -> False
+             case PoolRetire(_, _) -> False
+         case Mir ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(_) -> False
+             case Genesis -> False
+             case Mir -> True
+             case PoolRegister(_, _) -> False
+             case PoolRetire(_, _) -> False
+         case PoolRegister(poolId, vrf) ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(_) -> False
+             case Genesis -> False
+             case Mir -> False
+             case PoolRegister(poolId, vrf) ->
+               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(poolId, poolId)
+               and
+               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(vrf, vrf)
+             case PoolRetire(_, _) -> False
+         case PoolRetire(poolId, epoch) ->
+           match y with
+             case DelegDeRegKey(_) -> False
+             case DelegDelegate(_, _) -> False
+             case DelegRegKey(_) -> False
+             case Genesis -> False
+             case Mir -> False
+             case PoolRegister(_, _) -> False
+             case PoolRetire(poolId, epoch) ->
+               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(poolId, poolId)
+               and
+               scalus.prelude.Prelude$.given_Eq_BigInt(epoch, epoch)
+in fun scalus.ledger.api.v1.ScriptPurpose$.given_Eq_ScriptPurpose x y =
+       match x with
+         case Certifying(cert) ->
+           match y with
+             case Certifying(cert) -> scalus.ledger.api.v1.DCert$.given_Eq_DCert(cert, cert)
+             case Minting(_) -> False
+             case Rewarding(_) -> False
+             case Spending(_) -> False
+         case Minting(curSymbol) ->
+           match y with
+             case Certifying(_) -> False
+             case Minting(curSymbol) ->
+               scalus.prelude.Prelude$.given_Eq_ByteString(curSymbol, curSymbol)
+             case Rewarding(_) -> False
+             case Spending(_) -> False
+         case Rewarding(stakingCred) ->
+           match y with
+             case Certifying(_) -> False
+             case Minting(_) -> False
+             case Rewarding(stakingCred) ->
+               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(
+                 stakingCred,
+                 stakingCred
+               )
+             case Spending(_) -> False
+         case Spending(txOutRef) ->
+           match y with
+             case Certifying(_) -> False
+             case Minting(_) -> False
+             case Rewarding(_) -> False
+             case Spending(txOutRef) ->
+               scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef(txOutRef, txOutRef)
+in fun cosmex.CosmexContract$.handlePendingTx
+     contestChannelTxOutRef
+     snapshotPendingTx
+     snapshotTradingState =
+       match snapshotPendingTx with
+         case Just($pat3) ->
+           match $pat3 with
+             case PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef) ->
+               match snapshotTradingState with
+                 case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) ->
+                   if
+                       scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef(
+                         pendingTxSpentTxOutRef,
+                         contestChannelTxOutRef
+                       )
+                   then
+                       match pendingTxType with
+                         case PendingIn ->
+                           TradingState(
+                             scalus.ledger.api.v1.Value$.plus(tsClientBalance, pendingTxValue),
+                             tsExchangeBalance,
+                             tsOrders
+                           )
+                         case PendingOut(a) ->
+                           TradingState(
+                             scalus.ledger.api.v1.Value$.minus(tsClientBalance, pendingTxValue),
+                             tsExchangeBalance,
+                             tsOrders
+                           )
+                         case PendingTransfer(a) ->
+                           TradingState(
+                             tsClientBalance,
+                             scalus.ledger.api.v1.Value$.minus(tsExchangeBalance, pendingTxValue),
+                             tsOrders
+                           ) else snapshotTradingState
+         case Nothing -> snapshotTradingState
+in fun scalus.prelude.List$.isEmpty lst = match lst with case Cons(_, _) -> False case Nil -> True
+in fun cosmex.CosmexContract$.abs x = if lessThanInteger(x, 0) then subtractInteger(0, x) else x
+in fun cosmex.CosmexContract$.validTrade orderAmount orderPrice tradeAmount tradePrice =
+       lessThanInteger(0, orderPrice) and lessThanInteger(0, tradePrice)
+       and
+       (not equalsInteger(orderAmount, 0))
+       and
+       (not equalsInteger(tradeAmount, 0))
+       and
+       lessThanEqualsInteger(
+         cosmex.CosmexContract$.abs(tradeAmount),
+         cosmex.CosmexContract$.abs(orderAmount)
+       )
+       and
+       if lessThanInteger(0, orderAmount)
+       then
+           lessThanInteger(0, tradeAmount) and lessThanEqualsInteger(tradePrice, orderPrice)
+       else
+           lessThanInteger(tradeAmount, 0) and lessThanEqualsInteger(orderPrice, tradePrice)
+in fun scalus.prelude.AssocMap$.delete map key evidence$3 =
+       fun go lst =
+           match lst with
+             case Cons(pair, tail) ->
+               match pair with
+                 case Tuple2(k, v) -> if evidence$3(k, key) then tail else Cons(pair, go(tail))
+             case Nil -> Nil()
+       in AssocMap(go(map({λ inner -> inner })))
+in fun scalus.prelude.AssocMap$.insert map key value evidence$2 =
+       fun go lst =
+           match lst with
+             case Cons(pair, tail) ->
+               match pair with
+                 case Tuple2(k, v) ->
+                   if evidence$2(k, key) then Cons(Tuple2(key, value), tail)
+                   else
+                       Cons(pair, go(tail))
+             case Nil -> Cons(Tuple2(key, value), Nil())
+       in AssocMap(go(map({λ inner -> inner })))
+in fun cosmex.CosmexContract$.applyTrade tradingState trade =
+       match trade with
+         case Trade(orderId, tradeAmount, tradePrice) ->
+           match tradingState with
+             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) ->
+               match scalus.prelude.AssocMap$.lookup(
+                 tsOrders,
+                 orderId,
+                 scalus.prelude.Prelude$.given_Eq_BigInt
+               ) with
+                 case Just($pat4) ->
+                   match $pat4 with
+                     case LimitOrder(pair, orderAmount, orderPrice) ->
+                       match pair with
+                         case Tuple2(baseAsset, quoteAsset) ->
+                           if
+                               cosmex.CosmexContract$.validTrade(
+                                 orderAmount,
+                                 orderPrice,
+                                 tradeAmount,
+                                 tradePrice
+                               )
+                           then
+                               let quoteAmount = multiplyInteger(tradeAmount, tradePrice) in
+                               let baseAssetValue =
+                                 cosmex.CosmexContract$.assetClassValue(baseAsset, tradeAmount)
+                               in
+                               let quoteAssetValue =
+                                 cosmex.CosmexContract$.assetClassValue(quoteAsset, quoteAmount)
+                               in
+                               let clientBalance1 =
+                                 let v$proxy2 =
+                                   scalus.ledger.api.v1.Value$.plus(tsClientBalance, baseAssetValue)
+                                 in
+                                 scalus.ledger.api.v1.Value$.minus(v$proxy2, quoteAssetValue)
+                               in
+                               let exchangeBalance1 =
+                                 let v$proxy3 =
+                                   scalus.ledger.api.v1.Value$.minus(
+                                     tsExchangeBalance,
+                                     baseAssetValue
+                                   )
+                                 in
+                                 scalus.ledger.api.v1.Value$.plus(v$proxy3, quoteAssetValue)
+                               in
+                               let orderAmountLeft = subtractInteger(orderAmount, tradeAmount) in
+                               let newOrders =
+                                 if scalus.prelude.Prelude$.given_Eq_BigInt(orderAmountLeft, 0)
+                                 then
+                                     scalus.prelude.AssocMap$.delete(
+                                       tsOrders,
+                                       orderId,
+                                       scalus.prelude.Prelude$.given_Eq_BigInt
+                                     )
+                                 else
+                                     scalus.prelude.AssocMap$.insert(
+                                       tsOrders,
+                                       orderId,
+                                       LimitOrder(pair, orderAmountLeft, orderPrice),
+                                       scalus.prelude.Prelude$.given_Eq_BigInt
+                                     )
+                               in
+                               TradingState(clientBalance1, exchangeBalance1, newOrders)
+                           else
+                               ERROR 'Invalid trade'
+                 case Nothing -> ERROR 'Invalid order'
+in fun cosmex.CosmexContract$.validator params datum redeemer ctxData =
+       let state = cosmex.CosmexContract$.given_FromData_OnChainState(datum) in
+       let action = cosmex.CosmexContract$.given_FromData_Action(redeemer) in
+       let ctx = cosmex.CosmexContract$.given_FromData_CosmexScriptContext(ctxData) in
+       if
+           let _ =
+             match ctx with
+               case CosmexScriptContext(txInfo, purpose) ->
+                 match purpose with
+                   case Certifying(_) -> ERROR 'Spending expected'
+                   case Minting(_) -> ERROR 'Spending expected'
+                   case Rewarding(_) -> ERROR 'Spending expected'
+                   case Spending(spendingTxOutRef) ->
+                     fun findOwnInputAndIndex i txIns =
+                         match txIns with
+                           case Cons($pat7, tail) ->
+                             match $pat7 with
+                               case TxInInfo(txOutRef, resolved) ->
+                                 if
+                                     scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef(
+                                       txOutRef,
+                                       spendingTxOutRef
+                                     ) then Tuple2(resolved, i)
+                                 else
+                                     findOwnInputAndIndex(addInteger(i, 1), tail)
+                           case Nil -> ERROR 'Own input not found'
+                     in match txInfo with
+                          case CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers) ->
+                            match findOwnInputAndIndex(0, inputs) with
+                              case Tuple2(ownTxInResolvedTxOut, ownIndex) ->
+                                let ownOutput =
+                                  scalus.prelude.List$.getByIndex(outputs, ownIndex)
+                                in
+                                match state(
+                                  {λ clientPkh clientPubKey clientTxOutRef channelState ->
+                                    channelState
+                                  }
+                                ) with
+                                  case OpenState ->
+                                    match action with
+                                      case ClientAbort ->
+                                        let contestSnapshotStart =
+                                          validRange(validRange, {λ _1 _2 -> _2 })
+                                        in
+                                        match state with
+                                          case OnChainState(
+                                            clientPkh,
+                                            clientPubKey,
+                                            clientTxOutRef,
+                                            channelState
+                                          ) ->
+                                            let tradingState =
+                                              TradingState(
+                                                scalus.ledger.api.v1.Value$.zero,
+                                                scalus.ledger.api.v1.Value$.zero,
+                                                scalus.prelude.AssocMap$.empty
+                                              )
+                                            in
+                                            let snapshot = Snapshot(tradingState, Nothing(), 0) in
+                                            let contestSnapshotState =
+                                              SnapshotContestState(
+                                                snapshot,
+                                                contestSnapshotStart,
+                                                Client(),
+                                                spendingTxOutRef
+                                              )
+                                            in
+                                            let snapshotContestState =
+                                              OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                contestSnapshotState
+                                              )
+                                            in
+                                            match ownTxInResolvedTxOut with
+                                              case TxOut(ownInputAddress, ownInputValue, _, _) ->
+                                                cosmex.CosmexContract$.txSignedBy(
+                                                  signatories,
+                                                  clientPkh,
+                                                  "no client sig"
+                                                )
+                                                and
+                                                cosmex.CosmexContract$.expectNewState(
+                                                  ownOutput,
+                                                  ownInputAddress,
+                                                  snapshotContestState,
+                                                  ownInputValue
+                                                )
+                                      case Close(party, signedSnapshot) ->
+                                        let contestSnapshotStart =
+                                          validRange(validRange, {λ _1 _2 -> _2 })
+                                        in
+                                        match state with
+                                          case OnChainState(
+                                            clientPkh,
+                                            clientPubKey,
+                                            clientTxOutRef,
+                                            _
+                                          ) ->
+                                            let validInitiator =
+                                              match party with
+                                                case Client ->
+                                                  cosmex.CosmexContract$.txSignedBy(
+                                                    signatories,
+                                                    clientPkh,
+                                                    "no client sig"
+                                                  )
+                                                case Exchange ->
+                                                  cosmex.CosmexContract$.txSignedBy(
+                                                    signatories,
+                                                    params(
+                                                      {λ
+                                                          exchangePkh
+                                                          exchangePubKey
+                                                          contestationPeriodInMilliseconds ->
+                                                        exchangePkh
+                                                      }
+                                                    ),
+                                                    "no exchange sig"
+                                                  )
+                                            in
+                                            match signedSnapshot with
+                                              case SignedSnapshot(
+                                                signedSnapshot,
+                                                snapshotClientSignature,
+                                                snapshotExchangeSignature
+                                              ) ->
+                                                let newChannelState =
+                                                  SnapshotContestState(
+                                                    signedSnapshot,
+                                                    contestSnapshotStart,
+                                                    party,
+                                                    spendingTxOutRef
+                                                  )
+                                                in
+                                                let newState =
+                                                  OnChainState(
+                                                    clientPkh,
+                                                    clientPubKey,
+                                                    clientTxOutRef,
+                                                    newChannelState
+                                                  )
+                                                in
+                                                match ownTxInResolvedTxOut with
+                                                  case TxOut(
+                                                    ownInputAddress,
+                                                    ownInputValue,
+                                                    _,
+                                                    _
+                                                  ) ->
+                                                    validInitiator
+                                                    and
+                                                    cosmex.CosmexContract$.balancedSnapshot(
+                                                      signedSnapshot(
+                                                        {λ
+                                                            snapshotTradingState
+                                                            snapshotPendingTx
+                                                            snapshotVersion ->
+                                                          snapshotTradingState
+                                                        }
+                                                      ),
+                                                      ownInputValue
+                                                    )
+                                                    and
+                                                    cosmex.CosmexContract$.validSignedSnapshot(
+                                                      signedSnapshot,
+                                                      clientTxOutRef,
+                                                      clientPubKey,
+                                                      params(
+                                                        {λ
+                                                            exchangePkh
+                                                            exchangePubKey
+                                                            contestationPeriodInMilliseconds ->
+                                                          exchangePubKey
+                                                        }
+                                                      )
+                                                    )
+                                                    and
+                                                    cosmex.CosmexContract$.expectNewState(
+                                                      ownOutput,
+                                                      ownInputAddress,
+                                                      newState,
+                                                      ownInputValue
+                                                    )
+                                      case Payout -> ERROR 'Invalid action'
+                                      case Timeout -> ERROR 'Invalid action'
+                                      case Trades(_, _) -> ERROR 'Invalid action'
+                                      case Transfer(_, _) -> ERROR 'Invalid action'
+                                      case Update ->
+                                        let newValue =
+                                          ownOutput(
+                                            {λ address value datum referenceScript -> value }
+                                          )
+                                        in
+                                        cosmex.CosmexContract$.txSignedBy(
+                                          signatories,
+                                          state(
+                                            {λ clientPkh clientPubKey clientTxOutRef channelState ->
+                                              clientPkh
+                                            }
+                                          ),
+                                          "no client sig"
+                                        )
+                                        and
+                                        cosmex.CosmexContract$.txSignedBy(
+                                          signatories,
+                                          params(
+                                            {λ
+                                                exchangePkh
+                                                exchangePubKey
+                                                contestationPeriodInMilliseconds ->
+                                              exchangePkh
+                                            }
+                                          ),
+                                          "no exchange sig"
+                                        )
+                                        and
+                                        cosmex.CosmexContract$.expectNewState(
+                                          ownOutput,
+                                          ownTxInResolvedTxOut(
+                                            {λ address value datum referenceScript -> address }
+                                          ),
+                                          state,
+                                          newValue
+                                        )
+                                  case PayoutState(clientBalance, exchangeBalance) ->
+                                    match action with
+                                      case ClientAbort -> ERROR 'Invalid action'
+                                      case Close(_, _) -> ERROR 'Invalid action'
+                                      case Payout ->
+                                        match ownTxInResolvedTxOut with
+                                          case TxOut(ownInputAddress, ownInputValue, _, _) ->
+                                            let isFilled =
+                                              scalus.ledger.api.v1.Value$.given_Eq_Value(
+                                                clientBalance,
+                                                ownInputValue
+                                              )
+                                              and
+                                              scalus.ledger.api.v1.Value$.given_Eq_Value(
+                                                exchangeBalance,
+                                                scalus.ledger.api.v1.Value$.zero
+                                              )
+                                            in
+                                            if isFilled
+                                            then
+                                                match ownOutput with
+                                                  case TxOut(address, txOutValue, _, _) ->
+                                                    match address(
+                                                      {λ credential stakingCredential -> credential
+                                                      }
+                                                    ) with
+                                                      case PubKeyCredential(hash) ->
+                                                        if
+                                                            scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(
+                                                              hash,
+                                                              params(
+                                                                {λ
+                                                                    exchangePkh
+                                                                    exchangePubKey
+                                                                    contestationPeriodInMilliseconds ->
+                                                                  exchangePkh
+                                                                }
+                                                              )
+                                                            )
+                                                            and
+                                                            scalus.ledger.api.v1.Value$.given_Eq_Value(
+                                                              txOutValue,
+                                                              ownInputValue
+                                                            ) then True else ERROR 'Invalid payout'
+                                                      case ScriptCredential(hash) ->
+                                                        ERROR 'Invalid payout'
+                                            else
+                                                let min =
+                                                  {λ a b -> if lessThanInteger(a, b) then a else b }
+                                                in
+                                                let availableForPayment =
+                                                  scalus.ledger.api.v1.Value$.unionWith(
+                                                    min,
+                                                    clientBalance,
+                                                    ownInputValue
+                                                  )
+                                                in
+                                                let newOutputValue =
+                                                  scalus.ledger.api.v1.Value$.minus(
+                                                    ownInputValue,
+                                                    availableForPayment
+                                                  )
+                                                in
+                                                let newClientBalance =
+                                                  scalus.ledger.api.v1.Value$.minus(
+                                                    clientBalance,
+                                                    availableForPayment
+                                                  )
+                                                in
+                                                match state with
+                                                  case OnChainState(
+                                                    clientPkh,
+                                                    clientPubKey,
+                                                    clientTxOutRef,
+                                                    channelState
+                                                  ) ->
+                                                    let newState =
+                                                      OnChainState(
+                                                        clientPkh,
+                                                        clientPubKey,
+                                                        clientTxOutRef,
+                                                        PayoutState(
+                                                          newClientBalance,
+                                                          exchangeBalance
+                                                        )
+                                                      )
+                                                    in
+                                                    cosmex.CosmexContract$.expectNewState(
+                                                      ownOutput,
+                                                      ownInputAddress,
+                                                      newState,
+                                                      newOutputValue
+                                                    )
+                                      case Timeout -> ERROR 'Invalid action'
+                                      case Trades(_, _) -> ERROR 'Invalid action'
+                                      case Transfer(txOutIndex, value) ->
+                                        let $2$ =
+                                          match match ownOutput with
+                                                  case TxOut($pat8, txOutValue, _, _) ->
+                                                    match $pat8 with
+                                                      case Address(cred, _) ->
+                                                        match cred with
+                                                          case PubKeyCredential(_) ->
+                                                            ERROR 'Invalid output'
+                                                          case ScriptCredential(sh) ->
+                                                            Tuple2(txOutValue, sh) with
+                                            case Tuple2(locked, cosmexScriptHash) ->
+                                              Tuple2(locked, cosmexScriptHash)
+                                        in
+                                        let locked = $2$({λ _1 _2 -> _1 }) in
+                                        let cosmexScriptHash = $2$({λ _1 _2 -> _2 }) in
+                                        let transferValueIsPositive =
+                                          scalus.ledger.api.v1.Value$.gt(
+                                            value,
+                                            scalus.ledger.api.v1.Value$.zero
+                                          )
+                                        in
+                                        fun cosmexInputTransferAmountToTxOutIdx txInInfo =
+                                            match txInInfo with
+                                              case TxInInfo(txOutRef, $pat9) ->
+                                                match $pat9 with
+                                                  case TxOut($pat10, txOutValue, _, _) ->
+                                                    match $pat10 with
+                                                      case Address(cred, _) ->
+                                                        match cred with
+                                                          case PubKeyCredential(_) ->
+                                                            scalus.ledger.api.v1.Value$.zero
+                                                          case ScriptCredential(sh) ->
+                                                            if
+                                                                scalus.prelude.Prelude$.given_Eq_ByteString(
+                                                                  sh,
+                                                                  cosmexScriptHash
+                                                                )
+                                                            then
+                                                                let action =
+                                                                  match scalus.prelude.AssocMap$.lookup(
+                                                                    redeemers,
+                                                                    Spending(txOutRef),
+                                                                    scalus.ledger.api.v1.ScriptPurpose$.given_Eq_ScriptPurpose
+                                                                  ) with
+                                                                    case Just(value) ->
+                                                                      cosmex.CosmexContract$.given_FromData_Action(
+                                                                        value
+                                                                      )
+                                                                    case Nothing ->
+                                                                      ERROR 'No redeemer'
+                                                                in
+                                                                match action with
+                                                                  case ClientAbort ->
+                                                                    ERROR 'Invalid action'
+                                                                  case Close(_, _) ->
+                                                                    ERROR 'Invalid action'
+                                                                  case Payout ->
+                                                                    ERROR 'Invalid action'
+                                                                  case Timeout ->
+                                                                    ERROR 'Invalid action'
+                                                                  case Trades(_, _) ->
+                                                                    ERROR 'Invalid action'
+                                                                  case Transfer(
+                                                                    targetIdx,
+                                                                    amount
+                                                                  ) ->
+                                                                    if
+                                                                        scalus.prelude.Prelude$.given_Eq_BigInt(
+                                                                          targetIdx,
+                                                                          txOutIndex
+                                                                        ) then amount
+                                                                    else
+                                                                        scalus.ledger.api.v1.Value$.zero
+                                                                  case Update ->
+                                                                    ERROR 'Invalid action'
+                                                            else
+                                                                scalus.ledger.api.v1.Value$.zero
+                                        in let transferedToMe =
+                                          scalus.prelude.List$.foldLeft(
+                                            inputs,
+                                            scalus.ledger.api.v1.Value$.zero,
+                                            {λ acc input ->
+                                              let other$proxy2 =
+                                                cosmexInputTransferAmountToTxOutIdx(input)
+                                              in
+                                              scalus.ledger.api.v1.Value$.plus(acc, other$proxy2)
+                                            }
+                                          )
+                                        in
+                                        let diff =
+                                          scalus.ledger.api.v1.Value$.minus(transferedToMe, value)
+                                        in
+                                        let newOutputValue =
+                                          scalus.ledger.api.v1.Value$.minus(locked, diff)
+                                        in
+                                        let newExchangeBalance =
+                                          scalus.ledger.api.v1.Value$.minus(exchangeBalance, diff)
+                                        in
+                                        match state with
+                                          case OnChainState(
+                                            clientPkh,
+                                            clientPubKey,
+                                            clientTxOutRef,
+                                            channelState
+                                          ) ->
+                                            let newChannelState =
+                                              PayoutState(clientBalance, newExchangeBalance)
+                                            in
+                                            let newState =
+                                              OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                newChannelState
+                                              )
+                                            in
+                                            transferValueIsPositive
+                                            and
+                                            cosmex.CosmexContract$.expectNewState(
+                                              ownOutput,
+                                              ownTxInResolvedTxOut(
+                                                {λ address value datum referenceScript -> address }
+                                              ),
+                                              newState,
+                                              newOutputValue
+                                            )
+                                      case Update -> ERROR 'Invalid action'
+                                  case SnapshotContestState(
+                                    contestSnapshot,
+                                    contestSnapshotStart,
+                                    contestInitiator,
+                                    contestChannelTxOutRef
+                                  ) ->
+                                    match action with
+                                      case ClientAbort -> ERROR 'Invalid action'
+                                      case Close(party, newSignedSnapshot) ->
+                                        let tradeContestStart =
+                                          match validRange(validRange) with
+                                            case Tuple2(_, tradeContestStart) -> tradeContestStart
+                                        in
+                                        match contestSnapshot with
+                                          case Snapshot(
+                                            snapshotTradingState,
+                                            snapshotPendingTx,
+                                            oldVersion
+                                          ) ->
+                                            match state with
+                                              case OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                channelState
+                                              ) ->
+                                                let validParty =
+                                                  match contestInitiator with
+                                                    case Client ->
+                                                      match party with
+                                                        case Client -> ERROR 'Invalid party'
+                                                        case Exchange ->
+                                                          cosmex.CosmexContract$.txSignedBy(
+                                                            signatories,
+                                                            params(
+                                                              {λ
+                                                                  exchangePkh
+                                                                  exchangePubKey
+                                                                  contestationPeriodInMilliseconds ->
+                                                                exchangePkh
+                                                              }
+                                                            ),
+                                                            "no exchange sig"
+                                                          )
+                                                    case Exchange ->
+                                                      match party with
+                                                        case Client ->
+                                                          cosmex.CosmexContract$.txSignedBy(
+                                                            signatories,
+                                                            clientPkh,
+                                                            "no client sig"
+                                                          )
+                                                        case Exchange -> ERROR 'Invalid party'
+                                                in
+                                                let latestTradingState =
+                                                  cosmex.CosmexContract$.handlePendingTx(
+                                                    contestChannelTxOutRef,
+                                                    snapshotPendingTx,
+                                                    snapshotTradingState
+                                                  )
+                                                in
+                                                match latestTradingState with
+                                                  case TradingState(
+                                                    tsClientBalance,
+                                                    tsExchangeBalance,
+                                                    tsOrders
+                                                  ) ->
+                                                    let newChannelState =
+                                                      if
+                                                          scalus.prelude.List$.isEmpty(
+                                                            tsOrders({λ inner -> inner })
+                                                          )
+                                                      then
+                                                          PayoutState(
+                                                            tsClientBalance,
+                                                            tsExchangeBalance
+                                                          )
+                                                      else
+                                                          TradesContestState(
+                                                            latestTradingState,
+                                                            tradeContestStart
+                                                          )
+                                                    in
+                                                    let newState =
+                                                      OnChainState(
+                                                        clientPkh,
+                                                        clientPubKey,
+                                                        clientTxOutRef,
+                                                        newChannelState
+                                                      )
+                                                    in
+                                                    let isNewerSnapshot =
+                                                      if
+                                                          lessThanEqualsInteger(
+                                                            oldVersion,
+                                                            newSignedSnapshot(
+                                                              {λ
+                                                                  signedSnapshot
+                                                                  snapshotClientSignature
+                                                                  snapshotExchangeSignature ->
+                                                                signedSnapshot
+                                                              },
+                                                              {λ
+                                                                  snapshotTradingState
+                                                                  snapshotPendingTx
+                                                                  snapshotVersion ->
+                                                                snapshotVersion
+                                                              }
+                                                            )
+                                                          ) then True else ERROR 'Older snapshot'
+                                                    in
+                                                    match ownTxInResolvedTxOut with
+                                                      case TxOut(
+                                                        ownInputAddress,
+                                                        ownInputValue,
+                                                        _,
+                                                        _
+                                                      ) ->
+                                                        validParty and isNewerSnapshot
+                                                        and
+                                                        cosmex.CosmexContract$.balancedSnapshot(
+                                                          latestTradingState,
+                                                          ownInputValue
+                                                        )
+                                                        and
+                                                        cosmex.CosmexContract$.validSignedSnapshot(
+                                                          newSignedSnapshot,
+                                                          clientTxOutRef,
+                                                          clientPubKey,
+                                                          params(
+                                                            {λ
+                                                                exchangePkh
+                                                                exchangePubKey
+                                                                contestationPeriodInMilliseconds ->
+                                                              exchangePubKey
+                                                            }
+                                                          )
+                                                        )
+                                                        and
+                                                        cosmex.CosmexContract$.expectNewState(
+                                                          ownOutput,
+                                                          ownInputAddress,
+                                                          newState,
+                                                          ownInputValue
+                                                        )
+                                      case Payout -> ERROR 'Invalid action'
+                                      case Timeout ->
+                                        let txInfoValidRange$proxy1 = validRange(validRange) in
+                                        let $1$ =
+                                          match txInfoValidRange$proxy1 with
+                                            case Tuple2(start, tradeContestStart) ->
+                                              Tuple2(start, tradeContestStart)
+                                        in
+                                        let start = $1$({λ _1 _2 -> _1 }) in
+                                        let tradeContestStart = $1$({λ _1 _2 -> _2 }) in
+                                        let timeoutPassed =
+                                          let timeoutTime =
+                                            addInteger(
+                                              contestSnapshotStart,
+                                              params(
+                                                {λ
+                                                    exchangePkh
+                                                    exchangePubKey
+                                                    contestationPeriodInMilliseconds ->
+                                                  contestationPeriodInMilliseconds
+                                                }
+                                              )
+                                            )
+                                          in
+                                          lessThanInteger(timeoutTime, start)
+                                        in
+                                        let latestTradingState =
+                                          cosmex.CosmexContract$.handlePendingTx(
+                                            contestChannelTxOutRef,
+                                            contestSnapshot(
+                                              {λ
+                                                  snapshotTradingState
+                                                  snapshotPendingTx
+                                                  snapshotVersion ->
+                                                snapshotPendingTx
+                                              }
+                                            ),
+                                            contestSnapshot(
+                                              {λ
+                                                  snapshotTradingState
+                                                  snapshotPendingTx
+                                                  snapshotVersion ->
+                                                snapshotTradingState
+                                              }
+                                            )
+                                          )
+                                        in
+                                        match latestTradingState with
+                                          case TradingState(
+                                            tsClientBalance,
+                                            tsExchangeBalance,
+                                            tsOrders
+                                          ) ->
+                                            let newChannelState =
+                                              if
+                                                  scalus.prelude.List$.isEmpty(
+                                                    tsOrders({λ inner -> inner })
+                                                  )
+                                              then
+                                                  PayoutState(tsClientBalance, tsExchangeBalance)
+                                              else
+                                                  TradesContestState(
+                                                    latestTradingState,
+                                                    tradeContestStart
+                                                  )
+                                            in
+                                            match state with
+                                              case OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                channelState
+                                              ) ->
+                                                let newState =
+                                                  OnChainState(
+                                                    clientPkh,
+                                                    clientPubKey,
+                                                    clientTxOutRef,
+                                                    newChannelState
+                                                  )
+                                                in
+                                                match ownTxInResolvedTxOut with
+                                                  case TxOut(
+                                                    ownInputAddress,
+                                                    ownInputValue,
+                                                    _,
+                                                    _
+                                                  ) ->
+                                                    timeoutPassed
+                                                    and
+                                                    cosmex.CosmexContract$.expectNewState(
+                                                      ownOutput,
+                                                      ownInputAddress,
+                                                      newState,
+                                                      ownInputValue
+                                                    )
+                                      case Trades(_, _) -> ERROR 'Invalid action'
+                                      case Transfer(_, _) -> ERROR 'Invalid action'
+                                      case Update -> ERROR 'Invalid action'
+                                  case TradesContestState(latestTradingState, tradeContestStart) ->
+                                    match action with
+                                      case ClientAbort -> ERROR 'Invalid action'
+                                      case Close(_, _) -> ERROR 'Invalid action'
+                                      case Payout -> ERROR 'Invalid action'
+                                      case Timeout ->
+                                        let start =
+                                          match validRange(validRange) with
+                                            case Tuple2(start, _) -> start
+                                        in
+                                        let timeoutPassed =
+                                          let timeoutTime =
+                                            addInteger(
+                                              tradeContestStart,
+                                              params(
+                                                {λ
+                                                    exchangePkh
+                                                    exchangePubKey
+                                                    contestationPeriodInMilliseconds ->
+                                                  contestationPeriodInMilliseconds
+                                                }
+                                              )
+                                            )
+                                          in
+                                          lessThanInteger(timeoutTime, start)
+                                        in
+                                        let newChannelState =
+                                          match latestTradingState with
+                                            case TradingState(
+                                              tsClientBalance,
+                                              tsExchangeBalance,
+                                              _
+                                            ) ->
+                                              PayoutState(tsClientBalance, tsExchangeBalance)
+                                        in
+                                        match state with
+                                          case OnChainState(
+                                            clientPkh,
+                                            clientPubKey,
+                                            clientTxOutRef,
+                                            channelState
+                                          ) ->
+                                            let newState =
+                                              OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                newChannelState
+                                              )
+                                            in
+                                            match ownTxInResolvedTxOut with
+                                              case TxOut(ownInputAddress, ownInputValue, _, _) ->
+                                                timeoutPassed
+                                                and
+                                                cosmex.CosmexContract$.expectNewState(
+                                                  ownOutput,
+                                                  ownInputAddress,
+                                                  newState,
+                                                  ownInputValue
+                                                )
+                                      case Trades(actionTrades, actionCancelOthers) ->
+                                        let newTradeingState =
+                                          scalus.prelude.List$.foldLeft(
+                                            actionTrades,
+                                            latestTradingState,
+                                            {λ tradingState trade ->
+                                              cosmex.CosmexContract$.applyTrade(tradingState, trade)
+                                            }
+                                          )
+                                        in
+                                        let newChannelState =
+                                          match newTradeingState with
+                                            case TradingState(
+                                              tsClientBalance,
+                                              tsExchangeBalance,
+                                              tsOrders
+                                            ) ->
+                                              if
+                                                  actionCancelOthers
+                                                  or
+                                                  scalus.prelude.List$.isEmpty(
+                                                    tsOrders({λ inner -> inner })
+                                                  )
+                                              then
+                                                  PayoutState(tsClientBalance, tsExchangeBalance)
+                                              else
+                                                  TradesContestState(
+                                                    newTradeingState,
+                                                    tradeContestStart
+                                                  )
+                                        in
+                                        match state with
+                                          case OnChainState(
+                                            clientPkh,
+                                            clientPubKey,
+                                            clientTxOutRef,
+                                            channelState
+                                          ) ->
+                                            let newState =
+                                              OnChainState(
+                                                clientPkh,
+                                                clientPubKey,
+                                                clientTxOutRef,
+                                                newChannelState
+                                              )
+                                            in
+                                            match ownTxInResolvedTxOut with
+                                              case TxOut(ownInputAddress, ownInputValue, _, _) ->
+                                                cosmex.CosmexContract$.txSignedBy(
+                                                  signatories,
+                                                  params(
+                                                    {λ
+                                                        exchangePkh
+                                                        exchangePubKey
+                                                        contestationPeriodInMilliseconds ->
+                                                      exchangePkh
+                                                    }
+                                                  ),
+                                                  "no exchange sig"
+                                                )
+                                                and
+                                                cosmex.CosmexContract$.expectNewState(
+                                                  ownOutput,
+                                                  ownInputAddress,
+                                                  newState,
+                                                  ownInputValue
+                                                )
+                                      case Transfer(_, _) -> ERROR 'Invalid action'
+                                      case Update -> ERROR 'Invalid action'
+           in
+           False then () else ERROR 'Validation failed'
+in {λ params datum redeemer ctxData ->
+     cosmex.CosmexContract$.validator(params, datum, redeemer, ctxData)
+   }(
+  data PubKeyHash = PubKeyHash(hash)
+  data ExchangeParams = ExchangeParams(
+                          exchangePkh,
+                          exchangePubKey,
+                          contestationPeriodInMilliseconds
+                        )
+  {λ h pk period -> ExchangeParams(PubKeyHash(h), pk, period) }(#1234, #5678, 5000)
+)
