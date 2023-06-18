@@ -12,6 +12,7 @@ import scalus.builtins.ByteString
 import scalus.builtins.ByteString.given
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.TokenName
+import scalus.ledger.api.v1.POSIXTime
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
 import scalus.prelude.Maybe
@@ -79,7 +80,6 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         Gen.listOfN(32 * 2, Gen.hexChar).map(h => TxId(ByteString.fromHex(h.mkString)))
     }
     given Arbitrary[TxOutRef] = Arbitrary {
-        // case class TxOutRef(id: TxId, idx: BigInt)
         for
             txId <- Arbitrary.arbitrary[TxId]
             idx <- Gen.choose[BigInt](0, 1000)
@@ -94,11 +94,6 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef)
     }
 
-    /* case class TradingState(
-    tsClientBalance: Value,
-    tsExchangeBalance: Value,
-    tsOrders: AssocMap[OrderId, LimitOrder]
-) */
     given arbAssocMap[A: Arbitrary, B: Arbitrary]: Arbitrary[scalus.prelude.AssocMap[A, B]] =
         Arbitrary {
             for map <- Arbitrary.arbitrary[Map[A, B]]
@@ -126,11 +121,6 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
     }
 
-    /* case class SignedSnapshot(
-    signedSnapshot: Snapshot,
-    snapshotClientSignature: Signature,
-    snapshotExchangeSignature: Signature
-) */
     val genSignature: Gen[Signature] = Gen.listOfN(64 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
     given Arbitrary[SignedSnapshot] = Arbitrary {
         for
@@ -138,6 +128,32 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
             snapshotClientSignature <- genSignature
             snapshotExchangeSignature <- genSignature
         yield SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature)
+    }
+
+    given Arbitrary[OnChainChannelState] = Arbitrary {
+        for o <- Gen.oneOf(
+              Gen.const(OnChainChannelState.OpenState),
+              for
+                  contestSnapshot <- Arbitrary.arbitrary[Snapshot]
+                  contestSnapshotStart <- Arbitrary.arbitrary[POSIXTime]
+                  contestInitiator <- Arbitrary.arbitrary[Party]
+                  contestChannelTxOutRef <- Arbitrary.arbitrary[TxOutRef]
+              yield OnChainChannelState.SnapshotContestState(
+                contestSnapshot,
+                contestSnapshotStart,
+                contestInitiator,
+                contestChannelTxOutRef
+              ),
+              for
+                  latestTradingState <- Arbitrary.arbitrary[TradingState]
+                  tradeContestStart <- Arbitrary.arbitrary[POSIXTime]
+              yield OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart),
+              for
+                  clientBalance <- Arbitrary.arbitrary[Value]
+                  exchangeBalance <- Arbitrary.arbitrary[Value]
+              yield OnChainChannelState.PayoutState(clientBalance, exchangeBalance)
+            )
+        yield o
     }
 
     test("Pretty print CosmexContract") {
@@ -156,6 +172,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     testSerialization[TradingState]
     testSerialization[Snapshot]
     testSerialization[SignedSnapshot]
+    testSerialization[OnChainChannelState]
 
     def assertEval(p: Program, expected: Expected) = {
         val result = PlutusUplcEval.evalFlat(p)
