@@ -10,10 +10,11 @@ import scalus.Compiler.compile
 import scalus.*
 import scalus.builtins.ByteString
 import scalus.builtins.ByteString.given
-import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v1.CurrencySymbol
+import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
+import scalus.prelude.Maybe
 import scalus.pretty
 import scalus.uplc.Data.FromData
 import scalus.uplc.Data.ToData
@@ -111,6 +112,25 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield TradingState(tsClientBalance, tsExchangeBalance, tsOrders)
     }
 
+    /* case class Snapshot(
+    snapshotTradingState: TradingState,
+    snapshotPendingTx: Maybe[PendingTx],
+    snapshotVersion: BigInt
+) */
+    given arbMaybe[A: Arbitrary]: Arbitrary[scalus.prelude.Maybe[A]] = Arbitrary {
+        for o <- Arbitrary.arbitrary[Option[A]]
+        yield o match
+            case None        => scalus.prelude.Maybe.Nothing
+            case Some(value) => scalus.prelude.Maybe.Just(value)
+    }
+    given Arbitrary[Snapshot] = Arbitrary {
+        for
+            snapshotTradingState <- Arbitrary.arbitrary[TradingState]
+            snapshotPendingTx <- Arbitrary.arbitrary[Maybe[PendingTx]]
+            snapshotVersion <- Arbitrary.arbitrary[BigInt]
+        yield Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
+    }
+
     test("Pretty print CosmexContract") {
         val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
         println(program.term.pretty.render(100))
@@ -136,6 +156,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     testSerialization[PendingTxType]
     testSerialization[PendingTx]
     testSerialization[TradingState]
+    testSerialization[Snapshot]
 
     def assertEval(p: Program, expected: Expected) = {
         val result = PlutusUplcEval.evalFlat(p)
