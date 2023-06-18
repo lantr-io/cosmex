@@ -5,6 +5,7 @@ import scalus.*
 import scalus.builtins
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
+import scalus.Compiler.fieldAsData
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Extended.Finite
@@ -108,6 +109,16 @@ case class ExchangeParams(
     exchangePubKey: ByteString,
     contestationPeriodInMilliseconds: DiffMilliSeconds
 )
+
+case class CosmexTxInfo(
+    inputs: List[TxInInfo],
+    outputs: List[TxOut],
+    validRange: POSIXTimeRange,
+    signatories: List[PubKeyHash],
+    redeemers: AssocMap[ScriptPurpose, Redeemer]
+)
+
+case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: ScriptPurpose)
 
 @Compile
 object CosmexToDataInstances {
@@ -229,6 +240,19 @@ object CosmexContract {
     }
 
     given Data.FromData[OnChainState] = FromData.deriveCaseClass
+
+    given Data.FromData[CosmexTxInfo] = (d: Data) => {
+        val args = Builtins.unsafeDataAsConstr(d).snd
+        val seven = args.tail.tail.tail.tail.tail.tail.tail
+        new CosmexTxInfo(
+          inputs = fromData(args.head),
+          outputs = fromData(args.tail.tail.head),
+          validRange = fromData(seven.head),
+          signatories = fromData(seven.tail.head),
+          redeemers = fromData(seven.tail.tail.head)
+        )
+    }
+    given Data.FromData[CosmexScriptContext] = FromData.deriveCaseClass
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
@@ -830,7 +854,7 @@ object CosmexContract {
         params: ExchangeParams,
         state: OnChainState,
         action: Action,
-        txInfo: TxInfo,
+        txInfo: CosmexTxInfo,
         spendingTxOutRef: TxOutRef
     ): Boolean = {
         import OnChainChannelState.*
@@ -842,7 +866,7 @@ object CosmexContract {
                 else findOwnInputAndIndex(i + 1, tail)
 
         txInfo match
-            case TxInfo(inputs, _, outputs, _, _, _, _, validRange, signatories, redeemers, _, _) =>
+            case CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers) =>
                 findOwnInputAndIndex(0, inputs) match
                     case (ownTxInResolvedTxOut, ownIndex) =>
                         val ownOutput = outputs !! ownIndex
@@ -909,11 +933,11 @@ object CosmexContract {
         params: ExchangeParams,
         state: OnChainState,
         action: Action,
-        ctx: ScriptContext
+        ctx: CosmexScriptContext
     ): Boolean = {
         import ScriptPurpose.*
         ctx match
-            case ScriptContext(txInfo, purpose) =>
+            case CosmexScriptContext(txInfo, purpose) =>
                 purpose match
                     case Spending(spendingTxOutRef) => cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
                     case _                          => throw new Exception("Spending expected")
@@ -1034,7 +1058,7 @@ object CosmexContract {
     def validator(params: ExchangeParams)(datum: Data, redeemer: Data, ctxData: Data): Unit = {
         val state = fromData[OnChainState](datum)
         val action = fromData[Action](redeemer)
-        val ctx = fromData[ScriptContext](ctxData)
+        val ctx = fromData[CosmexScriptContext](ctxData)
         if cosmexValidator(params, state, action, ctx) then ()
         else throw new Exception("Validation failed")
     }
