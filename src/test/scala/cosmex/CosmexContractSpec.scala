@@ -156,6 +156,15 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield o
     }
 
+    given Arbitrary[OnChainState] = Arbitrary {
+        for
+            clientPkh <- Arbitrary.arbitrary[PubKeyHash]
+            clientPubKey <- Gen.listOfN(32 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
+            clientTxOutRef <- Arbitrary.arbitrary[TxOutRef]
+            channelState <- Arbitrary.arbitrary[OnChainChannelState]
+        yield OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState)
+    }
+
     test("Pretty print CosmexContract") {
         val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
         println(program.term.pretty.render(100))
@@ -173,6 +182,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     testSerialization[Snapshot]
     testSerialization[SignedSnapshot]
     testSerialization[OnChainChannelState]
+    testSerialization[OnChainState]
 
     def assertEval(p: Program, expected: Expected) = {
         val result = PlutusUplcEval.evalFlat(p)
