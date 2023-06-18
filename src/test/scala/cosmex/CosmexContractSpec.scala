@@ -7,9 +7,13 @@ import org.scalacheck.Gen
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.Compiler.compile
+import scalus.*
 import scalus.builtins.ByteString
 import scalus.builtins.ByteString.given
+import scalus.ledger.api.v1.TokenName
+import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v2.*
+import scalus.prelude.AssocMap
 import scalus.pretty
 import scalus.uplc.Data.FromData
 import scalus.uplc.Data.ToData
@@ -17,10 +21,8 @@ import scalus.uplc.Data.fromData
 import scalus.uplc.Data.toData
 import scalus.uplc.TermDSL.{_, given}
 import scalus.uplc.*
-import scalus.*
 
 import scala.reflect.ClassTag
-import scalus.prelude.AssocMap
 
 enum Expected {
     case Success(value: Term)
@@ -49,21 +51,36 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield t
     }
 
-    def genNonAdaValue: Gen[Value] =
+    val genCurrencySymbol: Gen[CurrencySymbol] =
+        Gen.listOfN(28 * 2, Gen.hexChar).map(_.mkString).map(ByteString.fromHex)
+
+    val genTokenName: Gen[TokenName] = for
+        len <- Gen.choose(1, 32)
+        name <- Gen.stringOfN(len, Gen.alphaNumChar)
+    yield ByteString.fromString(name)
+
+    val genNonAdaValue: Gen[Value] =
         for
-            currency <- Gen.listOfN(128, Gen.hexChar).map(_.mkString).map(ByteString.fromHex)
-            token <- Gen.stringOfN(32, Gen.alphaNumChar).map(ByteString.fromString)
+            currency <- genCurrencySymbol
+            token <- genTokenName
             value <- Gen.choose[BigInt](0, 1000)
         yield Value(currency, token, value)
+
     // TODO: improve generator
     given Arbitrary[Value] = Arbitrary {
         Gen.oneOf(genNonAdaValue, Gen.choose[BigInt](0, 1000).map(Value.lovelace))
     }
 
+    given Arbitrary[PubKeyHash] = Arbitrary {
+        Gen.listOfN(28 * 2, Gen.hexChar).map(h => PubKeyHash(ByteString.fromHex(h.mkString)))
+    }
+    given Arbitrary[TxId] = Arbitrary {
+        Gen.listOfN(32 * 2, Gen.hexChar).map(h => TxId(ByteString.fromHex(h.mkString)))
+    }
     given Arbitrary[TxOutRef] = Arbitrary {
         // case class TxOutRef(id: TxId, idx: BigInt)
         for
-            txId <- Gen.listOfN(64, Gen.hexChar).map(_.mkString).map(ByteString.fromHex).map(TxId.apply)
+            txId <- Arbitrary.arbitrary[TxId]
             idx <- Gen.choose[BigInt](0, 1000)
         yield TxOutRef(txId, idx)
     }
