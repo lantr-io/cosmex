@@ -5,7 +5,6 @@ import scalus.*
 import scalus.builtins
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
-import scalus.Compiler.fieldAsData
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Extended.Finite
@@ -21,6 +20,7 @@ import scalus.prelude.AssocMap
 import scalus.prelude.List
 import scalus.prelude.Maybe
 import scalus.prelude.Maybe.*
+import scalus.prelude.Prelude
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.given
 import scalus.sir.Program
@@ -29,7 +29,6 @@ import scalus.uplc.Data.fromData
 import scalus.uplc.FromData
 import scalus.uplc.FromDataInstances.given
 import scalus.uplc.ToData
-import scalus.prelude.Prelude
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -164,6 +163,7 @@ object CosmexToDataInstances {
 
     given Data.ToData[PendingTx] = ToData.deriveCaseClass[PendingTx](0)
     given Data.ToData[Snapshot] = ToData.deriveCaseClass[Snapshot](0)
+    given Data.ToData[SignedSnapshot] = ToData.deriveCaseClass[SignedSnapshot](0)
 
     given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
         o match

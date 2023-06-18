@@ -112,11 +112,6 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield TradingState(tsClientBalance, tsExchangeBalance, tsOrders)
     }
 
-    /* case class Snapshot(
-    snapshotTradingState: TradingState,
-    snapshotPendingTx: Maybe[PendingTx],
-    snapshotVersion: BigInt
-) */
     given arbMaybe[A: Arbitrary]: Arbitrary[scalus.prelude.Maybe[A]] = Arbitrary {
         for o <- Arbitrary.arbitrary[Option[A]]
         yield o match
@@ -131,6 +126,20 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         yield Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
     }
 
+    /* case class SignedSnapshot(
+    signedSnapshot: Snapshot,
+    snapshotClientSignature: Signature,
+    snapshotExchangeSignature: Signature
+) */
+    val genSignature: Gen[Signature] = Gen.listOfN(64 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
+    given Arbitrary[SignedSnapshot] = Arbitrary {
+        for
+            signedSnapshot <- Arbitrary.arbitrary[Snapshot]
+            snapshotClientSignature <- genSignature
+            snapshotExchangeSignature <- genSignature
+        yield SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature)
+    }
+
     test("Pretty print CosmexContract") {
         val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
         println(program.term.pretty.render(100))
@@ -138,6 +147,23 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
         println(s"Size: ${uplcProgram.cborEncoded.length}")
         // println(s"CBOR: ${uplcProgram.doubleCborHex}")
 
+    }
+
+    testSerialization[Party]
+    testSerialization[LimitOrder]
+    testSerialization[PendingTxType]
+    testSerialization[PendingTx]
+    testSerialization[TradingState]
+    testSerialization[Snapshot]
+    testSerialization[SignedSnapshot]
+
+    def assertEval(p: Program, expected: Expected) = {
+        val result = PlutusUplcEval.evalFlat(p)
+        (result, expected) match
+            case (UplcEvalResult.Success(result), Expected.Success(expected)) =>
+                assert(result == expected)
+            case (UplcEvalResult.UplcFailure(code, error), Expected.Failure(expected)) =>
+            case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
     inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
@@ -149,21 +175,5 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
                 assertEval(Program((2, 0, 0), term $ a.toData), Success(a.toData))
             }
         }
-    }
-
-    testSerialization[Party]
-    testSerialization[LimitOrder]
-    testSerialization[PendingTxType]
-    testSerialization[PendingTx]
-    testSerialization[TradingState]
-    testSerialization[Snapshot]
-
-    def assertEval(p: Program, expected: Expected) = {
-        val result = PlutusUplcEval.evalFlat(p)
-        (result, expected) match
-            case (UplcEvalResult.Success(result), Expected.Success(expected)) =>
-                assert(result == expected)
-            case (UplcEvalResult.UplcFailure(code, error), Expected.Failure(expected)) =>
-            case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 }
