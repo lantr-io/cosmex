@@ -1,6 +1,6 @@
 package cosmex
 
-import cosmex.CosmexContract.given
+import cosmex.CosmexFromDataInstances.given
 import cosmex.CosmexToDataInstances.given
 import org.scalacheck.Arbitrary
 import org.scalacheck.Gen
@@ -11,8 +11,8 @@ import scalus.*
 import scalus.builtins.ByteString
 import scalus.builtins.ByteString.given
 import scalus.ledger.api.v1.CurrencySymbol
-import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v1.POSIXTime
+import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
 import scalus.prelude.Maybe

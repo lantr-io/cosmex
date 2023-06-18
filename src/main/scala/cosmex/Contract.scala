@@ -213,9 +213,9 @@ object CosmexToDataInstances {
 
     given Data.ToData[OnChainState] = ToData.deriveCaseClass[OnChainState](0)
 }
-@Compile
-object CosmexContract {
 
+@Compile
+object CosmexFromDataInstances {
     given Data.FromData[Party] = FromData.deriveEnum[Party] {
         case 0 => _ => Party.Client
         case 1 => _ => Party.Exchange
@@ -280,6 +280,11 @@ object CosmexContract {
         else throw new Exception(s"Unknown ScriptPurpose")
 
     given Data.FromData[CosmexScriptContext] = FromData.deriveCaseClass
+}
+
+@Compile
+object CosmexContract {
+    import CosmexFromDataInstances.given
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
