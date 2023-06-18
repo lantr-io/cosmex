@@ -46,17 +46,7 @@ data Interval = Interval(from, to)
 data LowerBound = LowerBound(extended, closure)
 data Extended = Finite(a) | NegInf | PosInf
 data UpperBound = UpperBound(upper, closure)
-data ScriptPurpose = Certifying(cert)
-                   | Minting(curSymbol)
-                   | Rewarding(stakingCred)
-                   | Spending(txOutRef)
-data DCert = DelegDeRegKey(cred)
-           | DelegDelegate(cred, delegatee)
-           | DelegRegKey(cred)
-           | Genesis
-           | Mir
-           | PoolRegister(poolId, vrf)
-           | PoolRetire(poolId, epoch)
+data CosmexScriptPurpose = Certifying | Minting | Rewarding | Spending(txOutRef)
 data These = That(b) | These(a, b) | This(a)
 fun scalus.uplc.FromDataInstances$.given_FromData_ByteString d = unBData(d)
 in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash d =
@@ -235,7 +225,7 @@ in fun cosmex.CosmexContract$.given_FromData_OnChainChannelState d =
                        ) else ERROR 'Invalid tag'
 in fun cosmex.CosmexContract$.given_FromData_OnChainState d =
        let args = sndPair(unConstrData(d)) in
-       5;21mOnChainState(
+       OnChainState(
          scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(headList(args)),
          scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(tailList(args))),
          scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(
@@ -445,71 +435,11 @@ in fun scalus.ledger.api.v1.FromDataInstances$.IntervalFromData evidence$4 d =
            headList(tailList(args))
          )
        )
-in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_DCert d =
+in fun cosmex.CosmexContract$.given_FromData_CosmexScriptPurpose d =
        let pair = unConstrData(d) in
        let tag = fstPair(pair) in
        let args = sndPair(pair) in
-       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
-       then
-           DelegRegKey(
-             scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
-               headList(args)
-             )
-           )
-       else
-           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
-           then
-               DelegDeRegKey(
-                 scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
-                   headList(args)
-                 )
-               )
-           else
-               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2)
-               then
-                   DelegDelegate(
-                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
-                       headList(args)
-                     ),
-                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
-                       headList(tailList(args))
-                     )
-                   )
-               else
-                   if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 3)
-                   then
-                       PoolRegister(
-                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
-                           headList(args)
-                         ),
-                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
-                           headList(tailList(args))
-                         )
-                       )
-                   else
-                       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 4)
-                       then
-                           PoolRetire(
-                             scalus.ledger.api.v1.FromDataInstances$.given_FromData_PubKeyHash(
-                               headList(args)
-                             ),
-                             scalus.uplc.FromDataInstances$.given_FromData_BigInt(
-                               headList(tailList(args))
-                             )
-                           )
-                       else
-                           if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 5) then Genesis()
-                           else
-                               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 6) then Mir()
-                               else
-                                   ERROR 'error'
-in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose d =
-       let pair = unConstrData(d) in
-       let tag = fstPair(pair) in
-       let args = sndPair(pair) in
-       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0)
-       then
-           Minting(scalus.uplc.FromDataInstances$.given_FromData_ByteString(headList(args)))
+       if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 0) then Minting()
        else
            if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 1)
            then
@@ -517,21 +447,11 @@ in fun scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose d =
                  scalus.ledger.api.v1.FromDataInstances$.given_FromData_TxOutRef(headList(args))
                )
            else
-               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2)
-               then
-                   Rewarding(
-                     scalus.ledger.api.v1.FromDataInstances$.given_FromData_StakingCredential(
-                       headList(args)
-                     )
-                   )
+               if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 2) then Rewarding()
                else
-                   if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 3)
-                   then
-                       Certifying(
-                         scalus.ledger.api.v1.FromDataInstances$.given_FromData_DCert(
-                           headList(args)
-                         )
-                       ) else ERROR 'error'
+                   if scalus.prelude.Prelude$.given_Eq_BigInt(tag, 3) then Certifying()
+                   else
+                       ERROR 'error'
 in fun cosmex.CosmexContract$.given_FromData_CosmexTxInfo d =
        let args = sndPair(unConstrData(d)) in
        let seven = tailList(tailList(tailList(tailList(tailList(tailList(tailList(args))))))) in
@@ -553,7 +473,7 @@ in fun cosmex.CosmexContract$.given_FromData_CosmexTxInfo d =
            headList(tailList(seven))
          ),
          scalus.uplc.FromDataInstances$.AssocMapFromData(
-           scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose,
+           cosmex.CosmexContract$.given_FromData_CosmexScriptPurpose,
            scalus.uplc.FromDataInstances$.given_FromData_Data,
            headList(tailList(tailList(seven)))
          )
@@ -562,9 +482,7 @@ in fun cosmex.CosmexContract$.given_FromData_CosmexScriptContext d =
        let args = sndPair(unConstrData(d)) in
        CosmexScriptContext(
          cosmex.CosmexContract$.given_FromData_CosmexTxInfo(headList(args)),
-         scalus.ledger.api.v1.FromDataInstances$.given_FromData_ScriptPurpose(
-           headList(tailList(args))
-         )
+         cosmex.CosmexContract$.given_FromData_CosmexScriptPurpose(headList(tailList(args)))
        )
 in fun scalus.ledger.api.v1.TxId$.given_Eq_TxId a b =
        equalsByteString(a({λ hash -> hash }), b({λ hash -> hash }))
@@ -883,7 +801,7 @@ in fun scalus.prelude.Maybe$.maybeEq eq a b =
            match b with
              case Just(value2) -> eq(value, value2)
              case Nothing -> False
-         case Nothing -> match b with case Just(a) -> False0m case Nothing -> True
+         case Nothing -> match b with case Just(a) -> False case Nothing -> True
 in fun scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential lhs rhs =
        match lhs with
          case StakingHash(cred) ->
@@ -1015,7 +933,7 @@ in fun scalus.ledger.api.v1.Value$.unionVal l r =
                      cs,
                      scalus.prelude.AssocMap$.map(
                        v1,
-                       {λ x$1 -> match x$1 with case Tuple2(k, v) -> mTuple2(k, This(v)) }
+                       {λ x$1 -> match x$1 with case Tuple2(k, v) -> Tuple2(k, This(v)) }
                      )
                    )
          }
@@ -1151,114 +1069,18 @@ in fun scalus.ledger.api.v1.Value$.minus a b =
        scalus.ledger.api.v1.Value$.unionWith({λ i1 i2 -> subtractInteger(i1, i2) }, a, b)
 in fun scalus.ledger.api.v1.Value$.gt a b =
        scalus.ledger.api.v1.Value$.checkBinRel({λ i1 i2 -> lessThanInteger(i1, i2) }, b, a)
-in fun scalus.ledger.api.v1.DCert$.given_Eq_DCert x y =
-       match x with
-         case DelegDeRegKey(cred) ->
-           match y with
-             case DelegDeRegKey(cred) ->
-               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(_) -> False
-             case Genesis -> False
-             case Mir -> False
-             case PoolRegister(_, _) -> False
-             case PoolRetire(_, _) -> False
-         case DelegDelegate(cred, delegatee) ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(cred, delegatee) ->
-               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
-               and
-               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(delegatee, delegatee)
-             case DelegRegKey(_) -> False
-             case Genesis -> False
-             case Mir -> False
-             case PoolRegister(_, _) -> False
-             case PoolRetire(_, _) -> False
-         case DelegRegKey(cred) ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(cred) ->
-               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(cred, cred)
-             case Genesis -> False
-             case Mir -> False
-             case PoolRegister(_, _) -> False
-             case PoolRetire(_, _) -> False
-         case Genesis ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(_) -> False
-             case Genesis -> True
-             case Mir -> False
-             case PoolRegister(_, _) -> False
-             case PoolRetire(_, _) -> False
-         case Mir ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(_) -> False
-             case Genesis -> False
-             case Mir -> True
-             case PoolRegister(_, _) -> False
-             case PoolRetire(_, _) -> False
-         case PoolRegister(poolId, vrf) ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(_) -> False
-             case Genesis -> False
-             case Mir -> False
-             case PoolRegister(poolId, vrf) ->
-               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(poolId, poolId)
-               and
-               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(vrf, vrf)
-             case PoolRetire(_, _) -> False
-         case PoolRetire(poolId, epoch) ->
-           match y with
-             case DelegDeRegKey(_) -> False
-             case DelegDelegate(_, _) -> False
-             case DelegRegKey(_) -> False
-             case Genesis -> False
-             case Mir -> False
-             case PoolRegister(_, _) -> False
-             case PoolRetire(poolId, epoch) ->
-               scalus.ledger.api.v1.PubKeyHash$.given_Eq_PubKeyHash(poolId, poolId)
-               and
-               scalus.prelude.Prelude$.given_Eq_BigInt(epoch, epoch)
-in fun scalus.ledger.api.v1.ScriptPurpose$.given_Eq_ScriptPurpose x y =
-       match x with
-         case Certifying(cert) ->
-           match y with
-             case Certifying(cert) -> scalus.ledger.api.v1.DCert$.given_Eq_DCert(cert, cert)
-             case Minting(_) -> False
-             case Rewarding(_) -> False
-             case Spending(_) -> False
-         case Minting(curSymbol) ->
-           match y with
-             case Certifying(_) -> False
-             case Minting(curSymbol) ->
-               scalus.prelude.Prelude$.given_Eq_ByteString(curSymbol, curSymbol)
-             case Rewarding(_) -> False
-             case Spending(_) -> False
-         case Rewarding(stakingCred) ->
-           match y with
-             case Certifying(_) -> False
-             case Minting(_) -> False
-             case Rewarding(stakingCred) ->
-               scalus.ledger.api.v1.StakingCredential$.given_Eq_StakingCredential(
-                 stakingCred,
-                 stakingCred
-               )
-             case Spending(_) -> False
+in fun cosmex.CosmexScriptPurpose$.given_Eq_CosmexScriptPurpose a b =
+       match a with
+         case Certifying -> False
+         case Minting -> False
+         case Rewarding -> False
          case Spending(txOutRef) ->
-           match y with
-             case Certifying(_) -> False
-             case Minting(_) -> False
-             case Rewarding(_) -> False
-             case Spending(txOutRef) ->
-               scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef(txOutRef, txOutRef)
+           match b with
+             case Certifying -> False
+             case Minting -> False
+             case Rewarding -> False
+             case Spending(txOutRef2) ->
+               scalus.ledger.api.v1.TxOutRef$.given_Eq_TxOutRef(txOutRef, txOutRef2)
 in fun cosmex.CosmexContract$.handlePendingTx
      contestChannelTxOutRef
      snapshotPendingTx
@@ -1408,9 +1230,9 @@ in fun cosmex.CosmexContract$.validator params datum redeemer ctxData =
              match ctx with
                case CosmexScriptContext(txInfo, purpose) ->
                  match purpose with
-                   case Certifying(_) -> ERROR 'Spending expected'
-                   case Minting(_) -> ERROR 'Spending expected'
-                   case Rewarding(_) -> ERROR 'Spending expected'
+                   case Certifying -> ERROR 'Spending expected'
+                   case Minting -> ERROR 'Spending expected'
+                   case Rewarding -> ERROR 'Spending expected'
                    case Spending(spendingTxOutRef) ->
                      fun findOwnInputAndIndex i txIns =
                          match txIns with
@@ -1763,7 +1585,7 @@ in fun cosmex.CosmexContract$.validator params datum redeemer ctxData =
                                                                   match scalus.prelude.AssocMap$.lookup(
                                                                     redeemers,
                                                                     Spending(txOutRef),
-                                                                    scalus.ledger.api.v1.ScriptPurpose$.given_Eq_ScriptPurpose
+                                                                    cosmex.CosmexScriptPurpose$.given_Eq_CosmexScriptPurpose
                                                                   ) with
                                                                     case Just(value) ->
                                                                       cosmex.CosmexContract$.given_FromData_Action(

@@ -29,6 +29,7 @@ import scalus.uplc.Data.fromData
 import scalus.uplc.FromData
 import scalus.uplc.FromDataInstances.given
 import scalus.uplc.ToData
+import scalus.prelude.Prelude
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -115,7 +116,7 @@ case class CosmexTxInfo(
     outputs: List[TxOut],
     validRange: POSIXTimeRange,
     signatories: List[PubKeyHash],
-    redeemers: AssocMap[ScriptPurpose, Redeemer]
+    redeemers: AssocMap[CosmexScriptPurpose, Redeemer]
 )
 
 enum CosmexScriptPurpose:
@@ -123,6 +124,16 @@ enum CosmexScriptPurpose:
     case Minting
     case Rewarding
     case Certifying
+
+@Compile
+object CosmexScriptPurpose:
+    given Prelude.Eq[CosmexScriptPurpose] = (a, b) =>
+        a match
+            case Spending(txOutRef) =>
+                b match
+                    case Spending(txOutRef2) => txOutRef === txOutRef2
+                    case _                   => false
+            case _ => false
 
 case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpose)
 
@@ -602,7 +613,7 @@ object CosmexContract {
     inline def handlePayoutTransfer(
         params: ExchangeParams,
         state: OnChainState,
-        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        redeemers: AssocMap[CosmexScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         ownIdx: BigInt,
         transferValue: Value,
@@ -611,7 +622,7 @@ object CosmexContract {
         ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
-        import ScriptPurpose.*
+        import CosmexScriptPurpose.*
         import Action.*
         import OnChainChannelState.*
 
@@ -836,7 +847,7 @@ object CosmexContract {
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
-        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        redeemers: AssocMap[CosmexScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         state: OnChainState
     ): Boolean =
