@@ -16,6 +16,7 @@ addCompilerPlugin("org.scalus" %% "scalus-plugin" % "0.3.0-SNAPSHOT")
 scalacOptions += "-Wunused:all"
 
 libraryDependencies += "org.scalus" %% "scalus" % "0.3.0-SNAPSHOT"
+libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.4.3"
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.16" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-16" % "3.2.14.0" % "test"
