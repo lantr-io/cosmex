@@ -75,10 +75,10 @@ object Server {
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 validateOpenChannelRequest(tx, snapshot) match
                     case Right(openChannelInfo) =>
-                        val bothSignedSnapshot = signSnapshot(snapshot)
-                        storeSnapshot(bothSignedSnapshot)
+                        // val bothSignedSnapshot = signSnapshot(snapshot)
+                        // storeSnapshot(bothSignedSnapshot)
                         sendTx(tx)
-                        reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
+                        // reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
                     case Left(error) => reply(ClientResponse.Error(error))
             case _ => List.empty
 

@@ -3,6 +3,7 @@ import scalus.Compile
 import scalus.Compiler
 import scalus.*
 import scalus.builtins
+import scalus.builtins.given
 import scalus.builtins.Builtins
 import scalus.builtins.ByteString
 import scalus.ledger.api.v1.CurrencySymbol
