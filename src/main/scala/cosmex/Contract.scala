@@ -6,17 +6,11 @@ import scalus.builtin
 import scalus.builtin.given
 import scalus.builtin.Builtins
 import scalus.builtin.ByteString
-import scalus.ledger.api.v1.CurrencySymbol
-import scalus.ledger.api.v1.Extended
-import scalus.ledger.api.v1.Extended.Finite
 import scalus.ledger.api.v1.FromDataInstances.given
-import scalus.ledger.api.v1.LowerBound
-import scalus.ledger.api.v1.POSIXTime
-import scalus.ledger.api.v1.TokenName
-import scalus.ledger.api.v1.UpperBound
-import scalus.ledger.api.v1.Value.{_, given}
+import scalus.ledger.api.v2.Value.{_, given}
 import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.ledger.api.v2.*
+import scalus.ledger.api.v2.Extended.Finite
 import scalus.prelude.AssocMap
 import scalus.prelude.List
 import scalus.prelude.Maybe
