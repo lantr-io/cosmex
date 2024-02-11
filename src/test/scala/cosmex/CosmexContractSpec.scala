@@ -8,8 +8,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.Compiler.compile
 import scalus.*
-import scalus.builtins.ByteString
-import scalus.builtins.ByteString.given
+import scalus.builtin.ByteString
+import scalus.builtin.ByteString.given
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.POSIXTime
 import scalus.ledger.api.v1.TokenName
@@ -17,10 +17,10 @@ import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
 import scalus.prelude.Maybe
 import scalus.pretty
-import scalus.uplc.Data.FromData
-import scalus.uplc.Data.ToData
-import scalus.uplc.Data.fromData
-import scalus.uplc.Data.toData
+import scalus.builtin.Data.FromData
+import scalus.builtin.Data.ToData
+import scalus.builtin.Data.fromData
+import scalus.builtin.Data.toData
 import scalus.uplc.TermDSL.{_, given}
 import scalus.uplc.*
 

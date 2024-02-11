@@ -7,9 +7,9 @@ import scalus.ledger.api.v1.TxOutRef
 
 import scala.collection.mutable.HashMap
 import scalus.ledger.api.v1.TxId
-import scalus.builtins.ByteString
+import scalus.builtin.ByteString
 import scalus.ledger.api.v1.Value
-import scalus.builtins.Builtins
+import scalus.builtin.Builtins
 
 case class ServerState()
 case class Block()

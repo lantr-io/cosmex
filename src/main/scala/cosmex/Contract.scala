@@ -2,10 +2,10 @@ package cosmex
 import scalus.Compile
 import scalus.Compiler
 import scalus.*
-import scalus.builtins
-import scalus.builtins.given
-import scalus.builtins.Builtins
-import scalus.builtins.ByteString
+import scalus.builtin
+import scalus.builtin.given
+import scalus.builtin.Builtins
+import scalus.builtin.ByteString
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.Extended
 import scalus.ledger.api.v1.Extended.Finite
@@ -25,11 +25,11 @@ import scalus.prelude.Prelude
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.given
 import scalus.sir.Program
-import scalus.uplc.Data
-import scalus.uplc.Data.fromData
-import scalus.uplc.FromData
-import scalus.uplc.FromDataInstances.given
-import scalus.uplc.ToData
+import scalus.builtin.Data
+import scalus.builtin.Data.fromData
+import scalus.builtin.FromData
+import scalus.builtin.FromDataInstances.given
+import scalus.builtin.ToData
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
