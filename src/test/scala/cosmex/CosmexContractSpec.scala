@@ -11,12 +11,13 @@ import scalus.*
 import scalus.builtin.ByteString
 import scalus.builtin.ByteString.given
 import scalus.ledger.api.v1.CurrencySymbol
-import scalus.ledger.api.v1.POSIXTime
+import scalus.ledger.api.v1.PosixTime
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v2.*
 import scalus.prelude.AssocMap
 import scalus.prelude.Maybe
 import scalus.pretty
+import scalus.builtin.Data
 import scalus.builtin.Data.FromData
 import scalus.builtin.Data.ToData
 import scalus.builtin.Data.fromData
@@ -35,6 +36,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     import Expected.*
 
     given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
+
     given Arbitrary[LimitOrder] = Arbitrary {
         for
             pair <- Gen.const((hex"aa", hex"bb"), (hex"bb", hex"aa")) // FIXME: use real generator
@@ -42,6 +44,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
             price <- Arbitrary.arbitrary[BigInt]
         yield LimitOrder(pair, amount, price)
     }
+
     given Arbitrary[PendingTxType] = Arbitrary {
         for
             txOutIndex <- Gen.choose[BigInt](0, 1000)
@@ -76,9 +79,11 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     given Arbitrary[PubKeyHash] = Arbitrary {
         Gen.listOfN(28 * 2, Gen.hexChar).map(h => PubKeyHash(ByteString.fromHex(h.mkString)))
     }
+
     given Arbitrary[TxId] = Arbitrary {
         Gen.listOfN(32 * 2, Gen.hexChar).map(h => TxId(ByteString.fromHex(h.mkString)))
     }
+
     given Arbitrary[TxOutRef] = Arbitrary {
         for
             txId <- Arbitrary.arbitrary[TxId]
@@ -97,8 +102,9 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     given arbAssocMap[A: Arbitrary, B: Arbitrary]: Arbitrary[scalus.prelude.AssocMap[A, B]] =
         Arbitrary {
             for map <- Arbitrary.arbitrary[Map[A, B]]
-            yield scalus.prelude.AssocMap.fromList(scalus.prelude.List(map.toSeq: _*))
+            yield scalus.prelude.AssocMap.fromList(scalus.prelude.List(map.toSeq*))
         }
+
     given Arbitrary[TradingState] = Arbitrary {
         for
             tsClientBalance <- Arbitrary.arbitrary[Value]
@@ -135,7 +141,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
               Gen.const(OnChainChannelState.OpenState),
               for
                   contestSnapshot <- Arbitrary.arbitrary[Snapshot]
-                  contestSnapshotStart <- Arbitrary.arbitrary[POSIXTime]
+                  contestSnapshotStart <- Arbitrary.arbitrary[PosixTime]
                   contestInitiator <- Arbitrary.arbitrary[Party]
                   contestChannelTxOutRef <- Arbitrary.arbitrary[TxOutRef]
               yield OnChainChannelState.SnapshotContestState(
@@ -146,7 +152,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
               ),
               for
                   latestTradingState <- Arbitrary.arbitrary[TradingState]
-                  tradeContestStart <- Arbitrary.arbitrary[POSIXTime]
+                  tradeContestStart <- Arbitrary.arbitrary[PosixTime]
               yield OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart),
               for
                   clientBalance <- Arbitrary.arbitrary[Value]
@@ -185,21 +191,22 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks {
     testSerialization[OnChainState]
 
     def assertEval(p: Program, expected: Expected) = {
-        val result = PlutusUplcEval.evalFlat(p)
+        val result = UplcCli.evalFlat(p)
         (result, expected) match
-            case (UplcEvalResult.Success(result), Expected.Success(expected)) =>
+            case (UplcEvalResult.Success(result, _), Expected.Success(expected)) =>
                 assert(result == expected)
             case (UplcEvalResult.UplcFailure(code, error), Expected.Failure(expected)) =>
             case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
     inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary] = {
+        import scala.language.implicitConversions
         val sir = compile { (d: Data) => fromData[A](d).toData }
         // println(sir.pretty.render(100))
         val term = sir.toUplc()
         test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
             forAll { (a: A) =>
-                assertEval(Program((2, 0, 0), term $ a.toData), Success(a.toData))
+                assertEval(Program((1, 0, 0), term $ a.toData), Success(a.toData))
             }
         }
     }

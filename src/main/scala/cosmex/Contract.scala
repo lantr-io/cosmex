@@ -1,16 +1,23 @@
 package cosmex
+import scalus.*
 import scalus.Compile
 import scalus.Compiler
-import scalus.*
 import scalus.builtin
-import scalus.builtin.given
 import scalus.builtin.Builtins
+import scalus.builtin.Builtins.*
 import scalus.builtin.ByteString
+import scalus.builtin.Data
+import scalus.builtin.Data.fromData
+import scalus.builtin.FromData
+import scalus.builtin.FromDataInstances.given
+import scalus.builtin.ToData
+import scalus.builtin.given
 import scalus.ledger.api.v1.FromDataInstances.given
-import scalus.ledger.api.v2.Value.{_, given}
-import scalus.ledger.api.v2.FromDataInstances.given
+import scalus.ledger.api.v1.IntervalBound
+import scalus.ledger.api.v1.IntervalBoundType.Finite
 import scalus.ledger.api.v2.*
-import scalus.ledger.api.v2.Extended.Finite
+import scalus.ledger.api.v2.FromDataInstances.given
+import scalus.ledger.api.v2.Value.{*, given}
 import scalus.prelude.AssocMap
 import scalus.prelude.List
 import scalus.prelude.Maybe
@@ -19,11 +26,6 @@ import scalus.prelude.Prelude
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.given
 import scalus.sir.Program
-import scalus.builtin.Data
-import scalus.builtin.Data.fromData
-import scalus.builtin.FromData
-import scalus.builtin.FromDataInstances.given
-import scalus.builtin.ToData
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -85,11 +87,11 @@ enum OnChainChannelState:
     case OpenState
     case SnapshotContestState(
         contestSnapshot: Snapshot,
-        contestSnapshotStart: POSIXTime,
+        contestSnapshotStart: PosixTime,
         contestInitiator: Party,
         contestChannelTxOutRef: TxOutRef
     )
-    case TradesContestState(latestTradingState: TradingState, tradeContestStart: POSIXTime)
+    case TradesContestState(latestTradingState: TradingState, tradeContestStart: PosixTime)
     case PayoutState(clientBalance: Value, exchangeBalance: Value)
 
 case class OnChainState(
@@ -108,7 +110,7 @@ case class ExchangeParams(
 case class CosmexTxInfo(
     inputs: List[TxInInfo],
     outputs: List[TxOut],
-    validRange: POSIXTimeRange,
+    validRange: PosixTimeRange,
     signatories: List[PubKeyHash],
     redeemers: AssocMap[CosmexScriptPurpose, Redeemer]
 )
@@ -133,16 +135,16 @@ case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpos
 
 @Compile
 object CosmexToDataInstances {
-    import scalus.uplc.Data.toData
-    import scalus.uplc.ToDataInstances.given
+    import scalus.builtin.Data.toData
+    import scalus.builtin.ToDataInstances.given
     import scalus.ledger.api.v1.ToDataInstances.given
     given Data.ToData[Party] = (p: Party) =>
-        Builtins.mkConstr(
+        constrData(
           (p match
               case Party.Client   => 0
               case Party.Exchange => 1
           ),
-          Builtins.mkNilData()
+          mkNilData()
         )
 
     given Data.ToData[LimitOrder] = ToData.deriveCaseClass[LimitOrder](0)
@@ -150,11 +152,11 @@ object CosmexToDataInstances {
 
     given Data.ToData[PendingTxType] = (o: PendingTxType) =>
         o match
-            case PendingTxType.PendingIn => Builtins.mkConstr(0, Builtins.mkNilData())
+            case PendingTxType.PendingIn => constrData(0, mkNilData())
             case PendingTxType.PendingOut(txOutIndex) =>
-                Builtins.mkConstr(1, Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData()))
+                constrData(1, mkCons(txOutIndex.toData, mkNilData()))
             case PendingTxType.PendingTransfer(txOutIndex) =>
-                Builtins.mkConstr(2, Builtins.mkCons(txOutIndex.toData, Builtins.mkNilData()))
+                constrData(2, mkCons(txOutIndex.toData, mkNilData()))
 
     given Data.ToData[PendingTx] = ToData.deriveCaseClass[PendingTx](0)
     given Data.ToData[Snapshot] = ToData.deriveCaseClass[Snapshot](0)
@@ -163,24 +165,24 @@ object CosmexToDataInstances {
     given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
         o match
             case OnChainChannelState.OpenState =>
-                Builtins.mkConstr(0, Builtins.mkNilData())
+                constrData(0, mkNilData())
             case OnChainChannelState.SnapshotContestState(
                   contestSnapshot,
                   contestSnapshotStart,
                   contestInitiator,
                   contestChannelTxOutRef
                 ) =>
-                Builtins.mkConstr(
+                constrData(
                   1,
-                  Builtins.mkCons(
+                  mkCons(
                     contestSnapshot.toData,
-                    Builtins.mkCons(
+                    mkCons(
                       contestSnapshotStart.toData,
-                      Builtins.mkCons(
+                      mkCons(
                         contestInitiator.toData,
-                        Builtins.mkCons(
+                        mkCons(
                           contestChannelTxOutRef.toData,
-                          Builtins.mkNilData()
+                          mkNilData()
                         )
                       )
                     )
@@ -190,19 +192,19 @@ object CosmexToDataInstances {
                   latestTradingState,
                   tradeContestStart
                 ) =>
-                Builtins.mkConstr(
+                constrData(
                   2,
-                  Builtins.mkCons(
+                  mkCons(
                     latestTradingState.toData,
-                    Builtins.mkCons(tradeContestStart.toData, Builtins.mkNilData())
+                    mkCons(tradeContestStart.toData, mkNilData())
                   )
                 )
             case OnChainChannelState.PayoutState(clientBalance, exchangeBalance) =>
-                Builtins.mkConstr(
+                constrData(
                   3,
-                  Builtins.mkCons(
+                  mkCons(
                     clientBalance.toData,
-                    Builtins.mkCons(exchangeBalance.toData, Builtins.mkNilData())
+                    mkCons(exchangeBalance.toData, mkNilData())
                   )
                 )
 
@@ -253,8 +255,18 @@ object CosmexFromDataInstances {
 
     given Data.FromData[OnChainState] = FromData.deriveCaseClass
 
+    given Data.FromData[CosmexScriptPurpose] = (d: Data) =>
+        val pair = unConstrData(d)
+        val tag = pair.fst
+        val args = pair.snd
+        if tag === BigInt(0) then CosmexScriptPurpose.Minting
+        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(fromData[TxOutRef](args.head))
+        else if tag === BigInt(2) then CosmexScriptPurpose.Rewarding
+        else if tag === BigInt(3) then CosmexScriptPurpose.Certifying
+        else throw new Exception(s"Unknown ScriptPurpose")
+
     given Data.FromData[CosmexTxInfo] = (d: Data) => {
-        val args = Builtins.unsafeDataAsConstr(d).snd
+        val args = unConstrData(d).snd
         val seven = args.tail.tail.tail.tail.tail.tail.tail
         new CosmexTxInfo(
           inputs = fromData(args.head),
@@ -264,15 +276,6 @@ object CosmexFromDataInstances {
           redeemers = fromData(seven.tail.tail.head)
         )
     }
-    given Data.FromData[CosmexScriptPurpose] = (d: Data) =>
-        val pair = Builtins.unsafeDataAsConstr(d)
-        val tag = pair.fst
-        val args = pair.snd
-        if tag === BigInt(0) then CosmexScriptPurpose.Minting
-        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(fromData[TxOutRef](args.head))
-        else if tag === BigInt(2) then CosmexScriptPurpose.Rewarding
-        else if tag === BigInt(3) then CosmexScriptPurpose.Certifying
-        else throw new Exception(s"Unknown ScriptPurpose")
 
     given Data.FromData[CosmexScriptContext] = FromData.deriveCaseClass
 }
@@ -292,7 +295,7 @@ object CosmexContract {
     }
 
     def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
-        import scalus.uplc.Data.toData
+        import scalus.builtin.Data.toData
         import CosmexToDataInstances.given
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
@@ -328,7 +331,7 @@ object CosmexContract {
 
     inline def handleClientAbort(
         ownTxInResolvedTxOut: TxOut,
-        contestSnapshotStart: POSIXTime,
+        contestSnapshotStart: PosixTime,
         signatories: List[PubKeyHash],
         state: OnChainState,
         spendingTxOutRef: TxOutRef,
@@ -375,18 +378,18 @@ object CosmexContract {
         clientPubKey: PubKey,
         exchangePubKey: PubKey
     ): Boolean = {
-        import scalus.uplc.Data.toData
-        import scalus.uplc.ToDataInstances.given
+        import scalus.builtin.Data.toData
+        import scalus.builtin.ToDataInstances.given
         import scalus.ledger.api.v1.ToDataInstances.given
         import CosmexToDataInstances.given
         signedSnapshot match
             case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                 val signedInfo = (clientTxOutRef, signedSnapshot)
-                val msg = Builtins.serialiseData(
+                val msg = serialiseData(
                   signedInfo.toData
                 )
-                val validExchangeSig = Builtins.verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
-                val validClientSig = Builtins.verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
+                val validExchangeSig = verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
+                val validClientSig = verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
                 validClientSig && validExchangeSig
     }
 
@@ -400,7 +403,7 @@ object CosmexContract {
     inline def handleClose(
         initiator: Party,
         ownTxInResolvedTxOut: TxOut,
-        contestSnapshotStart: POSIXTime,
+        contestSnapshotStart: PosixTime,
         signatories: List[PubKeyHash],
         params: ExchangeParams,
         state: OnChainState,
@@ -440,11 +443,11 @@ object CosmexContract {
 
     inline def handleContestClose(
         params: ExchangeParams,
-        tradeContestStart: POSIXTime,
+        tradeContestStart: PosixTime,
         signatories: List[PubKeyHash],
         state: OnChainState,
         contestSnapshot: Snapshot,
-        contestSnapshotStart: POSIXTime,
+        contestSnapshotStart: PosixTime,
         contestInitiator: Party,
         contestChannelTxOutRef: TxOutRef,
         party: Party,
@@ -497,9 +500,9 @@ object CosmexContract {
     }
 
     inline def handleContestTimeout(
-        contestSnapshotStart: POSIXTime,
-        contestationPeriodInMilliseconds: POSIXTime,
-        txInfoValidRange: (POSIXTime, POSIXTime),
+        contestSnapshotStart: PosixTime,
+        contestationPeriodInMilliseconds: PosixTime,
+        txInfoValidRange: (PosixTime, PosixTime),
         contestChannelTxOutRef: TxOutRef,
         contestSnapshot: Snapshot,
         state: OnChainState,
@@ -536,8 +539,8 @@ object CosmexContract {
 
     inline def handleTradesContestTimeout(
         params: ExchangeParams,
-        start: POSIXTime,
-        tradeContestStart: POSIXTime,
+        start: PosixTime,
+        tradeContestStart: PosixTime,
         state: OnChainState,
         latestTradingState: TradingState,
         ownTxInResolvedTxOut: TxOut,
@@ -565,7 +568,7 @@ object CosmexContract {
         params: ExchangeParams,
         signatories: List[PubKeyHash],
         actionTrades: List[Trade],
-        tradeContestStart: POSIXTime,
+        tradeContestStart: PosixTime,
         actionCancelOthers: Boolean,
         latestTradingState: TradingState,
         state: OnChainState,
@@ -715,7 +718,7 @@ object CosmexContract {
         spendingTxOutRef: TxOutRef,
         state: OnChainState,
         signatories: List[PubKeyHash],
-        range: POSIXTimeRange
+        range: PosixTimeRange
     ): Boolean =
         import Action.*
         action match
@@ -763,13 +766,13 @@ object CosmexContract {
         contestChannelTxOutRef: TxOutRef,
         contestInitiator: Party,
         contestSnapshot: Snapshot,
-        contestSnapshotStart: POSIXTime,
+        contestSnapshotStart: PosixTime,
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
         signatories: List[PubKeyHash],
-        range: POSIXTimeRange
+        range: PosixTimeRange
     ): Boolean =
         import Action.*
         action match
@@ -809,9 +812,9 @@ object CosmexContract {
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
         state: OnChainState,
-        tradeContestStart: POSIXTime,
+        tradeContestStart: PosixTime,
         signatories: List[PubKeyHash],
-        range: POSIXTimeRange
+        range: PosixTimeRange
     ): Boolean =
         import Action.*
         action match
@@ -1071,9 +1074,9 @@ object CosmexContract {
          else (tradeAmount < 0) && (orderPrice <= tradePrice))
     }
 
-    def validRange(interval: Interval[POSIXTime]): (POSIXTime, POSIXTime) = {
+    def validRange(interval: Interval): (PosixTime, PosixTime) = {
         interval match
-            case Interval(LowerBound(lower, _), UpperBound(upper, _)) =>
+            case Interval(IntervalBound(lower, _), IntervalBound(upper, _)) =>
                 lower match
                     case Finite(start) =>
                         upper match
@@ -1093,6 +1096,7 @@ object CosmexContract {
 
 object CosmexValidator {
     import scalus.sir.SirDSL.{*, given}
+    import scala.language.implicitConversions
     private val compiledValidator = Compiler.compile(CosmexContract.validator)
     private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
         new ExchangeParams(new PubKeyHash(h), pk, period)
