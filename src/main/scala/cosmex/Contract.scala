@@ -25,7 +25,10 @@ import scalus.prelude.Maybe.*
 import scalus.prelude.Prelude
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.given
-import scalus.sir.Program
+import scalus.sir.RemoveRecursivity
+import scalus.sir.OptimizingSirToUplcLowering
+import scalus.sir.EtaReduce
+import scalus.uplc.Program
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -209,6 +212,37 @@ object CosmexToDataInstances {
                 )
 
     given Data.ToData[OnChainState] = ToData.deriveCaseClass[OnChainState](0)
+    given Data.ToData[Trade] = ToData.deriveCaseClass[Trade](0)
+    given Data.ToData[Action] = (a: Action) =>
+        a match
+            case Action.Update      => constrData(0, mkNilData())
+            case Action.ClientAbort => constrData(1, mkNilData())
+            case Action.Close(party, signedSnapshot) =>
+                constrData(
+                  2,
+                  mkCons(
+                    party.toData,
+                    mkCons(signedSnapshot.toData, mkNilData())
+                  )
+                )
+            case Action.Trades(actionTrades, actionCancelOthers) =>
+                constrData(
+                  3,
+                  mkCons(
+                    actionTrades.toData,
+                    mkCons(actionCancelOthers.toData, mkNilData())
+                  )
+                )
+            case Action.Payout => constrData(4, mkNilData())
+            case Action.Transfer(txOutIndex, value) =>
+                constrData(
+                  5,
+                  mkCons(
+                    txOutIndex.toData,
+                    mkCons(value.toData, mkNilData())
+                  )
+                )
+            case Action.Timeout => constrData(6, mkNilData())
 }
 
 @Compile
@@ -260,7 +294,7 @@ object CosmexFromDataInstances {
         val tag = pair.fst
         val args = pair.snd
         if tag === BigInt(0) then CosmexScriptPurpose.Minting
-        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(fromData[TxOutRef](args.head))
+        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(args.head.to[TxOutRef])
         else if tag === BigInt(2) then CosmexScriptPurpose.Rewarding
         else if tag === BigInt(3) then CosmexScriptPurpose.Certifying
         else throw new Exception(s"Unknown ScriptPurpose")
@@ -645,7 +679,7 @@ object CosmexContract {
                             val action = {
                                 AssocMap.lookup(redeemers)(new Spending(txOutRef)) match
                                     case Nothing     => throw new Exception("No redeemer")
-                                    case Just(value) => fromData[Action](value)
+                                    case Just(value) => value.to[Action]
                             }
                             action match
                                 case Transfer(targetIdx, amount) =>
@@ -971,8 +1005,6 @@ object CosmexContract {
                     case CosmexScriptPurpose.Spending(spendingTxOutRef) =>
                         cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
                     case _ => throw new Exception("Spending expected")
-
-        false
     }
 
     def assetClassValue(assetClass: AssetClass, i: BigInt): Value =
@@ -1086,18 +1118,17 @@ object CosmexContract {
     }
 
     def validator(params: ExchangeParams)(datum: Data, redeemer: Data, ctxData: Data): Unit = {
-        val state = fromData[OnChainState](datum)
-        val action = fromData[Action](redeemer)
-        val ctx = fromData[CosmexScriptContext](ctxData)
-        if cosmexValidator(params, state, action, ctx) then ()
-        else throw new Exception("Validation failed")
+        if cosmexValidator(params, datum.to, redeemer.to, ctxData.to) then ()
+        else throw new Exception()
     }
 }
 
 object CosmexValidator {
     import scalus.sir.SirDSL.{*, given}
     import scala.language.implicitConversions
-    private val compiledValidator = Compiler.compile(CosmexContract.validator)
+    private val compiledValidator =
+        Compiler.compile(CosmexContract.validator) |> RemoveRecursivity.apply
+
     private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
         new ExchangeParams(new PubKeyHash(h), pk, period)
     }
@@ -1108,6 +1139,8 @@ object CosmexValidator {
             params.exchangePubKey $
             params.contestationPeriodInMilliseconds
         val fullValidator = compiledValidator $ paramsTerm
-        Program((2, 0, 0), fullValidator)
+        val uplc = OptimizingSirToUplcLowering(fullValidator).lower() |> EtaReduce.apply
+        val uplcProgram = Program((1, 0, 0), uplc)
+        uplcProgram
     }
 }

@@ -1,37 +1,30 @@
 {
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    plutus.url = "github:input-output-hk/plutus/e2cbee0d31da1b2dfa42cc76fb112dc69fa06798";
   };
 
   outputs =
     { self
     , flake-utils
     , nixpkgs
-    # , cardano-node
-    , plutus
     , ...
     } @ inputs:
-    (flake-utils.lib.eachSystem [ "x86_64-darwin" "x86_64-linux" ]
+    (flake-utils.lib.eachSystem [ "x86_64-darwin" "x86_64-linux" "aarch64-darwin" ]
       (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        uplc = plutus.${system}.plutus.library.plutus-project.hsPkgs.plutus-core.components.exes.uplc;
       in
       rec {
         devShell = pkgs.mkShell {
-          JAVA_OPTS="-Xmx2g -XX:+UseG1GC";
           # This fixes bash prompt/autocomplete issues with subshells (i.e. in VSCode) under `nix develop`/direnv
           buildInputs = [ pkgs.bashInteractive ];
           packages = with pkgs; [
             git
-            openjdk11
+            openjdk21
+            scala-cli
             sbt
             scalafmt
-            niv
             nixpkgs-fmt
-            nodejs
-            uplc
           ];
         };
       })

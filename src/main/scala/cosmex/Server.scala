@@ -1,15 +1,15 @@
 package cosmex
 
-import java.time.Instant
 import com.bloxbean.cardano.client.transaction.spec.Transaction
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil
-import scalus.ledger.api.v1.TxOutRef
-
-import scala.collection.mutable.HashMap
-import scalus.ledger.api.v1.TxId
-import scalus.builtin.ByteString
-import scalus.ledger.api.v1.Value
 import scalus.builtin.Builtins
+import scalus.builtin.ByteString
+import scalus.ledger.api.v1.TxId
+import scalus.ledger.api.v1.TxOutRef
+import scalus.ledger.api.v1.Value
+
+import java.time.Instant
+import scala.collection.mutable.HashMap
 
 case class ServerState()
 case class Block()
@@ -78,7 +78,7 @@ object Server {
                         // val bothSignedSnapshot = signSnapshot(snapshot)
                         // storeSnapshot(bothSignedSnapshot)
                         sendTx(tx)
-                        // reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
+                    // reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
                     case Left(error) => reply(ClientResponse.Error(error))
             case _ => List.empty
 
