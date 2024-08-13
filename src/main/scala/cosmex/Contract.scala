@@ -261,10 +261,8 @@ object CosmexContract {
                 sameAddress.? && preserveValue.?
     }
 
-    def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash, msg: String): Boolean =
-        List.find(signatories)(k.hash === _.hash) match
-            case Just(a) => true
-            case Nothing => throw new Exception(msg)
+    def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash): Boolean =
+        List.exists(signatories)(k.hash === _.hash)
 
     inline def handleUpdate(
         ownInputAddress: Address,
@@ -277,12 +275,10 @@ object CosmexContract {
         // both parties must sign the transaction,
         // thus it's validated by them, so no need to check anything else
         // NOTE: this allows parties to change the channel funds by mutual agreement
-        txSignedBy(signatories, state.clientPkh, "no client sig") && txSignedBy(
-          signatories,
-          exchangePkh,
-          "no exchange sig"
-        )
-        && expectNewState(ownOutput, ownInputAddress, state, newValue)
+        val clientSigned = txSignedBy(signatories, state.clientPkh)
+        val exchangeSigned = txSignedBy(signatories, exchangePkh)
+        val validNewState = expectNewState(ownOutput, ownInputAddress, state, newValue)
+        clientSigned.? && exchangeSigned.? && validNewState.?
     }
 
     inline def handleClientAbort(
@@ -313,7 +309,7 @@ object CosmexContract {
                     new OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                        val clientSigned = txSignedBy(signatories, clientPkh, "no client sig")
+                        val clientSigned = txSignedBy(signatories, clientPkh)
                         val correctNewState =
                             expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
                         clientSigned.?
@@ -373,8 +369,8 @@ object CosmexContract {
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, _) =>
                 val validInitiator = initiator match
-                    case Party.Client   => txSignedBy(signatories, clientPkh, "no client sig")
-                    case Party.Exchange => txSignedBy(signatories, params.exchangePkh, "no exchange sig")
+                    case Party.Client   => txSignedBy(signatories, clientPkh)
+                    case Party.Exchange => txSignedBy(signatories, params.exchangePkh)
                 newSignedSnapshot match
                     case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                         val newChannelState =
@@ -389,7 +385,7 @@ object CosmexContract {
                         val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                         ownTxInResolvedTxOut match
                             case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                                validInitiator
+                                validInitiator.?
                                 && balancedSnapshot(signedSnapshot.snapshotTradingState, ownInputValue)
                                 && validSignedSnapshot(
                                   newSignedSnapshot,
@@ -422,10 +418,10 @@ object CosmexContract {
                             party match
                                 case Party.Client => throw new Exception("Invalid party")
                                 case Party.Exchange =>
-                                    txSignedBy(signatories, params.exchangePkh, "no exchange sig")
+                                    txSignedBy(signatories, params.exchangePkh)
                         case Party.Exchange =>
                             party match
-                                case Party.Client   => txSignedBy(signatories, clientPkh, "no client sig")
+                                case Party.Client   => txSignedBy(signatories, clientPkh)
                                 case Party.Exchange => throw new Exception("Invalid party")
 
                     val latestTradingState =
@@ -442,12 +438,10 @@ object CosmexContract {
                                     )
 
                             val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                            val isNewerSnapshot =
-                                if oldVersion <= newSignedSnapshot.signedSnapshot.snapshotVersion then true
-                                else throw new Exception("Older snapshot")
+                            val isNewerSnapshot = oldVersion <= newSignedSnapshot.signedSnapshot.snapshotVersion
                             ownTxInResolvedTxOut match
                                 case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                                    validParty && isNewerSnapshot && balancedSnapshot(
+                                    validParty.? && isNewerSnapshot.? && balancedSnapshot(
                                       latestTradingState,
                                       ownInputValue
                                     ) && validSignedSnapshot(
@@ -546,7 +540,7 @@ object CosmexContract {
                 val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                        txSignedBy(signatories, params.exchangePkh, "no exchange sig") && expectNewState(
+                        txSignedBy(signatories, params.exchangePkh) && expectNewState(
                           ownOutput,
                           ownInputAddress,
                           newState,

@@ -56,7 +56,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     test(s"Cosmex Validator size is ${validatorUplc.doubleCborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
-        assert(validatorUplc.doubleCborEncoded.length == 7377)
+        assert(validatorUplc.doubleCborEncoded.length == 7401)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -93,8 +93,16 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
         val action = Action.Update
         val tx = txbuilder.mkTx(state.toData, action.toData, Seq(exchangeParams.exchangePkh))
         evalCosmexValidator(state, action, tx) { case Result.Failure(_, _, _, logs) =>
-            println(logs.mkString("\n"))
-//            assert(logs.mkString("").contains("no client sig"))
+            assert(logs.mkString("").contains("clientSigned ? False"))
+        }
+    }
+
+    test("Update fails when there is no exchange signature") {
+        val state = mkOnChainState(OnChainChannelState.OpenState)
+        val action = Action.Update
+        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(clientPkh))
+        evalCosmexValidator(state, action, tx) { case Result.Failure(_, _, _, logs) =>
+            assert(logs.mkString("").contains("exchangeSigned ? False"))
         }
     }
 
