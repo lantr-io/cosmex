@@ -10,6 +10,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.compile
+import scalus.bloxbean.Interop
 import scalus.builtin.Builtins
 import scalus.builtin.given
 import scalus.builtin.ByteString
@@ -87,6 +88,16 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
         evalCosmexValidator(state, action, tx) { case Result.Success(_, _, _, _) => }
     }
 
+    test("Update fails when there is no client signature") {
+        val state = mkOnChainState(OnChainChannelState.OpenState)
+        val action = Action.Update
+        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(exchangeParams.exchangePkh))
+        evalCosmexValidator(state, action, tx) { case Result.Failure(_, _, _, logs) =>
+            println(logs.mkString("\n"))
+//            assert(logs.mkString("").contains("no client sig"))
+        }
+    }
+
     private def mkOnChainState(channelState: OnChainChannelState) = {
         OnChainState(
           clientPkh = clientPkh,
@@ -124,11 +135,18 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
         import scalus.ledger.api.v2.ToDataInstances.given
 
         val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
-        val scriptContext = txbuilder.makeScriptContext(tx)
-        try CosmexContract.validator(exchangeParams)(state.toData, action.toData, scriptContext.toData)
-        catch
-            case e: Throwable =>
-                e.printStackTrace()
+        val utxos = Map(tx.getBody.getInputs.get(0) -> tx.getBody.getOutputs.get(0))
+        val scriptContext =
+            Interop.getScriptContextV2(
+              tx.getWitnessSet.getRedeemers.get(0),
+              tx,
+              utxos,
+              protocolVersion = txbuilder.protocolVersion
+            )
+//        try CosmexContract.validator(exchangeParams)(state.toData, action.toData, scriptContext.toData)
+//        catch
+//            case e: Throwable =>
+//                e.printStackTrace()
         val term = validator.term $ state.toData $ action.toData $ scriptContext.toData
         val result = VM.evaluateDebug(term)
         if pf.isDefinedAt(result) then pf(result)

@@ -11,17 +11,14 @@ import com.bloxbean.cardano.client.transaction.spec.TransactionInput
 import com.bloxbean.cardano.client.transaction.spec.TransactionOutput
 import com.bloxbean.cardano.client.transaction.spec.TransactionWitnessSet
 import scalus.bloxbean.Interop
-import scalus.bloxbean.SlotConfig
-import scalus.builtin.ByteString
-import scalus.builtin.ByteString.given
 import scalus.builtin.Data
 import scalus.ledger.api.v2.PubKeyHash
-import scalus.ledger.api.v2.ScriptContext
 
 import java.math.BigInteger
 import java.util
 
 class TxBuilder(val exchangeParams: ExchangeParams) {
+    val protocolVersion = 8
     val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
 
     def mkTx(datum: Data, redeemer: Data, signatories: Seq[PubKeyHash]): Transaction = {
@@ -84,24 +81,5 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
             )
             .build()
         tx
-    }
-
-    def makeScriptContext(tx: Transaction): ScriptContext = {
-        import scala.jdk.CollectionConverters.*
-        val utxo = Map(tx.getBody.getInputs.get(0) -> tx.getBody.getOutputs.get(0))
-        val purpose = Interop.getScriptPurpose(
-          tx.getWitnessSet.getRedeemers.get(0),
-          tx.getBody().getInputs(),
-          util.List.of(),
-          util.List.of(),
-          util.List.of()
-        )
-        val datums = tx.getWitnessSet.getPlutusDataList.asScala.map { plutusData =>
-            ByteString.fromArray(plutusData.getDatumHashAsBytes) -> Interop.toScalusData(plutusData)
-        }
-        val protocolVersion = 8
-        val txInfo = Interop.getTxInfoV2(tx, datums, utxo, SlotConfig.default, protocolVersion)
-        val scriptContext = ScriptContext(txInfo, purpose)
-        scriptContext
     }
 }
