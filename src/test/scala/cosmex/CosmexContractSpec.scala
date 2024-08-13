@@ -1,34 +1,22 @@
 package cosmex
 
-import com.bloxbean.cardano.client.common.ADAConversionUtil
-import com.bloxbean.cardano.client.plutus.spec.ExUnits
-import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script
-import com.bloxbean.cardano.client.plutus.spec.Redeemer as PlutusRedeemer
-import com.bloxbean.cardano.client.plutus.spec.RedeemerTag
-import com.bloxbean.cardano.client.transaction.spec
+import com.bloxbean.cardano.client.account.Account
+import com.bloxbean.cardano.client.common.model.Networks
 import com.bloxbean.cardano.client.transaction.spec.Transaction
-import com.bloxbean.cardano.client.transaction.spec.TransactionBody
-import com.bloxbean.cardano.client.transaction.spec.TransactionInput
-import com.bloxbean.cardano.client.transaction.spec.TransactionOutput
-import com.bloxbean.cardano.client.transaction.spec.TransactionWitnessSet
 import cosmex.CosmexFromDataInstances.given
 import cosmex.CosmexToDataInstances.given
-import io.bullet.borer.Cbor
 import org.scalacheck.Arbitrary
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.compile
-import scalus.bloxbean.Interop
-import scalus.bloxbean.SlotConfig
+import scalus.builtin.Builtins
+import scalus.builtin.given
 import scalus.builtin.ByteString
-import scalus.builtin.ByteString.given
 import scalus.builtin.Data
 import scalus.builtin.Data.FromData
 import scalus.builtin.Data.ToData
 import scalus.builtin.Data.toData
-import scalus.builtin.PlatformSpecific
-import scalus.builtin.given
 import scalus.ledger.api.v2.*
 import scalus.sir.EtaReduce
 import scalus.sir.RemoveRecursivity
@@ -38,8 +26,6 @@ import scalus.uplc.TermDSL.{*, given}
 import scalus.uplc.eval.Result
 import scalus.uplc.eval.VM
 
-import java.math.BigInteger
-import java.util
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
@@ -51,12 +37,25 @@ enum Expected {
 class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with ArbitraryInstances {
     import Expected.*
 
-    test("Pretty print CosmexContract") {
-        val program = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
-        // println(program.term.prettyXTerm.render(100))
-        // println(s"Size: ${program.cborEncoded.length}")
-        // println(s"CBOR: ${uplcProgram.doubleCborHex}")
+    private val exchangeAccount = new Account(Networks.preview(), 1)
+    private val exchagePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
+    private val exchagePubKeyHash = ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val exchangeParams = ExchangeParams(
+      exchangePkh = PubKeyHash(exchagePubKeyHash),
+      contestationPeriodInMilliseconds = 5000,
+      exchangePubKey = exchagePubKey
+    )
+    private val clientAccount = new Account(Networks.preview(), 2)
+    private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
+    private val clientPubKeyHash = ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val clientPkh = PubKeyHash(clientPubKeyHash)
+    private val clientTxOutRef = TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
+    private val validatorUplc = CosmexValidator.mkCosmexValidator(exchangeParams)
+    private val txbuilder = TxBuilder(exchangeParams)
 
+    test(s"Cosmex Validator size is ${validatorUplc.doubleCborEncoded.length}") {
+//        println(CosmexValidator.compiledValidator.showHighlighted)
+        assert(validatorUplc.doubleCborEncoded.length == 7377)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -81,9 +80,20 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
         assertEval(Program((1, 0, 0), uplc $ i), Success(10))
     }
 
-    test("validator should return false") {
-        CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
+    test("Update succeeds when there are both signatures") {
+        val state = mkOnChainState(OnChainChannelState.OpenState)
+        val action = Action.Update
+        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(state.clientPkh, exchangeParams.exchangePkh))
+        evalCosmexValidator(state, action, tx) { case Result.Success(_, _, _, _) => }
+    }
 
+    private def mkOnChainState(channelState: OnChainChannelState) = {
+        OnChainState(
+          clientPkh = clientPkh,
+          clientPubKey = clientPubKey,
+          clientTxOutRef = clientTxOutRef,
+          channelState = channelState
+        )
     }
 
     def assertEval(p: Program, expected: Expected) = {
@@ -97,7 +107,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
             case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
-    def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](sir: SIR) = {
+    private def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](sir: SIR) = {
         import scala.language.implicitConversions
         // println(sir.pretty.render(100))
         val term = sir.toUplc()
@@ -108,94 +118,20 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
         }
     }
 
-    private def evalValidator[A](state: OnChainState, action: Action)(
-        pf: PartialFunction[eval.Result, A]
+    private def evalCosmexValidator[A](state: OnChainState, action: Action, tx: Transaction)(
+        pf: PartialFunction[scalus.uplc.eval.Result, A]
     ): A = {
         import scalus.ledger.api.v2.ToDataInstances.given
-        val validator = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
-        val datum = state.toData
-        val redeemer = action.toData
-        val scriptContext = makeScriptContext(datum, redeemer, Seq.empty)
-        val term = validator.term $ datum $ redeemer $ scriptContext.toData
+
+        val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
+        val scriptContext = txbuilder.makeScriptContext(tx)
+        try CosmexContract.validator(exchangeParams)(state.toData, action.toData, scriptContext.toData)
+        catch
+            case e: Throwable =>
+                e.printStackTrace()
+        val term = validator.term $ state.toData $ action.toData $ scriptContext.toData
         val result = VM.evaluateDebug(term)
-        pf(result)
-    }
-
-    private def makeScriptContext(
-        datum: Data,
-        redeemer: Data,
-        signatories: Seq[PubKeyHash]
-    ): ScriptContext = {
-        import scala.jdk.CollectionConverters.*
-        val cosmexValidator = CosmexValidator.mkCosmexValidator(ExchangeParams(PubKeyHash(hex"1234"), hex"5678", 5000))
-        val cosmexPlutusScript = PlutusV2Script
-            .builder()
-            .`type`("PlutusScriptV2")
-            .cborHex(cosmexValidator.doubleCborHex)
-            .build()
-            .asInstanceOf[PlutusV2Script]
-        val crypto = summon[PlatformSpecific]
-        val rdmr = PlutusRedeemer
-            .builder()
-            .tag(RedeemerTag.Spend)
-            .data(Interop.toPlutusData(redeemer))
-            .index(BigInteger.valueOf(0))
-            .exUnits(
-              ExUnits
-                  .builder()
-                  .steps(BigInteger.valueOf(1000))
-                  .mem(BigInteger.valueOf(1000))
-                  .build()
-            )
-            .build()
-
-        val input = TransactionInput
-            .builder()
-            .transactionId("1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982")
-            .index(0)
-            .build()
-        val inputs = util.List.of(input)
-
-        val utxo = Map(
-          input -> TransactionOutput
-              .builder()
-              .value(spec.Value.builder().coin(BigInteger.valueOf(20)).build())
-              .address("addr1aldkfjlkjaldfj")
-              .inlineDatum(Interop.toPlutusData(datum))
-              .build()
-        )
-        val tx = Transaction
-            .builder()
-            .body(
-              TransactionBody
-                  .builder()
-                  .fee(ADAConversionUtil.adaToLovelace(0.2))
-                  .inputs(inputs)
-                  .requiredSigners(signatories.map(_.hash.bytes).asJava)
-                  .build()
-            )
-            .witnessSet(
-              TransactionWitnessSet
-                  .builder()
-                  .plutusV2Scripts(util.List.of(cosmexPlutusScript))
-                  .redeemers(util.List.of(rdmr))
-                  .build()
-            )
-            .build()
-
-        val purpose = Interop.getScriptPurpose(
-          rdmr,
-          tx.getBody().getInputs(),
-          util.List.of(),
-          util.List.of(),
-          util.List.of()
-        )
-        val datumCbor = ByteString.fromArray(Cbor.encode(datum).toByteArray)
-        val datumHash = crypto.blake2b_256(datumCbor)
-        val datums = Seq((datumHash, datum))
-        val protocolVersion = 8
-        val txInfo = Interop.getTxInfoV2(tx, datums, utxo, SlotConfig.default, protocolVersion)
-        val scriptContext = ScriptContext(txInfo, purpose)
-        scriptContext
+        if pf.isDefinedAt(result) then pf(result)
+        else fail(s"Unexpected result: $result")
     }
 }

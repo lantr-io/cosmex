@@ -15,9 +15,11 @@ import scalus.builtin.given
 import scalus.ledger.api.v1.FromDataInstances.given
 import scalus.ledger.api.v1.IntervalBound
 import scalus.ledger.api.v1.IntervalBoundType.Finite
+import scalus.ledger.api.v2
 import scalus.ledger.api.v2.*
 import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.ledger.api.v2.Value.{*, given}
+import scalus.prelude.?
 import scalus.prelude.AssocMap
 import scalus.prelude.List
 import scalus.prelude.Maybe
@@ -119,8 +121,8 @@ case class CosmexTxInfo(
 )
 
 enum CosmexScriptPurpose:
-    case Spending(txOutRef: TxOutRef)
     case Minting
+    case Spending(txOutRef: TxOutRef)
     case Rewarding
     case Certifying
 
@@ -138,129 +140,30 @@ case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpos
 
 @Compile
 object CosmexToDataInstances {
-    import scalus.builtin.Data.toData
     import scalus.builtin.ToDataInstances.given
     import scalus.ledger.api.v1.ToDataInstances.given
-    given Data.ToData[Party] = (p: Party) =>
-        constrData(
-          (p match
-              case Party.Client   => 0
-              case Party.Exchange => 1
-          ),
-          mkNilData()
-        )
-
+    given Data.ToData[Party] = ToData.deriveEnum
     given Data.ToData[LimitOrder] = ToData.deriveCaseClass[LimitOrder](0)
     given Data.ToData[TradingState] = ToData.deriveCaseClass[TradingState](0)
-
-    given Data.ToData[PendingTxType] = (o: PendingTxType) =>
-        o match
-            case PendingTxType.PendingIn => constrData(0, mkNilData())
-            case PendingTxType.PendingOut(txOutIndex) =>
-                constrData(1, mkCons(txOutIndex.toData, mkNilData()))
-            case PendingTxType.PendingTransfer(txOutIndex) =>
-                constrData(2, mkCons(txOutIndex.toData, mkNilData()))
-
+    given Data.ToData[PendingTxType] = ToData.deriveEnum
     given Data.ToData[PendingTx] = ToData.deriveCaseClass[PendingTx](0)
     given Data.ToData[Snapshot] = ToData.deriveCaseClass[Snapshot](0)
     given Data.ToData[SignedSnapshot] = ToData.deriveCaseClass[SignedSnapshot](0)
-
-    given Data.ToData[OnChainChannelState] = (o: OnChainChannelState) =>
-        o match
-            case OnChainChannelState.OpenState =>
-                constrData(0, mkNilData())
-            case OnChainChannelState.SnapshotContestState(
-                  contestSnapshot,
-                  contestSnapshotStart,
-                  contestInitiator,
-                  contestChannelTxOutRef
-                ) =>
-                constrData(
-                  1,
-                  mkCons(
-                    contestSnapshot.toData,
-                    mkCons(
-                      contestSnapshotStart.toData,
-                      mkCons(
-                        contestInitiator.toData,
-                        mkCons(
-                          contestChannelTxOutRef.toData,
-                          mkNilData()
-                        )
-                      )
-                    )
-                  )
-                )
-            case OnChainChannelState.TradesContestState(
-                  latestTradingState,
-                  tradeContestStart
-                ) =>
-                constrData(
-                  2,
-                  mkCons(
-                    latestTradingState.toData,
-                    mkCons(tradeContestStart.toData, mkNilData())
-                  )
-                )
-            case OnChainChannelState.PayoutState(clientBalance, exchangeBalance) =>
-                constrData(
-                  3,
-                  mkCons(
-                    clientBalance.toData,
-                    mkCons(exchangeBalance.toData, mkNilData())
-                  )
-                )
-
+    given Data.ToData[OnChainChannelState] = ToData.deriveEnum
     given Data.ToData[OnChainState] = ToData.deriveCaseClass[OnChainState](0)
     given Data.ToData[Trade] = ToData.deriveCaseClass[Trade](0)
-    given Data.ToData[Action] = (a: Action) =>
-        a match
-            case Action.Update      => constrData(0, mkNilData())
-            case Action.ClientAbort => constrData(1, mkNilData())
-            case Action.Close(party, signedSnapshot) =>
-                constrData(
-                  2,
-                  mkCons(
-                    party.toData,
-                    mkCons(signedSnapshot.toData, mkNilData())
-                  )
-                )
-            case Action.Trades(actionTrades, actionCancelOthers) =>
-                constrData(
-                  3,
-                  mkCons(
-                    actionTrades.toData,
-                    mkCons(actionCancelOthers.toData, mkNilData())
-                  )
-                )
-            case Action.Payout => constrData(4, mkNilData())
-            case Action.Transfer(txOutIndex, value) =>
-                constrData(
-                  5,
-                  mkCons(
-                    txOutIndex.toData,
-                    mkCons(value.toData, mkNilData())
-                  )
-                )
-            case Action.Timeout => constrData(6, mkNilData())
+    given Data.ToData[Action] = ToData.deriveEnum
 }
 
 @Compile
 object CosmexFromDataInstances {
-    given Data.FromData[Party] = FromData.deriveEnum[Party] {
-        case 0 => _ => Party.Client
-        case 1 => _ => Party.Exchange
-    }
+    given Data.FromData[Party] = FromData.deriveEnum
 
     given Data.FromData[LimitOrder] = FromData.deriveCaseClass
 
     given Data.FromData[TradingState] = FromData.deriveCaseClass
 
-    given Data.FromData[PendingTxType] = FromData.deriveEnum[PendingTxType] {
-        case 0 => _ => PendingTxType.PendingIn
-        case 1 => FromData.deriveConstructor[PendingTxType.PendingOut]
-        case 2 => FromData.deriveConstructor[PendingTxType.PendingTransfer]
-    }
+    given Data.FromData[PendingTxType] = FromData.deriveEnum
 
     given Data.FromData[PendingTx] = FromData.deriveCaseClass
 
@@ -268,36 +171,15 @@ object CosmexFromDataInstances {
 
     given Data.FromData[SignedSnapshot] = FromData.deriveCaseClass
 
-    given Data.FromData[OnChainChannelState] = FromData.deriveEnum[OnChainChannelState] {
-        case 0 => _ => OnChainChannelState.OpenState
-        case 1 => FromData.deriveConstructor[OnChainChannelState.SnapshotContestState]
-        case 2 => FromData.deriveConstructor[OnChainChannelState.TradesContestState]
-        case 3 => FromData.deriveConstructor[OnChainChannelState.PayoutState]
-    }
+    given Data.FromData[OnChainChannelState] = FromData.deriveEnum
 
     given Data.FromData[Trade] = FromData.deriveCaseClass
 
-    given Data.FromData[Action] = FromData.deriveEnum[Action] {
-        case 0 => _ => Action.Update
-        case 1 => _ => Action.ClientAbort
-        case 2 => FromData.deriveConstructor[Action.Close]
-        case 3 => FromData.deriveConstructor[Action.Trades]
-        case 4 => _ => Action.Payout
-        case 5 => FromData.deriveConstructor[Action.Transfer]
-        case 6 => _ => Action.Timeout
-    }
+    given Data.FromData[Action] = FromData.deriveEnum
 
     given Data.FromData[OnChainState] = FromData.deriveCaseClass
 
-    given Data.FromData[CosmexScriptPurpose] = (d: Data) =>
-        val pair = unConstrData(d)
-        val tag = pair.fst
-        val args = pair.snd
-        if tag === BigInt(0) then CosmexScriptPurpose.Minting
-        else if tag === BigInt(1) then new CosmexScriptPurpose.Spending(args.head.to[TxOutRef])
-        else if tag === BigInt(2) then CosmexScriptPurpose.Rewarding
-        else if tag === BigInt(3) then CosmexScriptPurpose.Certifying
-        else throw new Exception(s"Unknown ScriptPurpose")
+    given Data.FromData[CosmexScriptPurpose] = FromData.deriveEnum
 
     given Data.FromData[CosmexTxInfo] = (d: Data) => {
         val args = unConstrData(d).snd
@@ -328,15 +210,55 @@ object CosmexContract {
         go(0, inputs)
     }
 
+    // FIXME: Value.eq doesn't work for some reason
+    def eqValue(a: Value, b: Value): Boolean = {
+        def eqTokens(a: List[(TokenName, BigInt)], b: List[(TokenName, BigInt)]): Boolean = {
+            a match
+                case scalus.prelude.List.Nil =>
+                    b match
+                        case scalus.prelude.List.Nil        => true
+                        case scalus.prelude.List.Cons(_, _) => false
+                case scalus.prelude.List.Cons(head, tail) =>
+                    b match
+                        case scalus.prelude.List.Nil => false
+                        case scalus.prelude.List.Cons(head2, tail2) =>
+                            if head._1 == head2._1 && head._2 == head2._2
+                            then eqTokens(tail, tail2)
+                            else false
+        }
+        def loop(
+            a: List[(CurrencySymbol, AssocMap[TokenName, BigInt])],
+            b: List[(CurrencySymbol, AssocMap[TokenName, BigInt])]
+        ): Boolean = {
+            a match
+                case scalus.prelude.List.Nil =>
+                    b match
+                        case scalus.prelude.List.Nil        => true
+                        case scalus.prelude.List.Cons(_, _) => false
+                case scalus.prelude.List.Cons(head, tail) =>
+                    b match
+                        case scalus.prelude.List.Nil => false
+                        case scalus.prelude.List.Cons(head2, tail2) =>
+                            if head._1 == head2._1 && eqTokens(head._2.inner, head2._2.inner)
+                            then loop(tail, tail2)
+                            else false
+        }
+        loop(a.inner, b.inner)
+    }
+
+    given Prelude.Eq[Value] = eqValue
+
     def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
         import scalus.builtin.Data.toData
         import CosmexToDataInstances.given
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
                 val newStateData = newState.toData
-                datum === new OutputDatum.OutputDatum(newStateData) &&
-                address === ownInputAddress &&
-                value === newValue
+                val expectedNewDatum = datum === new v2.OutputDatum.OutputDatum(newStateData)
+                val sameAddress = address === ownInputAddress
+                val preserveValue = value === newValue
+                expectedNewDatum.? &&
+                sameAddress.? && preserveValue.?
     }
 
     def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash, msg: String): Boolean =
@@ -391,8 +313,11 @@ object CosmexContract {
                     new OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                        txSignedBy(signatories, clientPkh, "no client sig")
-                        && expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
+                        val clientSigned = txSignedBy(signatories, clientPkh, "no client sig")
+                        val correctNewState =
+                            expectNewState(ownOutput, ownInputAddress, snapshotContestState, ownInputValue)
+                        clientSigned.?
+                        && correctNewState.?
     }
 
     def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
@@ -1126,7 +1051,7 @@ object CosmexContract {
 object CosmexValidator {
     import scalus.sir.SirDSL.{*, given}
     import scala.language.implicitConversions
-    private val compiledValidator =
+    val compiledValidator =
         Compiler.compile(CosmexContract.validator) |> RemoveRecursivity.apply
 
     private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
@@ -1139,7 +1064,7 @@ object CosmexValidator {
             params.exchangePubKey $
             params.contestationPeriodInMilliseconds
         val fullValidator = compiledValidator $ paramsTerm
-        val uplc = OptimizingSirToUplcLowering(fullValidator).lower() |> EtaReduce.apply
+        val uplc = fullValidator.toUplc(generateErrorTraces = true)
         val uplcProgram = Program((1, 0, 0), uplc)
         uplcProgram
     }
