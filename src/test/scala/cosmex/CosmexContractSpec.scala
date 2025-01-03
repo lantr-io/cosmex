@@ -11,6 +11,7 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.compile
 import scalus.bloxbean.Interop
+import scalus.bloxbean.SlotConfig
 import scalus.builtin.Builtins
 import scalus.builtin.given
 import scalus.builtin.ByteString
@@ -56,7 +57,9 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     test(s"Cosmex Validator size is ${validatorUplc.doubleCborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
-        assert(validatorUplc.doubleCborEncoded.length == 7401)
+        val length = validatorUplc.doubleCborEncoded.length
+
+        assert(length == 7409)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -149,6 +152,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
               tx.getWitnessSet.getRedeemers.get(0),
               tx,
               utxos,
+              SlotConfig.Preprod,
               protocolVersion = txbuilder.protocolVersion
             )
 //        try CosmexContract.validator(exchangeParams)(state.toData, action.toData, scriptContext.toData)

@@ -18,7 +18,7 @@ import java.math.BigInteger
 import java.util
 
 class TxBuilder(val exchangeParams: ExchangeParams) {
-    val protocolVersion = 8
+    val protocolVersion = 9
     val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
 
     def mkTx(datum: Data, redeemer: Data, signatories: Seq[PubKeyHash]): Transaction = {
