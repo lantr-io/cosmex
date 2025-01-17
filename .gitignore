@@ -7,6 +7,7 @@ target
 /.classpath
 /.project
 /.settings
+node_modules
 .DS_Store
 .metals
 .vscode
