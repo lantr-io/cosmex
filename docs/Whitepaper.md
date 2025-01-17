@@ -1,5 +1,9 @@
 # COSMEX – Cardano Layer 2 Order Book Exchange
 
+Whitepaper v0.1
+
+Alexander Nemish @ Lantr
+
 ## Abstract
 
 COSMEX is a Cardano layer-2 (L2) solution.
