@@ -979,6 +979,9 @@ object CosmexContract extends DataParameterizedValidator {
 }
 
 object CosmexValidator {
+    private given Compiler.Options = Compiler.Options(
+      targetLoweringBackend = Compiler.TargetLoweringBackend.SirToUplc110Lowering,
+    )
     val compiledValidator = Compiler.compile(CosmexContract.validate)
 
     def mkCosmexValidator(params: ExchangeParams): Program = {

@@ -59,7 +59,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.doubleCborEncoded.length
 
-        assert(length == 11529)
+        assert(length == 10088)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
