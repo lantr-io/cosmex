@@ -2,13 +2,12 @@ package cosmex
 import org.scalacheck.Arbitrary
 import org.scalacheck.Gen
 import scalus.builtin.ByteString
-import scalus.builtin.ByteString.given
+import scalus.builtin.ByteString.hex
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.PosixTime
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v2.*
-import scalus.prelude.AssocMap
-import scalus.prelude.Maybe
+import scalus.prelude.*
 
 trait ArbitraryInstances {
     given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
@@ -78,7 +77,7 @@ trait ArbitraryInstances {
     given arbAssocMap[A: Arbitrary, B: Arbitrary]: Arbitrary[scalus.prelude.AssocMap[A, B]] =
         Arbitrary {
             for map <- Arbitrary.arbitrary[Map[A, B]]
-            yield scalus.prelude.AssocMap.fromList(scalus.prelude.List(map.toSeq*))
+            yield scalus.prelude.AssocMap.unsafeFromList(scalus.prelude.List(map.toSeq*))
         }
 
     given Arbitrary[TradingState] = Arbitrary {
@@ -89,16 +88,16 @@ trait ArbitraryInstances {
         yield TradingState(tsClientBalance, tsExchangeBalance, tsOrders)
     }
 
-    given arbMaybe[A: Arbitrary]: Arbitrary[scalus.prelude.Maybe[A]] = Arbitrary {
-        for o <- Arbitrary.arbitrary[Option[A]]
+    given arbOption[A: Arbitrary]: Arbitrary[scalus.prelude.Option[A]] = Arbitrary {
+        for o <- Arbitrary.arbitrary[scala.Option[A]]
         yield o match
-            case None        => scalus.prelude.Maybe.Nothing
-            case Some(value) => scalus.prelude.Maybe.Just(value)
+            case scala.None        => Option.None
+            case scala.Some(value) => Option.Some(value)
     }
     given Arbitrary[Snapshot] = Arbitrary {
         for
             snapshotTradingState <- Arbitrary.arbitrary[TradingState]
-            snapshotPendingTx <- Arbitrary.arbitrary[Maybe[PendingTx]]
+            snapshotPendingTx <- Arbitrary.arbitrary[Option[PendingTx]]
             snapshotVersion <- Arbitrary.arbitrary[BigInt]
         yield Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
     }

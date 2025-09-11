@@ -19,17 +19,11 @@ import scalus.ledger.api.v2
 import scalus.ledger.api.v2.*
 import scalus.ledger.api.v2.FromDataInstances.given
 import scalus.ledger.api.v2.Value.{*, given}
-import scalus.prelude.?
-import scalus.prelude.AssocMap
-import scalus.prelude.List
-import scalus.prelude.Maybe
-import scalus.prelude.Maybe.*
-import scalus.prelude.Prelude
+import scalus.prelude.{?, AssocMap, Eq, List, Prelude, SortedMap}
 import scalus.prelude.Prelude.===
 import scalus.prelude.Prelude.given
+import scalus.prelude.Option
 import scalus.sir.RemoveRecursivity
-import scalus.sir.OptimizingSirToUplcLowering
-import scalus.sir.EtaReduce
 import scalus.uplc.Program
 
 type DiffMilliSeconds = BigInt
@@ -78,7 +72,7 @@ case class TradingState(
 
 case class Snapshot(
     snapshotTradingState: TradingState,
-    snapshotPendingTx: Maybe[PendingTx],
+    snapshotPendingTx: Option[PendingTx],
     snapshotVersion: BigInt
 )
 
@@ -128,7 +122,7 @@ enum CosmexScriptPurpose:
 
 @Compile
 object CosmexScriptPurpose:
-    given Prelude.Eq[CosmexScriptPurpose] = (a, b) =>
+    given Eq[CosmexScriptPurpose] = (a, b) =>
         a match
             case Spending(txOutRef) =>
                 b match
@@ -140,46 +134,44 @@ case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpos
 
 @Compile
 object CosmexToDataInstances {
-    import scalus.builtin.ToDataInstances.given
-    import scalus.ledger.api.v1.ToDataInstances.given
-    given Data.ToData[Party] = ToData.deriveEnum
-    given Data.ToData[LimitOrder] = ToData.deriveCaseClass[LimitOrder](0)
-    given Data.ToData[TradingState] = ToData.deriveCaseClass[TradingState](0)
-    given Data.ToData[PendingTxType] = ToData.deriveEnum
-    given Data.ToData[PendingTx] = ToData.deriveCaseClass[PendingTx](0)
-    given Data.ToData[Snapshot] = ToData.deriveCaseClass[Snapshot](0)
-    given Data.ToData[SignedSnapshot] = ToData.deriveCaseClass[SignedSnapshot](0)
-    given Data.ToData[OnChainChannelState] = ToData.deriveEnum
-    given Data.ToData[OnChainState] = ToData.deriveCaseClass[OnChainState](0)
-    given Data.ToData[Trade] = ToData.deriveCaseClass[Trade](0)
-    given Data.ToData[Action] = ToData.deriveEnum
+    given Data.ToData[Party] = ToData.derived
+    given Data.ToData[LimitOrder] = ToData.derived
+    given Data.ToData[TradingState] = ToData.derived
+    given Data.ToData[PendingTxType] = ToData.derived
+    given Data.ToData[PendingTx] = ToData.derived
+    given Data.ToData[Snapshot] = ToData.derived
+    given Data.ToData[SignedSnapshot] = ToData.derived
+    given Data.ToData[OnChainChannelState] = ToData.derived
+    given Data.ToData[OnChainState] = ToData.derived
+    given Data.ToData[Trade] = ToData.derived
+    given Data.ToData[Action] = ToData.derived
 }
 
 @Compile
 object CosmexFromDataInstances {
-    given Data.FromData[Party] = FromData.deriveEnum
+    given Data.FromData[Party] = FromData.derived
 
-    given Data.FromData[LimitOrder] = FromData.deriveCaseClass
+    given Data.FromData[LimitOrder] = FromData.derived
 
-    given Data.FromData[TradingState] = FromData.deriveCaseClass
+    given Data.FromData[TradingState] = FromData.derived
 
-    given Data.FromData[PendingTxType] = FromData.deriveEnum
+    given Data.FromData[PendingTxType] = FromData.derived
 
-    given Data.FromData[PendingTx] = FromData.deriveCaseClass
+    given Data.FromData[PendingTx] = FromData.derived
 
-    given Data.FromData[Snapshot] = FromData.deriveCaseClass
+    given Data.FromData[Snapshot] = FromData.derived
 
-    given Data.FromData[SignedSnapshot] = FromData.deriveCaseClass
+    given Data.FromData[SignedSnapshot] = FromData.derived
 
-    given Data.FromData[OnChainChannelState] = FromData.deriveEnum
+    given Data.FromData[OnChainChannelState] = FromData.derived
 
-    given Data.FromData[Trade] = FromData.deriveCaseClass
+    given Data.FromData[Trade] = FromData.derived
 
-    given Data.FromData[Action] = FromData.deriveEnum
+    given Data.FromData[Action] = FromData.derived
 
-    given Data.FromData[OnChainState] = FromData.deriveCaseClass
+    given Data.FromData[OnChainState] = FromData.derived
 
-    given Data.FromData[CosmexScriptPurpose] = FromData.deriveEnum
+    given Data.FromData[CosmexScriptPurpose] = FromData.derived
 
     given Data.FromData[CosmexTxInfo] = (d: Data) => {
         val args = unConstrData(d).snd
@@ -227,23 +219,23 @@ object CosmexContract {
                             else false
         }
         def loop(
-            a: List[(CurrencySymbol, AssocMap[TokenName, BigInt])],
-            b: List[(CurrencySymbol, AssocMap[TokenName, BigInt])]
+            a: List[(CurrencySymbol, SortedMap[TokenName, BigInt])],
+            b: List[(CurrencySymbol, SortedMap[TokenName, BigInt])]
         ): Boolean = {
             a match
-                case scalus.prelude.List.Nil =>
+                case List.Nil =>
                     b match
-                        case scalus.prelude.List.Nil        => true
-                        case scalus.prelude.List.Cons(_, _) => false
-                case scalus.prelude.List.Cons(head, tail) =>
+                        case List.Nil        => true
+                        case List.Cons(_, _) => false
+                case List.Cons(head, tail) =>
                     b match
                         case scalus.prelude.List.Nil => false
                         case scalus.prelude.List.Cons(head2, tail2) =>
-                            if head._1 == head2._1 && eqTokens(head._2.inner, head2._2.inner)
+                            if head._1 == head2._1 && eqTokens(head._2.toList, head2._2.toList)
                             then loop(tail, tail2)
                             else false
         }
-        loop(a.inner, b.inner)
+        loop(a.toList, b.toList)
     }
 
     given Prelude.Eq[Value] = eqValue
@@ -298,7 +290,11 @@ object CosmexContract {
                       tsOrders = AssocMap.empty
                     )
                 val snapshot =
-                    new Snapshot(snapshotTradingState = tradingState, snapshotPendingTx = Nothing, snapshotVersion = 0)
+                    new Snapshot(
+                      snapshotTradingState = tradingState,
+                      snapshotPendingTx = Option.None,
+                      snapshotVersion = 0
+                    )
                 val contestSnapshotState = new OnChainChannelState.SnapshotContestState(
                   contestSnapshot = snapshot,
                   contestSnapshotStart = contestSnapshotStart,
@@ -317,7 +313,7 @@ object CosmexContract {
     }
 
     def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
-        List.foldLeft(orders.inner, Value.zero) { (acc, pair) =>
+        orders.toList.foldLeft(Value.zero) { (acc, pair) =>
             pair match
                 case (orderId, LimitOrder((base, quote), orderAmount, orderPrice)) =>
                     val orderValue =
@@ -429,10 +425,10 @@ object CosmexContract {
                     latestTradingState match
                         case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                             val newChannelState =
-                                if List.isEmpty(tsOrders.inner) then
-                                    new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                                if List.isEmpty(tsOrders.toList) then
+                                    OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                                 else
-                                    new OnChainChannelState.TradesContestState(
+                                    OnChainChannelState.TradesContestState(
                                       latestTradingState = latestTradingState,
                                       tradeContestStart = tradeContestStart
                                     )
@@ -478,7 +474,7 @@ object CosmexContract {
         latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                 val newChannelState =
-                    if List.isEmpty(tsOrders.inner) then
+                    if List.isEmpty(tsOrders.toList) then
                         new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                     else new OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart)
 
@@ -528,12 +524,12 @@ object CosmexContract {
         ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ) = {
-        val newTradeingState = List.foldLeft(actionTrades, latestTradingState)(applyTrade)
+        val newTradeingState = actionTrades.foldLeft(latestTradingState)(applyTrade)
         val newChannelState = newTradeingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
-                if actionCancelOthers || List.isEmpty(tsOrders.inner) then
-                    new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
-                else new OnChainChannelState.TradesContestState(newTradeingState, tradeContestStart)
+                if actionCancelOthers || List.isEmpty(tsOrders.toList) then
+                    OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                else OnChainChannelState.TradesContestState(newTradeingState, tradeContestStart)
 
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
@@ -595,11 +591,8 @@ object CosmexContract {
                 cred match
                     case Credential.ScriptCredential(sh) =>
                         if sh === cosmexScriptHash then
-                            val action = {
-                                AssocMap.lookup(redeemers)(new Spending(txOutRef)) match
-                                    case Nothing     => throw new Exception("No redeemer")
-                                    case Just(value) => value.to[Action]
-                            }
+                            val action = redeemers.lookup(Spending(txOutRef)).getOrFail("No redeemer").to[Action]
+
                             action match
                                 case Transfer(targetIdx, amount) =>
                                     if targetIdx === ownIdx then amount
@@ -608,7 +601,7 @@ object CosmexContract {
                         else Value.zero
                     case Credential.PubKeyCredential(_) => Value.zero
 
-        val transferedToMe = List.foldLeft(inputs, Value.zero) { (acc, input) =>
+        val transferedToMe = inputs.foldLeft(Value.zero) { (acc, input) =>
             acc + cosmexInputTransferAmountToTxOutIdx(input)
         }
         val diff = transferedToMe - transferValue
@@ -931,30 +924,30 @@ object CosmexContract {
 
     def handlePendingTx(
         contestChannelTxOutRef: TxOutRef,
-        snapshotPendingTx: Maybe[PendingTx],
+        snapshotPendingTx: Option[PendingTx],
         snapshotTradingState: TradingState
     ): TradingState = {
         snapshotPendingTx match
-            case Nothing => snapshotTradingState
-            case Just(PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef)) =>
+            case Option.None => snapshotTradingState
+            case Option.Some(PendingTx(pendingTxValue, pendingTxType, pendingTxSpentTxOutRef)) =>
                 snapshotTradingState match
                     case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                         if pendingTxSpentTxOutRef === contestChannelTxOutRef then
                             pendingTxType match
                                 case PendingTxType.PendingIn =>
-                                    new TradingState(
+                                    TradingState(
                                       tsClientBalance + pendingTxValue,
                                       tsExchangeBalance,
                                       tsOrders
                                     )
                                 case PendingTxType.PendingOut(a) =>
-                                    new TradingState(
+                                    TradingState(
                                       tsClientBalance - pendingTxValue,
                                       tsExchangeBalance,
                                       tsOrders
                                     )
                                 case PendingTxType.PendingTransfer(a) =>
-                                    new TradingState(
+                                    TradingState(
                                       tsClientBalance,
                                       tsExchangeBalance - pendingTxValue,
                                       tsOrders
@@ -989,7 +982,7 @@ object CosmexContract {
                 tradingState match
                     case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                         AssocMap.lookup(tsOrders)(orderId) match {
-                            case Maybe.Just(LimitOrder(pair @ (baseAsset, quoteAsset), orderAmount, orderPrice)) =>
+                            case Option.Some(LimitOrder(pair @ (baseAsset, quoteAsset), orderAmount, orderPrice)) =>
                                 if validTrade(orderAmount, orderPrice, tradeAmount, tradePrice) then
                                     val quoteAmount = tradeAmount * tradePrice
                                     val baseAssetValue = assetClassValue(baseAsset, tradeAmount)
@@ -1012,7 +1005,7 @@ object CosmexContract {
                                             )
                                     new TradingState(clientBalance1, exchangeBalance1, newOrders)
                                 else throw new Exception("Invalid trade")
-                            case Maybe.Nothing => throw new Exception("Invalid order")
+                            case Option.None => throw new Exception("Invalid order")
                         }
     }
 
@@ -1045,8 +1038,7 @@ object CosmexContract {
 object CosmexValidator {
     import scalus.sir.SirDSL.{*, given}
     import scala.language.implicitConversions
-    val compiledValidator =
-        Compiler.compile(CosmexContract.validator) |> RemoveRecursivity.apply
+    val compiledValidator = Compiler.compile(CosmexContract.validator)
 
     private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
         new ExchangeParams(new PubKeyHash(h), pk, period)

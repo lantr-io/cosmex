@@ -20,13 +20,10 @@ import scalus.builtin.Data.FromData
 import scalus.builtin.Data.ToData
 import scalus.builtin.Data.toData
 import scalus.ledger.api.v2.*
-import scalus.sir.EtaReduce
-import scalus.sir.RemoveRecursivity
 import scalus.sir.SIR
 import scalus.uplc.*
 import scalus.uplc.TermDSL.{*, given}
-import scalus.uplc.eval.Result
-import scalus.uplc.eval.VM
+import scalus.uplc.eval.{PlutusVM, Result}
 
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
@@ -38,6 +35,8 @@ enum Expected {
 
 class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with ArbitraryInstances {
     import Expected.*
+
+    private given PlutusVM = PlutusVM.makePlutusV2VM()
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchagePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
@@ -59,7 +58,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.doubleCborEncoded.length
 
-        assert(length == 7409)
+        assert(length == 7572)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -76,12 +75,12 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
     test("validRange") {
         val sir = compile { (i: Interval) =>
             CosmexContract.validRange(i)._2
-        } |> RemoveRecursivity.apply
+        }
         // println(sir.prettyXTerm.render(100))
-        val uplc = sir.toUplc(generateErrorTraces = true) |> EtaReduce.apply
+        val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV2
         // println(uplc.prettyXTerm.render(100))
-        val i = VM.evaluateTerm(compile(Interval.between(1, 10)).toUplc())
-        assertEval(Program((1, 0, 0), uplc $ i), Success(10))
+        val i = compile(Interval.between(1, 10)).toUplc().evaluate
+        assertEval(uplc $ i, Success(10))
     }
 
     test("Update succeeds when there are both signatures") {
@@ -119,7 +118,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
     }
 
     def assertEval(p: Program, expected: Expected) = {
-        val result = VM.evaluateDebug(p.term)
+        val result = p.evaluateDebug
         (result, expected) match
             case (Result.Success(result, budget, _, _), Expected.Success(expected)) =>
                 assert(result == expected)
@@ -159,8 +158,8 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        catch
 //            case e: Throwable =>
 //                e.printStackTrace()
-        val term = validator.term $ state.toData $ action.toData $ scriptContext.toData
-        val result = VM.evaluateDebug(term)
+        val program = validator $ state.toData $ action.toData $ scriptContext.toData
+        val result = program.evaluateDebug
         if pf.isDefinedAt(result) then pf(result)
         else fail(s"Unexpected result: $result")
     }

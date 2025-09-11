@@ -1,7 +1,7 @@
 {
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
   };
 
   outputs =
@@ -10,20 +10,24 @@
     , nixpkgs
     , ...
     } @ inputs:
-    (flake-utils.lib.eachSystem [ "x86_64-darwin" "x86_64-linux" "aarch64-darwin" ]
-      (system:
+    (flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
       in
       rec {
-        devShell = pkgs.mkShell {
+        devShell =
+          let
+              jdk = pkgs.openjdk23;
+              sbt = pkgs.sbt.override { jre = jdk; };
+            in
+          pkgs.mkShell {
           # This fixes bash prompt/autocomplete issues with subshells (i.e. in VSCode) under `nix develop`/direnv
           buildInputs = [ pkgs.bashInteractive ];
           packages = with pkgs; [
             git
-            openjdk21
             scala-cli
             sbt
+            visualvm
             scalafmt
             nixpkgs-fmt
             texliveFull

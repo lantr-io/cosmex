@@ -1,5 +1,5 @@
-val scala3Version = "3.3.4"
-val scalusVersion = "0.8.3"
+val scala3Version = "3.3.6"
+val scalusVersion = "0.11.0"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
@@ -20,7 +20,7 @@ scalacOptions += "-feature"
 
 libraryDependencies += "org.scalus" %% "scalus" % scalusVersion
 libraryDependencies += "org.scalus" %% "scalus-bloxbean-cardano-client-lib" % scalusVersion
-libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.5.1"
+libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.6.4"
 
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.18" % "test"
-libraryDependencies += "org.scalatestplus" %% "scalacheck-1-16" % "3.2.14.0" % "test"
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
+libraryDependencies += "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % "test"
