@@ -33,7 +33,7 @@ enum Expected {
     case Failure(reason: String)
 }
 
-class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
+class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     import Expected.*
 
     private given PlutusVM = PlutusVM.makePlutusV2VM()
