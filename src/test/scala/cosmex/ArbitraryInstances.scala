@@ -6,7 +6,7 @@ import scalus.builtin.ByteString.hex
 import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.PosixTime
 import scalus.ledger.api.v1.TokenName
-import scalus.ledger.api.v2.*
+import scalus.ledger.api.v3.*
 import scalus.prelude.*
 
 trait ArbitraryInstances {

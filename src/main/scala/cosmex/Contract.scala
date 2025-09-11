@@ -1,13 +1,13 @@
 package cosmex
 import scalus.*
 import scalus.builtin.Builtins.*
-import scalus.builtin.Data.fromData
+import scalus.builtin.Data.toData
 import scalus.builtin.{Builtins, ByteString, Data, FromData, ToData}
 import scalus.ledger.api.v1.IntervalBound
 import scalus.ledger.api.v1.IntervalBoundType.Finite
-import scalus.ledger.api.v2
-import scalus.ledger.api.v2.*
+import scalus.ledger.api.{v2, v3}
 import scalus.ledger.api.v2.Value.*
+import scalus.ledger.api.v3.*
 import scalus.prelude.{*, given}
 import scalus.uplc.Program
 
@@ -89,33 +89,11 @@ case class ExchangeParams(
     exchangePkh: PubKeyHash,
     exchangePubKey: ByteString,
     contestationPeriodInMilliseconds: DiffMilliSeconds
-)
-
-case class CosmexTxInfo(
-    inputs: List[TxInInfo],
-    outputs: List[TxOut],
-    validRange: PosixTimeRange,
-    signatories: List[PubKeyHash],
-    redeemers: AssocMap[CosmexScriptPurpose, Redeemer]
-)
-
-enum CosmexScriptPurpose:
-    case Minting
-    case Spending(txOutRef: TxOutRef)
-    case Rewarding
-    case Certifying
+) derives FromData,
+      ToData
 
 @Compile
-object CosmexScriptPurpose:
-    given Eq[CosmexScriptPurpose] = (a, b) =>
-        a match
-            case Spending(txOutRef) =>
-                b match
-                    case Spending(txOutRef2) => txOutRef === txOutRef2
-                    case _                   => false
-            case _ => false
-
-case class CosmexScriptContext(txInfo: CosmexTxInfo, purpose: CosmexScriptPurpose)
+object ExchangeParams
 
 @Compile
 object CosmexToDataInstances {
@@ -155,26 +133,11 @@ object CosmexFromDataInstances {
     given Data.FromData[Action] = FromData.derived
 
     given Data.FromData[OnChainState] = FromData.derived
-
-    given Data.FromData[CosmexScriptPurpose] = FromData.derived
-
-    given Data.FromData[CosmexTxInfo] = (d: Data) => {
-        val args = unConstrData(d).snd
-        val seven = args.tail.tail.tail.tail.tail.tail.tail
-        CosmexTxInfo(
-          inputs = fromData(args.head),
-          outputs = fromData(args.tail.tail.head),
-          validRange = fromData(seven.head),
-          signatories = fromData(seven.tail.head),
-          redeemers = fromData(seven.tail.tail.head)
-        )
-    }
-
-    given Data.FromData[CosmexScriptContext] = FromData.deriveCaseClass
 }
 
 @Compile
-object CosmexContract {
+object CosmexContract extends DataParameterizedValidator {
+
     import CosmexFromDataInstances.given
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
@@ -223,7 +186,7 @@ object CosmexContract {
         loop(a.toList, b.toList)
     }
 
-    given Prelude.Eq[Value] = eqValue
+    given Eq[Value] = eqValue
 
     def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
         import CosmexToDataInstances.given
@@ -547,7 +510,7 @@ object CosmexContract {
     inline def handlePayoutTransfer(
         params: ExchangeParams,
         state: OnChainState,
-        redeemers: AssocMap[CosmexScriptPurpose, Redeemer],
+        redeemers: AssocMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         ownIdx: BigInt,
         transferValue: Value,
@@ -557,7 +520,6 @@ object CosmexContract {
         ownOutput: TxOut
     ): Boolean = {
         import Action.*
-        import CosmexScriptPurpose.*
         import OnChainChannelState.*
 
         val (locked, cosmexScriptHash) = ownOutput match
@@ -573,7 +535,8 @@ object CosmexContract {
                 cred match
                     case Credential.ScriptCredential(sh) =>
                         if sh === cosmexScriptHash then
-                            val action = redeemers.get(Spending(txOutRef)).getOrFail("No redeemer").to[Action]
+                            val action =
+                                redeemers.get(ScriptPurpose.Spending(txOutRef)).getOrFail("No redeemer").to[Action]
 
                             action match
                                 case Transfer(targetIdx, amount) =>
@@ -778,7 +741,7 @@ object CosmexContract {
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
-        redeemers: AssocMap[CosmexScriptPurpose, Redeemer],
+        redeemers: AssocMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         state: OnChainState
     ): Boolean =
@@ -812,7 +775,7 @@ object CosmexContract {
         params: ExchangeParams,
         state: OnChainState,
         action: Action,
-        txInfo: CosmexTxInfo,
+        tx: TxInfo,
         spendingTxOutRef: TxOutRef
     ): Boolean = {
         import OnChainChannelState.*
@@ -823,82 +786,68 @@ object CosmexContract {
                 if txOutRef === spendingTxOutRef then (resolved, i)
                 else findOwnInputAndIndex(i + 1, tail)
 
-        txInfo match
-            case CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers) =>
-                findOwnInputAndIndex(0, inputs) match
-                    case (ownTxInResolvedTxOut, ownIndex) =>
-                        val ownOutput = outputs !! ownIndex
-                        state.channelState match
-                            case OpenState =>
-                                handleOpenState(
-                                  action,
-                                  ownOutput,
-                                  ownTxInResolvedTxOut,
-                                  params,
-                                  spendingTxOutRef,
-                                  state,
-                                  signatories,
-                                  validRange
-                                )
+//        txInfo match
+//            case CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers) =>
+        findOwnInputAndIndex(0, tx.inputs) match
+            case (ownTxInResolvedTxOut, ownIndex) =>
+                val ownOutput = tx.outputs !! ownIndex
+                state.channelState match
+                    case OpenState =>
+                        handleOpenState(
+                          action,
+                          ownOutput,
+                          ownTxInResolvedTxOut,
+                          params,
+                          spendingTxOutRef,
+                          state,
+                          tx.signatories,
+                          tx.validRange
+                        )
 
-                            case SnapshotContestState(
-                                  contestSnapshot,
-                                  contestSnapshotStart,
-                                  contestInitiator,
-                                  contestChannelTxOutRef
-                                ) =>
-                                handleSnapshotContestState(
-                                  action,
-                                  contestChannelTxOutRef,
-                                  contestInitiator,
-                                  contestSnapshot,
-                                  contestSnapshotStart,
-                                  ownOutput,
-                                  ownTxInResolvedTxOut,
-                                  params,
-                                  state,
-                                  signatories,
-                                  validRange
-                                )
-                            case TradesContestState(latestTradingState, tradeContestStart) =>
-                                handleTradesContestState(
-                                  action,
-                                  latestTradingState,
-                                  ownOutput,
-                                  ownTxInResolvedTxOut,
-                                  params,
-                                  state,
-                                  tradeContestStart,
-                                  signatories,
-                                  validRange
-                                )
+                    case SnapshotContestState(
+                          contestSnapshot,
+                          contestSnapshotStart,
+                          contestInitiator,
+                          contestChannelTxOutRef
+                        ) =>
+                        handleSnapshotContestState(
+                          action,
+                          contestChannelTxOutRef,
+                          contestInitiator,
+                          contestSnapshot,
+                          contestSnapshotStart,
+                          ownOutput,
+                          ownTxInResolvedTxOut,
+                          params,
+                          state,
+                          tx.signatories,
+                          tx.validRange
+                        )
+                    case TradesContestState(latestTradingState, tradeContestStart) =>
+                        handleTradesContestState(
+                          action,
+                          latestTradingState,
+                          ownOutput,
+                          ownTxInResolvedTxOut,
+                          params,
+                          state,
+                          tradeContestStart,
+                          tx.signatories,
+                          tx.validRange
+                        )
 
-                            case PayoutState(clientBalance, exchangeBalance) =>
-                                handlePayoutState(
-                                  action,
-                                  clientBalance,
-                                  exchangeBalance,
-                                  ownOutput,
-                                  ownTxInResolvedTxOut,
-                                  params,
-                                  redeemers,
-                                  inputs,
-                                  state
-                                )
-    }
-
-    inline def cosmexValidator(
-        params: ExchangeParams,
-        state: OnChainState,
-        action: Action,
-        ctx: CosmexScriptContext
-    ): Boolean = {
-        ctx match
-            case CosmexScriptContext(txInfo, purpose) =>
-                purpose match
-                    case CosmexScriptPurpose.Spending(spendingTxOutRef) =>
-                        cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
-                    case _ => fail("Spending expected")
+                    case PayoutState(clientBalance, exchangeBalance) =>
+                        handlePayoutState(
+                          action,
+                          clientBalance,
+                          exchangeBalance,
+                          ownOutput,
+                          ownTxInResolvedTxOut,
+                          params,
+                          tx.redeemers,
+                          tx.inputs,
+                          state
+                        )
     }
 
     def assetClassValue(assetClass: AssetClass, i: BigInt): Value =
@@ -963,7 +912,7 @@ object CosmexContract {
             case Trade(orderId, tradeAmount, tradePrice) =>
                 tradingState match
                     case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
-                        AssocMap.lookup(tsOrders)(orderId) match {
+                        tsOrders.get(orderId) match {
                             case Option.Some(LimitOrder(pair @ (baseAsset, quoteAsset), orderAmount, orderPrice)) =>
                                 if validTrade(orderAmount, orderPrice, tradeAmount, tradePrice) then
                                     val quoteAmount = tradeAmount * tradePrice
@@ -1011,30 +960,30 @@ object CosmexContract {
                     case _ => fail("LBI")
     }
 
-    def validator(params: ExchangeParams)(datum: Data, redeemer: Data, ctxData: Data): Unit = {
-        if cosmexValidator(params, datum.to, redeemer.to, ctxData.to) then ()
-        else fail()
+    override def spend(
+        param: Datum,
+        datum: Option[Datum],
+        redeemer: Datum,
+        tx: v3.TxInfo,
+        ownRef: v3.TxOutRef
+    ): Unit = {
+        val result = cosmexSpending(
+          param.to[ExchangeParams],
+          datum.get.to[OnChainState],
+          redeemer.to[Action],
+          tx,
+          ownRef
+        )
+        require(result, "Validation failed")
     }
 }
 
 object CosmexValidator {
-    import scalus.sir.SirDSL.{*, given}
-
-    import scala.language.implicitConversions
-    val compiledValidator = Compiler.compile(CosmexContract.validator)
-
-    private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
-        ExchangeParams(new PubKeyHash(h), pk, period)
-    }
+    val compiledValidator = Compiler.compile(CosmexContract.validate)
 
     def mkCosmexValidator(params: ExchangeParams): Program = {
-        val paramsTerm = exchangeParamsConstructor $
-            params.exchangePkh.hash $
-            params.exchangePubKey $
-            params.contestationPeriodInMilliseconds
-        val fullValidator = compiledValidator $ paramsTerm
-        val uplc = fullValidator.toUplc(generateErrorTraces = true)
-        val uplcProgram = uplc.plutusV2
+        val program = compiledValidator.toUplc().plutusV2
+        val uplcProgram = program $ params.toData
         uplcProgram
     }
 }

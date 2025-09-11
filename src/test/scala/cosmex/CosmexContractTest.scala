@@ -3,6 +3,7 @@ package cosmex
 import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.Networks
 import com.bloxbean.cardano.client.transaction.spec.Transaction
+import com.bloxbean.cardano.client.transaction.util.TransactionUtil
 import cosmex.CosmexFromDataInstances.given
 import cosmex.CosmexToDataInstances.given
 import org.scalacheck.Arbitrary
@@ -19,7 +20,7 @@ import scalus.builtin.Data
 import scalus.builtin.Data.FromData
 import scalus.builtin.Data.ToData
 import scalus.builtin.Data.toData
-import scalus.ledger.api.v2.*
+import scalus.ledger.api.v3.*
 import scalus.sir.SIR
 import scalus.uplc.*
 import scalus.uplc.TermDSL.{*, given}
@@ -58,7 +59,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.doubleCborEncoded.length
 
-        assert(length == 7585)
+        assert(length == 11529)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -142,14 +143,14 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     private def evalCosmexValidator[A](state: OnChainState, action: Action, tx: Transaction)(
         pf: PartialFunction[scalus.uplc.eval.Result, A]
     ): A = {
-        import scalus.ledger.api.v2.ToDataInstances.given
-
         val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
         val utxos = Map(tx.getBody.getInputs.get(0) -> tx.getBody.getOutputs.get(0))
         val scriptContext =
-            Interop.getScriptContextV2(
+            Interop.getScriptContextV3(
               tx.getWitnessSet.getRedeemers.get(0),
+              Some(state.toData),
               tx,
+              TransactionUtil.getTxHash(tx),
               utxos,
               SlotConfig.Preprod,
               protocolVersion = txbuilder.protocolVersion
@@ -158,7 +159,8 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        catch
 //            case e: Throwable =>
 //                e.printStackTrace()
-        val program = validator $ state.toData $ action.toData $ scriptContext.toData
+        val program = validator $ scriptContext.toData
+//        CosmexContract.validate(exchangeParams.toData)(scriptContext.toData)
         val result = program.evaluateDebug
         if pf.isDefinedAt(result) then pf(result)
         else fail(s"Unexpected result: $result")
