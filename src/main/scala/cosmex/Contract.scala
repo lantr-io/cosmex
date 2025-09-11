@@ -1,29 +1,14 @@
 package cosmex
 import scalus.*
-import scalus.Compile
-import scalus.Compiler
-import scalus.builtin
-import scalus.builtin.Builtins
 import scalus.builtin.Builtins.*
-import scalus.builtin.ByteString
-import scalus.builtin.Data
 import scalus.builtin.Data.fromData
-import scalus.builtin.FromData
-import scalus.builtin.FromDataInstances.given
-import scalus.builtin.ToData
-import scalus.builtin.given
-import scalus.ledger.api.v1.FromDataInstances.given
+import scalus.builtin.{Builtins, ByteString, Data, FromData, ToData}
 import scalus.ledger.api.v1.IntervalBound
 import scalus.ledger.api.v1.IntervalBoundType.Finite
 import scalus.ledger.api.v2
 import scalus.ledger.api.v2.*
-import scalus.ledger.api.v2.FromDataInstances.given
-import scalus.ledger.api.v2.Value.{*, given}
-import scalus.prelude.{?, AssocMap, Eq, List, Prelude, SortedMap}
-import scalus.prelude.Prelude.===
-import scalus.prelude.Prelude.given
-import scalus.prelude.Option
-import scalus.sir.RemoveRecursivity
+import scalus.ledger.api.v2.Value.*
+import scalus.prelude.{*, given}
 import scalus.uplc.Program
 
 type DiffMilliSeconds = BigInt
@@ -241,8 +226,8 @@ object CosmexContract {
     given Prelude.Eq[Value] = eqValue
 
     def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
-        import scalus.builtin.Data.toData
         import CosmexToDataInstances.given
+        import scalus.builtin.Data.toData
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
                 val newStateData = newState.toData
@@ -329,10 +314,8 @@ object CosmexContract {
         clientPubKey: PubKey,
         exchangePubKey: PubKey
     ): Boolean = {
-        import scalus.builtin.Data.toData
-        import scalus.builtin.ToDataInstances.given
-        import scalus.ledger.api.v1.ToDataInstances.given
         import CosmexToDataInstances.given
+        import scalus.builtin.Data.toData
         signedSnapshot match
             case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                 val signedInfo = (clientTxOutRef, signedSnapshot)
@@ -574,8 +557,8 @@ object CosmexContract {
         ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
-        import CosmexScriptPurpose.*
         import Action.*
+        import CosmexScriptPurpose.*
         import OnChainChannelState.*
 
         val (locked, cosmexScriptHash) = ownOutput match
@@ -1037,6 +1020,7 @@ object CosmexContract {
 
 object CosmexValidator {
     import scalus.sir.SirDSL.{*, given}
+
     import scala.language.implicitConversions
     val compiledValidator = Compiler.compile(CosmexContract.validator)
 

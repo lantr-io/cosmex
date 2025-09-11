@@ -20,7 +20,8 @@ scalacOptions += "-feature"
 
 libraryDependencies += "org.scalus" %% "scalus" % scalusVersion
 libraryDependencies += "org.scalus" %% "scalus-bloxbean-cardano-client-lib" % scalusVersion
-libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.6.4"
+libraryDependencies += "org.scalus" %% "scalus-testkit" % scalusVersion % Test
+libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.6.6"
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % "test"

@@ -33,7 +33,7 @@ enum Expected {
     case Failure(reason: String)
 }
 
-class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with ArbitraryInstances {
+class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     import Expected.*
 
     private given PlutusVM = PlutusVM.makePlutusV2VM()
@@ -58,7 +58,7 @@ class CosmexContractSpec extends AnyFunSuite with ScalaCheckPropertyChecks with 
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.doubleCborEncoded.length
 
-        assert(length == 7572)
+        assert(length == 7582)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
