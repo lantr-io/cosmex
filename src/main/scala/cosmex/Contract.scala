@@ -161,7 +161,7 @@ object CosmexFromDataInstances {
     given Data.FromData[CosmexTxInfo] = (d: Data) => {
         val args = unConstrData(d).snd
         val seven = args.tail.tail.tail.tail.tail.tail.tail
-        new CosmexTxInfo(
+        CosmexTxInfo(
           inputs = fromData(args.head),
           outputs = fromData(args.tail.tail.head),
           validRange = fromData(seven.head),
@@ -179,7 +179,7 @@ object CosmexContract {
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
-            case List.Nil => throw new Exception("Own input not found")
+            case List.Nil => fail("Own input not found")
             case List.Cons(txInInfo, tail) =>
                 if txInInfo.outRef === spendingTxOutRef then (txInInfo, i)
                 else go(i + 1, tail)
@@ -231,7 +231,7 @@ object CosmexContract {
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
                 val newStateData = newState.toData
-                val expectedNewDatum = datum === new v2.OutputDatum.OutputDatum(newStateData)
+                val expectedNewDatum = datum === v2.OutputDatum.OutputDatum(newStateData)
                 val sameAddress = address === ownInputAddress
                 val preserveValue = value === newValue
                 expectedNewDatum.? &&
@@ -269,25 +269,25 @@ object CosmexContract {
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
                 val tradingState =
-                    new TradingState(
+                    TradingState(
                       tsClientBalance = Value.zero,
                       tsExchangeBalance = Value.zero,
                       tsOrders = AssocMap.empty
                     )
                 val snapshot =
-                    new Snapshot(
+                    Snapshot(
                       snapshotTradingState = tradingState,
                       snapshotPendingTx = Option.None,
                       snapshotVersion = 0
                     )
-                val contestSnapshotState = new OnChainChannelState.SnapshotContestState(
+                val contestSnapshotState = OnChainChannelState.SnapshotContestState(
                   contestSnapshot = snapshot,
                   contestSnapshotStart = contestSnapshotStart,
                   contestInitiator = Party.Client,
                   contestChannelTxOutRef = spendingTxOutRef
                 )
                 val snapshotContestState =
-                    new OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
+                    OnChainState(clientPkh, clientPubKey, clientTxOutRef, contestSnapshotState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
                         val clientSigned = txSignedBy(signatories, clientPkh)
@@ -353,7 +353,7 @@ object CosmexContract {
                 newSignedSnapshot match
                     case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                         val newChannelState =
-                            new OnChainChannelState.SnapshotContestState(
+                            OnChainChannelState.SnapshotContestState(
                               contestSnapshot = signedSnapshot,
                               contestSnapshotStart = contestSnapshotStart,
                               contestInitiator = initiator,
@@ -361,7 +361,7 @@ object CosmexContract {
                               contestChannelTxOutRef = spendingTxOutRef
                             )
 
-                        val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                        val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                         ownTxInResolvedTxOut match
                             case TxOut(ownInputAddress, ownInputValue, _, _) =>
                                 validInitiator.?
@@ -395,13 +395,12 @@ object CosmexContract {
                     val validParty = contestInitiator match
                         case Party.Client =>
                             party match
-                                case Party.Client => throw new Exception("Invalid party")
-                                case Party.Exchange =>
-                                    txSignedBy(signatories, params.exchangePkh)
+                                case Party.Client   => fail("Invalid party")
+                                case Party.Exchange => txSignedBy(signatories, params.exchangePkh)
                         case Party.Exchange =>
                             party match
                                 case Party.Client   => txSignedBy(signatories, clientPkh)
-                                case Party.Exchange => throw new Exception("Invalid party")
+                                case Party.Exchange => fail("Invalid party")
 
                     val latestTradingState =
                         handlePendingTx(contestChannelTxOutRef, snapshotPendingTx, snapshotTradingState)
@@ -416,7 +415,7 @@ object CosmexContract {
                                       tradeContestStart = tradeContestStart
                                     )
 
-                            val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                            val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                             val isNewerSnapshot = oldVersion <= newSignedSnapshot.signedSnapshot.snapshotVersion
                             ownTxInResolvedTxOut match
                                 case TxOut(ownInputAddress, ownInputValue, _, _) =>
@@ -458,12 +457,12 @@ object CosmexContract {
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
                 val newChannelState =
                     if List.isEmpty(tsOrders.toList) then
-                        new OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
-                    else new OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart)
+                        OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
+                    else OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart)
 
                 state match
                     case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                        val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                        val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                         ownTxInResolvedTxOut match
                             case TxOut(ownInputAddress, ownInputValue, _, _) =>
                                 timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
@@ -484,13 +483,13 @@ object CosmexContract {
             timeoutTime < start
         val newChannelState = latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, _) =>
-                new OnChainChannelState.PayoutState(
+                OnChainChannelState.PayoutState(
                   clientBalance = tsClientBalance,
                   exchangeBalance = tsExchangeBalance
                 )
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
                         timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
@@ -516,7 +515,7 @@ object CosmexContract {
 
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                 ownTxInResolvedTxOut match
                     case TxOut(ownInputAddress, ownInputValue, _, _) =>
                         txSignedBy(signatories, params.exchangePkh) && expectNewState(
@@ -565,7 +564,7 @@ object CosmexContract {
             case TxOut(Address(cred, _), txOutValue, _, _) =>
                 cred match
                     case Credential.ScriptCredential(sh) => (txOutValue, sh)
-                    case Credential.PubKeyCredential(_)  => throw new Exception("Invalid output")
+                    case Credential.PubKeyCredential(_)  => fail("Invalid output")
 
         val transferValueIsPositive = transferValue > Value.zero
 
@@ -574,13 +573,13 @@ object CosmexContract {
                 cred match
                     case Credential.ScriptCredential(sh) =>
                         if sh === cosmexScriptHash then
-                            val action = redeemers.lookup(Spending(txOutRef)).getOrFail("No redeemer").to[Action]
+                            val action = redeemers.get(Spending(txOutRef)).getOrFail("No redeemer").to[Action]
 
                             action match
                                 case Transfer(targetIdx, amount) =>
                                     if targetIdx === ownIdx then amount
                                     else Value.zero
-                                case _ => throw new Exception("Invalid action")
+                                case _ => fail("Invalid action")
                         else Value.zero
                     case Credential.PubKeyCredential(_) => Value.zero
 
@@ -592,8 +591,8 @@ object CosmexContract {
         val newExchangeBalance = exchangeBalance - diff
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                val newChannelState = new PayoutState(clientBalance, newExchangeBalance)
-                val newState = new OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
+                val newChannelState = PayoutState(clientBalance, newExchangeBalance)
+                val newState = OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                 transferValueIsPositive && expectNewState(
                   ownOutput,
                   ownTxInResolvedTxOut.address,
@@ -620,9 +619,9 @@ object CosmexContract {
                             address.credential match
                                 case Credential.PubKeyCredential(hash) =>
                                     if hash === params.exchangePkh && txOutValue === ownInputValue then true
-                                    else throw new Exception("Invalid payout")
+                                    else fail("Invalid payout")
                                 case Credential.ScriptCredential(hash) =>
-                                    throw new Exception("Invalid payout")
+                                    fail("Invalid payout")
                 else
                     val min = (a: BigInt, b: BigInt) => if a < b then a else b
                     val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
@@ -630,11 +629,11 @@ object CosmexContract {
                     val newClientBalance = clientBalance - availableForPayment
                     state match
                         case OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState) =>
-                            val newState = new OnChainState(
+                            val newState = OnChainState(
                               clientPkh,
                               clientPubKey,
                               clientTxOutRef,
-                              new PayoutState(newClientBalance, exchangeBalance)
+                              PayoutState(newClientBalance, exchangeBalance)
                             )
                             expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
     }
@@ -688,7 +687,7 @@ object CosmexContract {
                   spendingTxOutRef,
                   ownOutput
                 )
-            case _ => throw new Exception("Invalid action")
+            case _ => fail("Invalid action")
 
     inline def handleSnapshotContestState(
         action: Action,
@@ -732,7 +731,7 @@ object CosmexContract {
                   ownTxInResolvedTxOut,
                   ownOutput
                 )
-            case _ => throw new Exception("Invalid action")
+            case _ => fail("Invalid action")
 
     inline def handleTradesContestState(
         action: Action,
@@ -770,7 +769,7 @@ object CosmexContract {
                   ownTxInResolvedTxOut,
                   ownOutput
                 )
-            case _ => throw new Exception("Invalid action")
+            case _ => fail("Invalid action")
 
     inline def handlePayoutState(
         action: Action,
@@ -807,7 +806,7 @@ object CosmexContract {
                   ownTxInResolvedTxOut,
                   ownOutput
                 )
-            case _ => throw new Exception("Invalid action")
+            case _ => fail("Invalid action")
 
     inline def cosmexSpending(
         params: ExchangeParams,
@@ -819,7 +818,7 @@ object CosmexContract {
         import OnChainChannelState.*
 
         def findOwnInputAndIndex(i: BigInt, txIns: List[TxInInfo]): (TxOut, BigInt) = txIns match
-            case List.Nil => throw new Exception("Own input not found")
+            case List.Nil => fail("Own input not found")
             case List.Cons(TxInInfo(txOutRef, resolved), tail) =>
                 if txOutRef === spendingTxOutRef then (resolved, i)
                 else findOwnInputAndIndex(i + 1, tail)
@@ -899,7 +898,7 @@ object CosmexContract {
                 purpose match
                     case CosmexScriptPurpose.Spending(spendingTxOutRef) =>
                         cosmexSpending(params, state, action, txInfo, spendingTxOutRef)
-                    case _ => throw new Exception("Spending expected")
+                    case _ => fail("Spending expected")
     }
 
     def assetClassValue(assetClass: AssetClass, i: BigInt): Value =
@@ -980,15 +979,15 @@ object CosmexContract {
                                         else
                                             AssocMap.insert(tsOrders)(
                                               orderId,
-                                              new LimitOrder(
+                                              LimitOrder(
                                                 pair,
                                                 orderAmount = orderAmountLeft,
                                                 orderPrice = orderPrice
                                               )
                                             )
-                                    new TradingState(clientBalance1, exchangeBalance1, newOrders)
-                                else throw new Exception("Invalid trade")
-                            case Option.None => throw new Exception("Invalid order")
+                                    TradingState(clientBalance1, exchangeBalance1, newOrders)
+                                else fail("Invalid trade")
+                            case Option.None => fail("Invalid order")
                         }
     }
 
@@ -1008,13 +1007,13 @@ object CosmexContract {
                     case Finite(start) =>
                         upper match
                             case Finite(end) => (start, end)
-                            case _           => throw new Exception("UBI")
-                    case _ => throw new Exception("LBI")
+                            case _           => fail("UBI")
+                    case _ => fail("LBI")
     }
 
     def validator(params: ExchangeParams)(datum: Data, redeemer: Data, ctxData: Data): Unit = {
         if cosmexValidator(params, datum.to, redeemer.to, ctxData.to) then ()
-        else throw new Exception()
+        else fail()
     }
 }
 
@@ -1025,7 +1024,7 @@ object CosmexValidator {
     val compiledValidator = Compiler.compile(CosmexContract.validator)
 
     private val exchangeParamsConstructor = Compiler.compile { (h: ByteString, pk: ByteString, period: BigInt) =>
-        new ExchangeParams(new PubKeyHash(h), pk, period)
+        ExchangeParams(new PubKeyHash(h), pk, period)
     }
 
     def mkCosmexValidator(params: ExchangeParams): Program = {
@@ -1035,7 +1034,7 @@ object CosmexValidator {
             params.contestationPeriodInMilliseconds
         val fullValidator = compiledValidator $ paramsTerm
         val uplc = fullValidator.toUplc(generateErrorTraces = true)
-        val uplcProgram = Program((1, 0, 0), uplc)
+        val uplcProgram = uplc.plutusV2
         uplcProgram
     }
 }
