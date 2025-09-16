@@ -14,7 +14,6 @@ import scalus.Compiler.compile
 import scalus.bloxbean.Interop
 import scalus.bloxbean.SlotConfig
 import scalus.builtin.Builtins
-import scalus.builtin.given
 import scalus.builtin.ByteString
 import scalus.builtin.Data
 import scalus.builtin.Data.FromData
@@ -37,7 +36,7 @@ enum Expected {
 class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     import Expected.*
 
-    private given PlutusVM = PlutusVM.makePlutusV2VM()
+    private given PlutusVM = PlutusVM.makePlutusV3VM()
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchagePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
@@ -55,11 +54,10 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     private val validatorUplc = CosmexValidator.mkCosmexValidator(exchangeParams)
     private val txbuilder = TxBuilder(exchangeParams)
 
-    test(s"Cosmex Validator size is ${validatorUplc.doubleCborEncoded.length}") {
+    test(s"Cosmex Validator size is ${validatorUplc.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
-        val length = validatorUplc.doubleCborEncoded.length
-
-        assert(length == 10088)
+        val length = validatorUplc.cborEncoded.length
+        assert(length == 10140)
     }
 
     testSerialization[Action](compile((d: Data) => d.to[Action].toData))
@@ -78,7 +76,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
             CosmexContract.validRange(i)._2
         }
         // println(sir.prettyXTerm.render(100))
-        val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV2
+        val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV3
         // println(uplc.prettyXTerm.render(100))
         val i = compile(Interval.between(1, 10)).toUplc().evaluate
         assertEval(uplc $ i, Success(10))
@@ -88,25 +86,25 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val action = Action.Update
         val tx = txbuilder.mkTx(state.toData, action.toData, Seq(state.clientPkh, exchangeParams.exchangePkh))
-        evalCosmexValidator(state, action, tx) { case Result.Success(_, _, _, _) => }
+        evalCosmexValidator(state, tx)({ case Result.Success(_, _, _, _) => })
     }
 
     test("Update fails when there is no client signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val action = Action.Update
         val tx = txbuilder.mkTx(state.toData, action.toData, Seq(exchangeParams.exchangePkh))
-        evalCosmexValidator(state, action, tx) { case Result.Failure(_, _, _, logs) =>
+        evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("clientSigned ? False"))
-        }
+        })
     }
 
     test("Update fails when there is no exchange signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val action = Action.Update
         val tx = txbuilder.mkTx(state.toData, action.toData, Seq(clientPkh))
-        evalCosmexValidator(state, action, tx) { case Result.Failure(_, _, _, logs) =>
+        evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("exchangeSigned ? False"))
-        }
+        })
     }
 
     private def mkOnChainState(channelState: OnChainChannelState) = {
@@ -119,7 +117,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     }
 
     def assertEval(p: Program, expected: Expected) = {
-        val result = p.evaluateDebug
+        val result = p.term.evaluateDebug
         (result, expected) match
             case (Result.Success(result, budget, _, _), Expected.Success(expected)) =>
                 assert(result == expected)
@@ -140,9 +138,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
         }
     }
 
-    private def evalCosmexValidator[A](state: OnChainState, action: Action, tx: Transaction)(
-        pf: PartialFunction[scalus.uplc.eval.Result, A]
-    ): A = {
+    private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(pf: PartialFunction[Result, Any]): Any = {
         val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
         val utxos = Map(tx.getBody.getInputs.get(0) -> tx.getBody.getOutputs.get(0))
         val scriptContext =

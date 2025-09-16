@@ -5,7 +5,7 @@ import scalus.builtin.Data.toData
 import scalus.builtin.{Builtins, ByteString, Data, FromData, ToData}
 import scalus.ledger.api.v1.IntervalBound
 import scalus.ledger.api.v1.IntervalBoundType.Finite
-import scalus.ledger.api.{v2, v3}
+import scalus.ledger.api.v2
 import scalus.ledger.api.v2.Value.*
 import scalus.ledger.api.v3.*
 import scalus.prelude.{*, given}
@@ -139,6 +139,7 @@ object CosmexFromDataInstances {
 object CosmexContract extends DataParameterizedValidator {
 
     import CosmexFromDataInstances.given
+    import CosmexToDataInstances.given
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
@@ -150,47 +151,8 @@ object CosmexContract extends DataParameterizedValidator {
         go(0, inputs)
     }
 
-    // FIXME: Value.eq doesn't work for some reason
-    def eqValue(a: Value, b: Value): Boolean = {
-        def eqTokens(a: List[(TokenName, BigInt)], b: List[(TokenName, BigInt)]): Boolean = {
-            a match
-                case scalus.prelude.List.Nil =>
-                    b match
-                        case scalus.prelude.List.Nil        => true
-                        case scalus.prelude.List.Cons(_, _) => false
-                case scalus.prelude.List.Cons(head, tail) =>
-                    b match
-                        case scalus.prelude.List.Nil => false
-                        case scalus.prelude.List.Cons(head2, tail2) =>
-                            if head._1 == head2._1 && head._2 == head2._2
-                            then eqTokens(tail, tail2)
-                            else false
-        }
-        def loop(
-            a: List[(CurrencySymbol, SortedMap[TokenName, BigInt])],
-            b: List[(CurrencySymbol, SortedMap[TokenName, BigInt])]
-        ): Boolean = {
-            a match
-                case List.Nil =>
-                    b match
-                        case List.Nil        => true
-                        case List.Cons(_, _) => false
-                case List.Cons(head, tail) =>
-                    b match
-                        case scalus.prelude.List.Nil => false
-                        case scalus.prelude.List.Cons(head2, tail2) =>
-                            if head._1 == head2._1 && eqTokens(head._2.toList, head2._2.toList)
-                            then loop(tail, tail2)
-                            else false
-        }
-        loop(a.toList, b.toList)
-    }
-
-    given Eq[Value] = eqValue
-
     def expectNewState(ownOutput: TxOut, ownInputAddress: Address, newState: OnChainState, newValue: Value): Boolean = {
-        import CosmexToDataInstances.given
-        import scalus.builtin.Data.toData
+
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
                 val newStateData = newState.toData
@@ -277,8 +239,6 @@ object CosmexContract extends DataParameterizedValidator {
         clientPubKey: PubKey,
         exchangePubKey: PubKey
     ): Boolean = {
-        import CosmexToDataInstances.given
-        import scalus.builtin.Data.toData
         signedSnapshot match
             case SignedSnapshot(signedSnapshot, snapshotClientSignature, snapshotExchangeSignature) =>
                 val signedInfo = (clientTxOutRef, signedSnapshot)
@@ -964,8 +924,8 @@ object CosmexContract extends DataParameterizedValidator {
         param: Datum,
         datum: Option[Datum],
         redeemer: Datum,
-        tx: v3.TxInfo,
-        ownRef: v3.TxOutRef
+        tx: TxInfo,
+        ownRef: TxOutRef
     ): Unit = {
         val result = cosmexSpending(
           param.to[ExchangeParams],
@@ -980,12 +940,12 @@ object CosmexContract extends DataParameterizedValidator {
 
 object CosmexValidator {
     private given Compiler.Options = Compiler.Options(
-      targetLoweringBackend = Compiler.TargetLoweringBackend.SirToUplc110Lowering,
+      targetLoweringBackend = Compiler.TargetLoweringBackend.SirToUplc110Lowering
     )
     val compiledValidator = Compiler.compile(CosmexContract.validate)
 
     def mkCosmexValidator(params: ExchangeParams): Program = {
-        val program = compiledValidator.toUplc().plutusV2
+        val program = compiledValidator.toUplc().plutusV3
         val uplcProgram = program $ params.toData
         uplcProgram
     }

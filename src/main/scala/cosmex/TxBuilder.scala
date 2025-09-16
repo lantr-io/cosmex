@@ -1,9 +1,6 @@
 package cosmex
 import com.bloxbean.cardano.client.common.ADAConversionUtil
-import com.bloxbean.cardano.client.plutus.spec.ExUnits
-import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script
-import com.bloxbean.cardano.client.plutus.spec.Redeemer as PlutusRedeemer
-import com.bloxbean.cardano.client.plutus.spec.RedeemerTag
+import com.bloxbean.cardano.client.plutus.spec.{ExUnits, PlutusV2Script, PlutusV3Script, RedeemerTag, Redeemer as PlutusRedeemer}
 import com.bloxbean.cardano.client.transaction.spec
 import com.bloxbean.cardano.client.transaction.spec.Transaction
 import com.bloxbean.cardano.client.transaction.spec.TransactionBody
@@ -23,18 +20,18 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
 
     def mkTx(datum: Data, redeemer: Data, signatories: Seq[PubKeyHash]): Transaction = {
         import scala.jdk.CollectionConverters.*
-        val cosmexPlutusScript = PlutusV2Script
+        val cosmexPlutusScript = PlutusV3Script
             .builder()
-            .`type`("PlutusScriptV2")
+            .`type`("PlutusScriptV3")
             .cborHex(cosmexValidator.doubleCborHex)
             .build()
-            .asInstanceOf[PlutusV2Script]
+            .asInstanceOf[PlutusV3Script]
 
         val rdmr = PlutusRedeemer
             .builder()
             .tag(RedeemerTag.Spend)
             .data(Interop.toPlutusData(redeemer))
-            .index(BigInteger.valueOf(0))
+            .index(0)
             .exUnits(
               ExUnits
                   .builder()
@@ -75,7 +72,7 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
             .witnessSet(
               TransactionWitnessSet
                   .builder()
-                  .plutusV2Scripts(util.List.of(cosmexPlutusScript))
+                  .plutusV3Scripts(util.List.of(cosmexPlutusScript))
                   .redeemers(util.List.of(rdmr))
                   .build()
             )
