@@ -31,10 +31,10 @@ A client can withdraw funds from the exchange smart contract by publishing its c
 ## How does it work in a nutshell?
 
 1. Alice deposits funds into a Cosmex smart contract to open a state channel.
-1. Alice trades off-chain using Cosmex's API as if she were using a regular exchange. Cosmex provides Alice with a signed snapshot of her orders and balances.
-1. When Alice is ready to close the channel and withdraw her funds, she can send a transaction with the latest signed snapshot on-chain to initiate the process. Cosmex may execute her open orders before timeout and then the remaining funds are guaranteed by the smart contract to be sent to Alice.
-1. To keep the channels balanced, Cosmex periodically arranges on-chain transactions that transfer funds between parties. Think of it as a rebalancing mechanism using multi-party swaps.
-1. If Alice doesn't cooperate or behave, Cosmex will close the channel and settle the balance on-chain. In any case, all her funds are guaranteed to be sent to her.
+2. Alice trades off-chain using Cosmex's API as if she were using a regular exchange. Cosmex provides Alice with a signed snapshot of her orders and balances.
+3. When Alice is ready to close the channel and withdraw her funds, she can send a transaction with the latest signed snapshot on-chain to initiate the process. Cosmex may execute her open orders before timeout and then the remaining funds are guaranteed by the smart contract to be sent to Alice.
+4. To keep the channels balanced, Cosmex periodically arranges on-chain transactions that transfer funds between parties. Think of it as a rebalancing mechanism using multi-party swaps.
+5. If Alice doesn't cooperate or behave, Cosmex will close the channel and settle the balance on-chain. In any case, all her funds are guaranteed to be sent to her.
 
 ```mermaid
 flowchart LR
@@ -83,26 +83,8 @@ Every arrow is an on-chain transaction.
 ```mermaid
 stateDiagram-v2
       [*]-->Open: Deposit
-      Open-->Open: Update
-      Open-->SnapshotContest : Abort by client
-      Open-->SnapshotContest : Close with Signed Snapshot
-      Open-->[*]: Graceful close
-      SnapshotContest-->TradesContest : Newer Snapshot
-      SnapshotContest-->Payout : Newer Snapshot and no open orders
-      SnapshotContest-->TradesContest : Timeout and there are open orders
-      SnapshotContest-->Payout : Timeout and no open orders
-      TradesContest-->TradesContest : Trades
-      TradesContest-->Payout : No more trades
-      TradesContest-->Payout : Timeout
-      Payout-->Payout : Rebalancing
-      Payout-->[*] : Payout
-```
-
-```mermaid
-stateDiagram-v2
-      [*]-->Open: Deposit
       Open-->Open: Deposit/Witdraw/Balance
-      Open-->SnapshotContest : Close
+      Open-->SnapshotContest : Rule-based Close
       Open-->[*]: Graceful Withdraw
       SnapshotContest-->TradesContest : Newer Snapshot/Timeout
       SnapshotContest-->Payout : Newer Snapshot/Timeout
@@ -111,8 +93,7 @@ stateDiagram-v2
       Payout-->[*] : Withdraw
 ```
 
-1. Commit money to Cosmex state channel by payinig to Cosmex script address and minting a NFT token that
-ensures the validity of the Commit transaction.
+1. Commit money to Cosmex state channel by paying to Cosmex script address and minting a NFT token that ensures the validity of the Commit transaction.
 
 ## Open a channel
 
@@ -140,34 +121,20 @@ case class OnChainState(
 )
 ```
 
-1. Alice sends to Cosmex a valid Tx with initial deposit, timeout 5 mins,
-and a `ClientSignedSnapshot` v0.
-Exchange can publish this Tx leaving Alice without BothSignedSnapshot for closure.
-In that case Alice can publish a ClientAbort transaction and collect her initial deposit without a BothSignedSnapshot. See [Aborting the channel](#aborting-the-channel).
-1. Cosmex replies with `BothSignedSnapshot` v0
+1. Alice sends to Cosmex an unsigned Tx with initial deposit and a `ClientSignedSnapshot` v0.
+2. Cosmex replies with `BothSignedSnapshot` v0
+3. Alice signs the Tx and publishes it on-chain.
 
 ```mermaid
 sequenceDiagram
-    Alice->>Cosmex: Signed Tx with OpenState Client Signed Snapshot v0
-    Cosmex->>Cardano Node: Publish Signed Tx
+    Alice->>Cosmex: Unsigned Tx with OpenState Client Signed Snapshot v0
     Cosmex->>Alice: BothSignedSnapshot v0
+    Alice->>Cardano Node: Publish Signed Tx
     Cardano Node->>Cosmex: 20 blocks confirmed
     Cosmex->>Alice: Channel is opened! I accept orders now
 ```
 
-## Aborting the channel
-
-Can only be initiated by a client. Doesn't need a BothSignedSnapshot.
-Advances the State Machin to `SnapshotContestationState` with Snapshot v0,
-and clientBalance = all the locked money.
-
-```mermaid
-sequenceDiagram
-    Alice->>Cosmex: Signed Tx with OpenState Signed Snapshot v0
-    Cosmex->>Cardano Node: Publish Signed Tx
-    Cosmex-->Alice: No Signed Snapshot v0 from Cosmex within Timeout
-    Alice->>Cardano Node: ClientAbort Tx
-```
+The channel is now open, and both parties can trade off-chain by exchanging signed snapshots. These snapshots are essentially updated states of the channel that reflect the current balances and orders of both parties.
 
 ## Closing the channel
 
@@ -387,6 +354,10 @@ sequenceDiagram
 ### Rebalance by Cosmex
 
 In a simple form it's a two or more party swap initiated by the exchange.
+This allows Cosmex to settle trades between clients and keep channels balanced,
+batching multiple rebalances into a single on-chain transaction.
+
+Cosmex uses `Guard` scripts or `withdraw 0` reward scripts to run the swap logic.
 
 ```mermaid
 flowchart LR

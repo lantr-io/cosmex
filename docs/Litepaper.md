@@ -88,7 +88,7 @@ No slippage, no front-running, no flash-loans, no IOUs. Your keys – your crypt
 stateDiagram-v2
       [*]-->Open: Deposit
       Open-->Open: Deposit/Witdraw/Balance
-      Open-->SnapshotContest : Close
+      Open-->SnapshotContest : Rule-based Close
       Open-->[*]: Graceful Withdraw
       SnapshotContest-->TradesContest : Newer Snapshot/Timeout
       SnapshotContest-->Payout : Newer Snapshot/Timeout
