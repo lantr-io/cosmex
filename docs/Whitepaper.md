@@ -9,11 +9,11 @@ Alexander Nemish @ Lantr
 COSMEX is a Cardano layer-2 (L2) solution.
 It extends Hydra Head protocol to provide a centralized order book exchange (CEX), but guarantees the security of the funds and the privacy of the users.
 
-Clients can deposit and withdraw funds to the exchange smart contract, and trade with other users using off-chain orders. They always has the option to withdraw funds from the exchange smart contract after a contestation period.
+Clients can deposit and withdraw funds to the exchange smart contract, and trade with other users using off-chain orders. They always have the option to withdraw funds from the exchange smart contract after a contestation period.
 
 All the actual trades are guaranteed to follow client's orders, and are batched and settled on-chain in an efficient way.
 
-## Desing overview
+## Design overview
 
 Clients connect to a centralized server, and use its REST/WS API to interact with the exchange. Most of the interactions are off-chain, where a client and the server exchange valid signed transaction, similarly to how Hydra Head or Bitcoin Lightning Network work.
 
@@ -83,7 +83,7 @@ Every arrow is an on-chain transaction.
 ```mermaid
 stateDiagram-v2
       [*]-->Open: Deposit
-      Open-->Open: Deposit/Witdraw/Balance
+      Open-->Open: Deposit/Withdraw/Balance
       Open-->SnapshotContest : Rule-based Close
       Open-->[*]: Graceful Withdraw
       SnapshotContest-->TradesContest : Newer Snapshot/Timeout
@@ -159,7 +159,7 @@ During the `TradesContestation` period, limited by a timeout, the exchange
 may produce one or many transactions that apply trades to open orders.
 Multiple transactions allowed to handle the case when not all trades can be fit into a single transaction.
 
-After the timeout, anyone can be advance the StateMachine to `PayoutState`.
+After the timeout, anyone can advance the StateMachine to `PayoutState`.
 
 ## Payout state
 
@@ -206,7 +206,7 @@ Cosmex may close the channel if the error rate is over a threshold.
 ```mermaid
 sequenceDiagram
     Cosmex->>Alice: Here are trades, new Exchange Signed Snapshot k
-    Alice->>Cosmex: Client Signed Snaphost k
+    Alice->>Cosmex: Client Signed Snapshot k
 ```
 
 Cosmex closes the channel and starts the trades contestation
@@ -224,7 +224,7 @@ Channel update is either:
 There are some issues to consider:
 
 - an update must be signed by both parties. What happens when counterparty doesn't cooperate? Must it be signed by both?
-- We want to keep trading during the updates. Hence we need to progress snashots.
+- We want to keep trading during the updates. Hence we need to progress snapshots.
 - How do we handle closure?
 - How do we handle a counterparty that doesn't cooperate?
 
@@ -280,7 +280,7 @@ Consider the following scenario:
      - Possible solution: validate Close Snapshot balance == locked, reject otherwise.
 
 1. Counterparty signs the Snapshot and Tx, sends it back. Now both parties have a BothSignedSnapshot.
-1. The initiator signes the Tx and publishes it. If the Tx is reorged, the initiator sends a new BothSignedSnapshot with the PendingTx discarded.
+1. The initiator signs the Tx and publishes it. If the Tx is reorged, the initiator sends a new BothSignedSnapshot with the PendingTx discarded.
 1. After the Tx is confirmed, the exchange sends a new ExchangeSignedSnapshot with PendingTx accepted.
 1. A client signs the Snapshot and sends it back.
 
@@ -377,8 +377,8 @@ sequenceDiagram
     Note over Alice,Cosmex: Synced Snapshots
     Cosmex->>Alice: Rebalance Tx
     Cosmex->>Bob: Rebalance Tx
-    Alice->>Cosmex: Signed Deposit Tx ₳100
-    Cosmex->>Cardano Node: Signed Deposit Tx
+    Alice->>Cosmex: Signed Rebalance Tx ₳80
+    Cosmex->>Cardano Node: Signed Rebalance Tx
     Cardano Node->>Cosmex: 30 blocks confirmation
     Cosmex->>Alice: Snapshot k+1 with balances updated
 ```

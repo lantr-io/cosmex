@@ -9,7 +9,7 @@ Alexander Nemish @ Lantr
 COSMEX is a Cardano layer-2 (L2) solution.
 It extends Hydra Head protocol to provide a centralized order book exchange (CEX), but guarantees the security of the funds and the privacy of the users.
 
-Clients can deposit and withdraw funds to the exchange smart contract, and trade with other users using off-chain orders. They always has the option to withdraw funds from the exchange smart contract after a contestation period.
+Clients can deposit and withdraw funds to the exchange smart contract, and trade with other users using off-chain orders. They always have the option to withdraw funds from the exchange smart contract after a contestation period.
 
 All the actual trades are guaranteed to follow client's orders, and are batched and settled on-chain in an efficient way.
 
@@ -87,7 +87,7 @@ No slippage, no front-running, no flash-loans, no IOUs. Your keys – your crypt
 ```mermaid
 stateDiagram-v2
       [*]-->Open: Deposit
-      Open-->Open: Deposit/Witdraw/Balance
+      Open-->Open: Deposit/Withdraw/Balance
       Open-->SnapshotContest : Rule-based Close
       Open-->[*]: Graceful Withdraw
       SnapshotContest-->TradesContest : Newer Snapshot/Timeout
@@ -138,6 +138,6 @@ COSMEX represents a major advancement in decentralized exchange technology on Ca
 Key technologies and concepts underlying COSMEX:
 
 1. Cardano Blockchain Platform (IOHK, 2020)
-Hydra: Fast Isomorphic State Channels (Chakravarty et al., 2020)
-1. Bitcoin Lightning Network (Poon & Dryja, 2016)
-1. SoK: Layer-Two Blockchain Protocols (Gudgeon et al., 2020)
+2. Hydra: Fast Isomorphic State Channels (Chakravarty et al., 2020)
+3. Bitcoin Lightning Network (Poon & Dryja, 2016)
+4. SoK: Layer-Two Blockchain Protocols (Gudgeon et al., 2020)
