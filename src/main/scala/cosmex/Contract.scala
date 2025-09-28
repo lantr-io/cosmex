@@ -470,7 +470,7 @@ object CosmexContract extends DataParameterizedValidator {
     inline def handlePayoutTransfer(
         params: ExchangeParams,
         state: OnChainState,
-        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        redeemers: SortedMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         ownIdx: BigInt,
         transferValue: Value,
@@ -488,7 +488,7 @@ object CosmexContract extends DataParameterizedValidator {
                     case Credential.ScriptCredential(sh) => (txOutValue, sh)
                     case Credential.PubKeyCredential(_)  => fail("Invalid output")
 
-        val transferValueIsPositive = transferValue > Value.zero
+        val transferValueIsPositive = transferValue.isPositive
 
         def cosmexInputTransferAmountToTxOutIdx(txInInfo: TxInInfo): Value = txInInfo match
             case TxInInfo(txOutRef, TxOut(Address(cred, _), txOutValue, _, _)) =>
@@ -547,7 +547,7 @@ object CosmexContract extends DataParameterizedValidator {
                                     fail("Invalid payout")
                 else
                     val min = (a: BigInt, b: BigInt) => if a < b then a else b
-                    val availableForPayment = Value.unionWith(min)(clientBalance, ownInputValue)
+                    val availableForPayment = Value.zero// FIXME: Value.unionWith(min)(clientBalance, ownInputValue)
                     val newOutputValue = ownInputValue - availableForPayment
                     val newClientBalance = clientBalance - availableForPayment
                     state match
@@ -701,7 +701,7 @@ object CosmexContract extends DataParameterizedValidator {
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
         params: ExchangeParams,
-        redeemers: AssocMap[ScriptPurpose, Redeemer],
+        redeemers: SortedMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
         state: OnChainState
     ): Boolean =

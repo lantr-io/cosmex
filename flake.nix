@@ -19,16 +19,15 @@
           let
               jdk = pkgs.openjdk23;
               sbt = pkgs.sbt.override { jre = jdk; };
+              visualvm = pkgs.visualvm.override { jdk = jdk; };
             in
           pkgs.mkShell {
           # This fixes bash prompt/autocomplete issues with subshells (i.e. in VSCode) under `nix develop`/direnv
           buildInputs = [ pkgs.bashInteractive ];
           packages = with pkgs; [
             git
-            scala-cli
             sbt
             visualvm
-            scalafmt
             nixpkgs-fmt
             texliveFull
             pandoc
