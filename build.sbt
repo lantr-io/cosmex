@@ -1,5 +1,5 @@
 val scala3Version = "3.3.7"
-val scalusVersion = "0.13.0"
+val scalusVersion = "0.13.0+130-29efe4b8-SNAPSHOT"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
@@ -8,6 +8,10 @@ name := "scalus"
 version := "0.1.0-SNAPSHOT"
 
 scalaVersion := scala3Version
+
+Global / onChangedBuildSource := ReloadOnSourceChanges
+
+resolvers += Resolver.sonatypeCentralSnapshots
 
 addCompilerPlugin("org.scalus" %% "scalus-plugin" % scalusVersion)
 

@@ -3,13 +3,12 @@ import org.scalacheck.Arbitrary
 import org.scalacheck.Gen
 import scalus.builtin.ByteString
 import scalus.builtin.ByteString.hex
-import scalus.ledger.api.v1.CurrencySymbol
 import scalus.ledger.api.v1.PosixTime
 import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v3.*
 import scalus.prelude.*
 
-trait ArbitraryInstances {
+trait ArbitraryInstances extends scalus.testkit.ArbitraryInstances {
     given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
 
     given Arbitrary[LimitOrder] = Arbitrary {
@@ -31,40 +30,12 @@ trait ArbitraryInstances {
         yield t
     }
 
-    val genCurrencySymbol: Gen[CurrencySymbol] =
-        Gen.listOfN(28 * 2, Gen.hexChar).map(_.mkString).map(ByteString.fromHex)
-
-    val genTokenName: Gen[TokenName] = for
-        len <- Gen.choose(1, 32)
-        name <- Gen.stringOfN(len, Gen.alphaNumChar)
-    yield ByteString.fromString(name)
-
     val genNonAdaValue: Gen[Value] =
         for
-            currency <- genCurrencySymbol
-            token <- genTokenName
+            currency <- Arbitrary.arbitrary[PolicyId]
+            token <- Arbitrary.arbitrary[TokenName]
             value <- Gen.choose[BigInt](0, 1000)
         yield Value(currency, token, value)
-
-    // TODO: improve generator
-    given Arbitrary[Value] = Arbitrary {
-        Gen.oneOf(genNonAdaValue, Gen.choose[BigInt](0, 1000).map(Value.lovelace))
-    }
-
-    given Arbitrary[PubKeyHash] = Arbitrary {
-        Gen.listOfN(28 * 2, Gen.hexChar).map(h => PubKeyHash(ByteString.fromHex(h.mkString)))
-    }
-
-    given Arbitrary[TxId] = Arbitrary {
-        Gen.listOfN(32 * 2, Gen.hexChar).map(h => TxId(ByteString.fromHex(h.mkString)))
-    }
-
-    given Arbitrary[TxOutRef] = Arbitrary {
-        for
-            txId <- Arbitrary.arbitrary[TxId]
-            idx <- Gen.choose[BigInt](0, 1000)
-        yield TxOutRef(txId, idx)
-    }
 
     given Arbitrary[PendingTx] = Arbitrary {
         for
@@ -88,12 +59,6 @@ trait ArbitraryInstances {
         yield TradingState(tsClientBalance, tsExchangeBalance, tsOrders)
     }
 
-    given arbOption[A: Arbitrary]: Arbitrary[scalus.prelude.Option[A]] = Arbitrary {
-        for o <- Arbitrary.arbitrary[scala.Option[A]]
-        yield o match
-            case scala.None        => Option.None
-            case scala.Some(value) => Option.Some(value)
-    }
     given Arbitrary[Snapshot] = Arbitrary {
         for
             snapshotTradingState <- Arbitrary.arbitrary[TradingState]
@@ -103,6 +68,7 @@ trait ArbitraryInstances {
     }
 
     val genSignature: Gen[Signature] = Gen.listOfN(64 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
+
     given Arbitrary[SignedSnapshot] = Arbitrary {
         for
             signedSnapshot <- Arbitrary.arbitrary[Snapshot]
