@@ -8,7 +8,7 @@ import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v3.*
 import scalus.prelude.*
 
-trait ArbitraryInstances extends scalus.testkit.ArbitraryInstances {
+trait ArbitraryInstances extends scalus.testing.kit.ArbitraryInstances {
     given Arbitrary[Party] = Arbitrary { Gen.oneOf(Party.Client, Party.Exchange) }
 
     given Arbitrary[LimitOrder] = Arbitrary {
