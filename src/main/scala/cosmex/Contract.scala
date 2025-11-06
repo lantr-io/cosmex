@@ -17,11 +17,14 @@ type OrderId = BigInt
 type AssetClass = (PolicyId, TokenName)
 type PubKey = ByteString
 
-case class Trade(orderId: OrderId, tradeAmount: BigInt, tradePrice: BigInt)
+case class Trade(orderId: OrderId, tradeAmount: BigInt, tradePrice: BigInt) derives FromData, ToData
+
+@Compile
+object Trade
 
 type TxOutIndex = BigInt
 
-enum Action:
+enum Action derives FromData, ToData:
     case Update
     case ClientAbort
     case Close(party: Party, signedSnapshot: SignedSnapshot)
@@ -30,44 +33,71 @@ enum Action:
     case Transfer(txOutIndex: TxOutIndex, value: Value)
     case Timeout
 
-enum Party:
+@Compile
+object Action
+
+enum Party derives FromData, ToData:
     case Client
     case Exchange
 
+@Compile
+object Party
+
 type Pair = (AssetClass, AssetClass)
 
-case class LimitOrder(orderPair: Pair, orderAmount: BigInt, orderPrice: BigInt)
+case class LimitOrder(orderPair: Pair, orderAmount: BigInt, orderPrice: BigInt) derives FromData, ToData
+@Compile
+object LimitOrder
 
-enum PendingTxType:
+enum PendingTxType derives FromData, ToData:
     case PendingIn
     case PendingOut(txOutIndex: TxOutIndex)
     case PendingTransfer(txOutIndex: TxOutIndex)
+
+@Compile
+object PendingTxType
 
 case class PendingTx(
     pendingTxValue: Value,
     pendingTxType: PendingTxType,
     pendingTxSpentTxOutRef: TxOutRef
-)
+) derives FromData,
+      ToData
+
+@Compile
+object PendingTx
 
 case class TradingState(
     tsClientBalance: Value,
     tsExchangeBalance: Value,
     tsOrders: AssocMap[OrderId, LimitOrder]
-)
+) derives FromData,
+      ToData
+
+@Compile
+object TradingState
 
 case class Snapshot(
     snapshotTradingState: TradingState,
     snapshotPendingTx: Option[PendingTx],
     snapshotVersion: BigInt
-)
+) derives FromData,
+      ToData
+
+@Compile
+object Snapshot
 
 case class SignedSnapshot(
     signedSnapshot: Snapshot,
     snapshotClientSignature: Signature,
     snapshotExchangeSignature: Signature
-)
+) derives FromData,
+      ToData
 
-enum OnChainChannelState:
+@Compile
+object SignedSnapshot
+
+enum OnChainChannelState derives FromData, ToData:
     case OpenState
     case SnapshotContestState(
         contestSnapshot: Snapshot,
@@ -78,12 +108,19 @@ enum OnChainChannelState:
     case TradesContestState(latestTradingState: TradingState, tradeContestStart: PosixTime)
     case PayoutState(clientBalance: Value, exchangeBalance: Value)
 
+@Compile
+object OnChainChannelState
+
 case class OnChainState(
     clientPkh: PubKeyHash,
     clientPubKey: ByteString,
     clientTxOutRef: TxOutRef,
     channelState: OnChainChannelState
-)
+) derives FromData,
+      ToData
+
+@Compile
+object OnChainState
 
 case class ExchangeParams(
     exchangePkh: PubKeyHash,
@@ -96,50 +133,7 @@ case class ExchangeParams(
 object ExchangeParams
 
 @Compile
-object CosmexToDataInstances {
-    given Data.ToData[Party] = ToData.derived
-    given Data.ToData[LimitOrder] = ToData.derived
-    given Data.ToData[TradingState] = ToData.derived
-    given Data.ToData[PendingTxType] = ToData.derived
-    given Data.ToData[PendingTx] = ToData.derived
-    given Data.ToData[Snapshot] = ToData.derived
-    given Data.ToData[SignedSnapshot] = ToData.derived
-    given Data.ToData[OnChainChannelState] = ToData.derived
-    given Data.ToData[OnChainState] = ToData.derived
-    given Data.ToData[Trade] = ToData.derived
-    given Data.ToData[Action] = ToData.derived
-}
-
-@Compile
-object CosmexFromDataInstances {
-    given Data.FromData[Party] = FromData.derived
-
-    given Data.FromData[LimitOrder] = FromData.derived
-
-    given Data.FromData[TradingState] = FromData.derived
-
-    given Data.FromData[PendingTxType] = FromData.derived
-
-    given Data.FromData[PendingTx] = FromData.derived
-
-    given Data.FromData[Snapshot] = FromData.derived
-
-    given Data.FromData[SignedSnapshot] = FromData.derived
-
-    given Data.FromData[OnChainChannelState] = FromData.derived
-
-    given Data.FromData[Trade] = FromData.derived
-
-    given Data.FromData[Action] = FromData.derived
-
-    given Data.FromData[OnChainState] = FromData.derived
-}
-
-@Compile
 object CosmexContract extends DataParameterizedValidator {
-
-    import CosmexFromDataInstances.given
-    import CosmexToDataInstances.given
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
@@ -545,7 +539,7 @@ object CosmexContract extends DataParameterizedValidator {
                                     fail("Invalid payout")
                 else
                     val min = (a: BigInt, b: BigInt) => if a < b then a else b
-                    val availableForPayment = Value.zero// FIXME: Value.unionWith(min)(clientBalance, ownInputValue)
+                    val availableForPayment = Value.zero // FIXME: Value.unionWith(min)(clientBalance, ownInputValue)
                     val newOutputValue = ownInputValue - availableForPayment
                     val newClientBalance = clientBalance - availableForPayment
                     state match

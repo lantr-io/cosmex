@@ -2,8 +2,6 @@ package cosmex
 
 import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.Networks
-import cosmex.CosmexFromDataInstances.given
-import cosmex.CosmexToDataInstances.given
 import org.scalacheck.Arbitrary
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks

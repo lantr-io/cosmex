@@ -113,7 +113,6 @@ object Server {
     def signSnapshot(clientTxOutRef: TxOutRef, snapshot: SignedSnapshot): SignedSnapshot = {
         val signedInfo = (clientTxOutRef, snapshot.signedSnapshot)
         import scalus.builtin.Data.toData
-        import CosmexToDataInstances.given
         val msg = Builtins.serialiseData(signedInfo.toData)
         val cosmexSignature = ByteString.empty // TODO: sign
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)

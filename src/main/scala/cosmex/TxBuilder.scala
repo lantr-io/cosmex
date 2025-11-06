@@ -1,5 +1,4 @@
 package cosmex
-import cosmex.CosmexToDataInstances.given
 import scalus.builtin.{platform, ByteString}
 import scalus.builtin.Data.toData
 import scalus.cardano.address.*
