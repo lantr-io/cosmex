@@ -1,5 +1,6 @@
 package cosmex
-import scalus.builtin.Data
+import cosmex.CosmexToDataInstances.given
+import scalus.builtin.Data.toData
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.*
@@ -12,7 +13,7 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
     // Convert PlutusScript to Script.PlutusV3
     private val script: Script.PlutusV3 = Script.PlutusV3(cosmexValidator.cborByteString)
 
-    def mkTx(datum: Data, redeemer: Data, signatories: Seq[PubKeyHash]): Transaction = {
+    def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {
         val network = Network.Mainnet
 
         // Create the input (hardcoded as in original)
@@ -29,7 +30,7 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
         val output = TransactionOutput(
           address = outputAddress,
           value = Value.ada(20),
-          datumOption = Some(DatumOption.Inline(datum)),
+          datumOption = Some(DatumOption.Inline(state.toData)),
           scriptRef = None
         )
 
@@ -39,7 +40,7 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
         // Create the witness with Scalus types
         val witness = ThreeArgumentPlutusScriptWitness(
           scriptSource = ScriptSource.PlutusScriptValue(script),
-          redeemer = redeemer,
+          redeemer = Action.Update.toData,
           datum = Datum.DatumInlined,
           additionalSigners = signatories.map { pkh =>
               ExpectedSigner(AddrKeyHash(pkh.hash))

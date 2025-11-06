@@ -304,7 +304,6 @@ object CosmexContract extends DataParameterizedValidator {
         signatories: List[PubKeyHash],
         state: OnChainState,
         contestSnapshot: Snapshot,
-        contestSnapshotStart: PosixTime,
         contestInitiator: Party,
         contestChannelTxOutRef: TxOutRef,
         party: Party,
@@ -468,7 +467,6 @@ object CosmexContract extends DataParameterizedValidator {
               |-----|
      */
     inline def handlePayoutTransfer(
-        params: ExchangeParams,
         state: OnChainState,
         redeemers: SortedMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
@@ -635,7 +633,6 @@ object CosmexContract extends DataParameterizedValidator {
                   signatories,
                   state,
                   contestSnapshot,
-                  contestSnapshotStart,
                   contestInitiator,
                   contestChannelTxOutRef,
                   party,
@@ -709,7 +706,6 @@ object CosmexContract extends DataParameterizedValidator {
         action match
             case Transfer(txOutIndex, value) =>
                 handlePayoutTransfer(
-                  params,
                   state,
                   redeemers,
                   inputs,
@@ -940,7 +936,7 @@ object CosmexContract extends DataParameterizedValidator {
 
 object CosmexValidator {
     private given Compiler.Options = Compiler.Options(
-      targetLoweringBackend = Compiler.TargetLoweringBackend.SirToUplcV3Lowering
+      targetLoweringBackend = Compiler.TargetLoweringBackend.SirToUplc110Lowering
     )
     private val compiledValidator = Compiler.compile(CosmexContract.validate)
 

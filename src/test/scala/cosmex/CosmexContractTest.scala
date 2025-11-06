@@ -53,16 +53,16 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
         assert(length == 10358)
     }
 
-    testSerialization[Action]
-    testSerialization[Party]
-    testSerialization[LimitOrder]
-    testSerialization[PendingTxType]
-    testSerialization[PendingTx]
-    testSerialization[TradingState]
-    testSerialization[Snapshot]
-    testSerialization[SignedSnapshot]
-    testSerialization[OnChainChannelState]
-    testSerialization[OnChainState]
+    testSerialization[Action]()
+    testSerialization[Party]()
+    testSerialization[LimitOrder]()
+    testSerialization[PendingTxType]()
+    testSerialization[PendingTx]()
+    testSerialization[TradingState]()
+    testSerialization[Snapshot]()
+    testSerialization[SignedSnapshot]()
+    testSerialization[OnChainChannelState]()
+    testSerialization[OnChainState]()
 
     test("validRange") {
         val sir = compile { (i: Interval) =>
@@ -77,15 +77,13 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     test("Update succeeds when there are both signatures") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
-        val action = Action.Update
-        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(state.clientPkh, exchangeParams.exchangePkh))
+        val tx = txbuilder.update(state, Seq(state.clientPkh, exchangeParams.exchangePkh))
         evalCosmexValidator(state, tx)({ case Result.Success(_, _, _, _) => })
     }
 
     test("Update fails when there is no client signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
-        val action = Action.Update
-        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(exchangeParams.exchangePkh))
+        val tx = txbuilder.update(state, Seq(exchangeParams.exchangePkh))
         evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("clientSigned ? False"))
         })
@@ -93,8 +91,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     test("Update fails when there is no exchange signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
-        val action = Action.Update
-        val tx = txbuilder.mkTx(state.toData, action.toData, Seq(clientPkh))
+        val tx = txbuilder.update(state, Seq(clientPkh))
         evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("exchangeSigned ? False"))
         })
@@ -120,7 +117,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
             case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
-    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary]: Unit = {
+    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](): Unit = {
         import scala.language.implicitConversions
         val program = compileInline((d: Data) => d.to[A].toData).toUplc().plutusV3
         test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
