@@ -1,21 +1,89 @@
 package cosmex
 import cosmex.CosmexToDataInstances.given
+import scalus.builtin.{platform, ByteString}
 import scalus.builtin.Data.toData
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.*
 import scalus.ledger.api.v2.PubKeyHash
+import scalus.ledger.api.v3.{TxId, TxOutRef}
 
-class TxBuilder(val exchangeParams: ExchangeParams) {
+class TxBuilder(val exchangeParams: ExchangeParams, val network: Network) {
     val protocolVersion = 9
     private val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
+    private val script = Script.PlutusV3(cosmexValidator.cborByteString)
 
-    // Convert PlutusScript to Script.PlutusV3
-    private val script: Script.PlutusV3 = Script.PlutusV3(cosmexValidator.cborByteString)
+    /** Opens a new channel by depositing funds to the Cosmex script address.
+      *
+      * This creates an unsigned transaction that:
+      *   - Spends the client's input UTxO
+      *   - Creates an output to the Cosmex script with OpenState
+      *   - Uses the client's input as the unique channel identifier (clientTxOutRef)
+      *
+      * Protocol flow (from whitepaper):
+      *   1. Client creates unsigned Tx with initial deposit and ClientSignedSnapshot v0 2. Exchange replies with
+      *      BothSignedSnapshot v0 3. Client signs the Tx and publishes it on-chain
+      *
+      * @param clientInput
+      *   The UTxO to spend (contains client's funds for deposit)
+      * @param clientPubKey
+      *   The client's public key (for signature verification)
+      * @param depositAmount
+      *   The amount to deposit into the channel
+      * @param validityStartSlot
+      *   The validity start slot for the transaction
+      * @param validityEndSlot
+      *   The validity end slot for the transaction
+      * @return
+      *   An unsigned Transaction that opens the channel
+      */
+    def openChannel(
+        clientInput: TransactionUnspentOutput,
+        clientPubKey: ByteString,
+        depositAmount: Value,
+        validityStartSlot: Long,
+        validityEndSlot: Long
+    ): Transaction = {
+        // The script address where funds will be locked
+        val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+
+        // Create the initial OnChainState with OpenState
+        // The clientTxOutRef is the input being spent, which uniquely identifies this channel
+        val initialState = OnChainState(
+          clientPkh = PubKeyHash(platform.blake2b_224(clientPubKey)),
+          clientPubKey = clientPubKey,
+          clientTxOutRef = TxOutRef(TxId(clientInput.input.transactionId), clientInput.input.index),
+          channelState = OnChainChannelState.OpenState
+        )
+
+        // Create the output with the deposited funds and initial state
+        val channelOutput = TransactionOutput(
+          address = scriptAddress,
+          value = depositAmount,
+          datumOption = Some(DatumOption.Inline(initialState.toData)),
+          scriptRef = None
+        )
+
+        // Build transaction steps
+        val steps = Seq(
+          // Spend the client's input (no witness needed for unsigned tx)
+          TransactionBuilderStep.Spend(clientInput),
+          // Send funds to the script address with initial state
+          TransactionBuilderStep.Send(channelOutput),
+          // Set validity range
+          TransactionBuilderStep.ValidityStartSlot(validityStartSlot),
+          TransactionBuilderStep.ValidityEndSlot(validityEndSlot)
+        )
+
+        // Build the transaction
+        val result = TransactionBuilder.build(network, steps)
+
+        result match
+            case Right(context) => context.transaction
+            case Left(error)    => throw new RuntimeException(s"Channel opening transaction build failed: $error")
+    }
 
     def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {
-        val network = Network.Mainnet
-
         // Create the input (hardcoded as in original)
         val txId = TransactionHash.fromHex("1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982")
         val input = TransactionInput(
@@ -59,9 +127,9 @@ class TxBuilder(val exchangeParams: ExchangeParams) {
         // Build the transaction
         val result = TransactionBuilder.build(network, steps)
 
-        result match {
+        result match
             case Right(context) => context.transaction
             case Left(error)    => throw new RuntimeException(s"Transaction build failed: $error")
-        }
+
     }
 }
