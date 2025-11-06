@@ -1,78 +1,66 @@
 package cosmex
-import com.bloxbean.cardano.client.common.ADAConversionUtil
-import com.bloxbean.cardano.client.plutus.spec.{ExUnits, PlutusV3Script, Redeemer as PlutusRedeemer, RedeemerTag}
-import com.bloxbean.cardano.client.transaction.spec
-import com.bloxbean.cardano.client.transaction.spec.*
-import scalus.bloxbean.Interop
 import scalus.builtin.Data
+import scalus.cardano.address.*
+import scalus.cardano.ledger.*
+import scalus.cardano.txbuilder.*
 import scalus.ledger.api.v2.PubKeyHash
-
-import java.math.BigInteger
-import java.util
 
 class TxBuilder(val exchangeParams: ExchangeParams) {
     val protocolVersion = 9
-    val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
+    private val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
+
+    // Convert PlutusScript to Script.PlutusV3
+    private val script: Script.PlutusV3 = Script.PlutusV3(cosmexValidator.cborByteString)
 
     def mkTx(datum: Data, redeemer: Data, signatories: Seq[PubKeyHash]): Transaction = {
-        import scala.jdk.CollectionConverters.*
-        val cosmexPlutusScript = PlutusV3Script
-            .builder()
-            .`type`("PlutusScriptV3")
-            .cborHex(cosmexValidator.doubleCborHex)
-            .build()
-            .asInstanceOf[PlutusV3Script]
+        val network = Network.Mainnet
 
-        val rdmr = PlutusRedeemer
-            .builder()
-            .tag(RedeemerTag.Spend)
-            .data(Interop.toPlutusData(redeemer))
-            .index(0)
-            .exUnits(
-              ExUnits
-                  .builder()
-                  .steps(BigInteger.valueOf(1000))
-                  .mem(BigInteger.valueOf(1000))
-                  .build()
-            )
-            .build()
+        // Create the input (hardcoded as in original)
+        val txId = TransactionHash.fromHex("1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982")
+        val input = TransactionInput(
+          transactionId = txId,
+          index = 0
+        )
 
-        val input = TransactionInput
-            .builder()
-            .transactionId("1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982")
-            .index(0)
-            .build()
-        val inputs = util.List.of(input)
+        // Create the output address (hardcoded as in original)
+        val outputAddress = Address(network, Credential.ScriptHash(script.scriptHash))
 
-        val cosmexTxOut = TransactionOutput
-            .builder()
-            .value(spec.Value.builder().coin(BigInteger.valueOf(20)).build())
-            .inlineDatum(Interop.toPlutusData(datum))
-            .address(
-              "addr1q8q7jyap76l0d5gqj8naw5t49yu3f0h7qkzsps9z0gfjcu25uj747vu83mvg3fuh6ttdgwshjwtcne6esrpct2uzmnuqdqd82j"
-            )
+        // Create the output with inline datum
+        val output = TransactionOutput(
+          address = outputAddress,
+          value = Value.ada(20),
+          datumOption = Some(DatumOption.Inline(datum)),
+          scriptRef = None
+        )
 
-        val tx = Transaction
-            .builder()
-            .body(
-              TransactionBody
-                  .builder()
-                  .fee(ADAConversionUtil.adaToLovelace(0.2))
-                  .inputs(inputs)
-                  .outputs(util.List.of(cosmexTxOut.build()))
-                  .validityStartInterval(10)
-                  .ttl(1000)
-                  .requiredSigners(signatories.map(_.hash.bytes).asJava)
-                  .build()
-            )
-            .witnessSet(
-              TransactionWitnessSet
-                  .builder()
-                  .plutusV3Scripts(util.List.of(cosmexPlutusScript))
-                  .redeemers(util.List.of(rdmr))
-                  .build()
-            )
-            .build()
-        tx
+        // Create the UTxO to spend
+        val utxo = TransactionUnspentOutput(input, output)
+
+        // Create the witness with Scalus types
+        val witness = ThreeArgumentPlutusScriptWitness(
+          scriptSource = ScriptSource.PlutusScriptValue(script),
+          redeemer = redeemer,
+          datum = Datum.DatumInlined,
+          additionalSigners = signatories.map { pkh =>
+              ExpectedSigner(AddrKeyHash(pkh.hash))
+          }.toSet
+        )
+
+        // Build transaction with steps
+        val steps = Seq(
+          TransactionBuilderStep.Spend(utxo, witness),
+          TransactionBuilderStep.ValidityStartSlot(10),
+          TransactionBuilderStep.ValidityEndSlot(1000),
+          TransactionBuilderStep.Send(output),
+          TransactionBuilderStep.Fee(Coin(200000)) // 0.2 ADA = 200,000 lovelace
+        )
+
+        // Build the transaction
+        val result = TransactionBuilder.build(network, steps)
+
+        result match {
+            case Right(context) => context.transaction
+            case Left(error)    => throw new RuntimeException(s"Transaction build failed: $error")
+        }
     }
 }

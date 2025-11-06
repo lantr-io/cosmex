@@ -2,8 +2,6 @@ package cosmex
 
 import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.Networks
-import com.bloxbean.cardano.client.transaction.spec.Transaction
-import com.bloxbean.cardano.client.transaction.util.TransactionUtil
 import cosmex.CosmexFromDataInstances.given
 import cosmex.CosmexToDataInstances.given
 import org.scalacheck.Arbitrary
@@ -11,9 +9,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.*
-import scalus.bloxbean.Interop
 import scalus.builtin.{Builtins, ByteString, Data}
-import scalus.cardano.ledger.SlotConfig
+import scalus.cardano.ledger.{LedgerToPlutusTranslation, SlotConfig, Transaction, TransactionInput, TransactionOutput}
 import scalus.builtin.Data.{toData, FromData, ToData}
 import scalus.ledger.api.v3.*
 import scalus.sir.SIR
@@ -135,23 +132,28 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(pf: PartialFunction[Result, Any]): Any = {
         val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
-        val utxos = Map(tx.getBody.getInputs.get(0) -> tx.getBody.getOutputs.get(0))
+
+        // Get the first redeemer from the transaction
+        val redeemer = tx.witnessSet.redeemers.get.value.toSeq.head
+
+        // Build the UTxO map from transaction inputs and outputs
+        // Note: This is a simplified mapping for tests - inputs and outputs are zipped together
+        val inputs = tx.body.value.inputs.toSeq
+        val outputs = tx.body.value.outputs.map(_.value)
+        val utxos: Map[TransactionInput, TransactionOutput] = inputs.zip(outputs).toMap
+
+        // Convert Scalus Transaction to ScriptContext using LedgerToPlutusTranslation
         val scriptContext =
-            Interop.getScriptContextV3(
-              tx.getWitnessSet.getRedeemers.get(0),
-              Some(state.toData),
-              tx,
-              TransactionUtil.getTxHash(tx),
-              utxos,
-              SlotConfig.Preprod,
-              protocolVersion = txbuilder.protocolVersion
+            LedgerToPlutusTranslation.getScriptContextV3(
+              redeemer = redeemer,
+              datum = Some(state.toData),
+              tx = tx,
+              utxos = utxos,
+              slotConfig = SlotConfig.Preprod,
+              protocolVersion = scalus.cardano.ledger.MajorProtocolVersion(txbuilder.protocolVersion)
             )
-//        try CosmexContract.validator(exchangeParams)(state.toData, action.toData, scriptContext.toData)
-//        catch
-//            case e: Throwable =>
-//                e.printStackTrace()
+
         val program = validator $ scriptContext.toData
-//        CosmexContract.validate(exchangeParams.toData)(scriptContext.toData)
         val result = program.evaluateDebug
         if pf.isDefinedAt(result) then pf(result)
         else fail(s"Unexpected result: $result")
