@@ -10,19 +10,15 @@ import org.scalacheck.Arbitrary
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
-import scalus.Compiler.compile
+import scalus.Compiler.*
 import scalus.bloxbean.Interop
-import scalus.bloxbean.SlotConfig
-import scalus.builtin.Builtins
-import scalus.builtin.ByteString
-import scalus.builtin.Data
-import scalus.builtin.Data.FromData
-import scalus.builtin.Data.ToData
-import scalus.builtin.Data.toData
+import scalus.builtin.{Builtins, ByteString, Data}
+import scalus.cardano.ledger.SlotConfig
+import scalus.builtin.Data.{toData, FromData, ToData}
 import scalus.ledger.api.v3.*
 import scalus.sir.SIR
 import scalus.uplc.*
-import scalus.uplc.TermDSL.{*, given}
+import scalus.uplc.TermDSL.given
 import scalus.uplc.eval.{PlutusVM, Result}
 
 import scala.language.implicitConversions
@@ -57,19 +53,19 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     test(s"Cosmex Validator size is ${validatorUplc.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.cborEncoded.length
-        assert(length == 10889)
+        assert(length == 10358)
     }
 
-    testSerialization[Action](compile((d: Data) => d.to[Action].toData))
-    testSerialization[Party](compile((d: Data) => d.to[Party].toData))
-    testSerialization[LimitOrder](compile((d: Data) => d.to[LimitOrder].toData))
-    testSerialization[PendingTxType](compile((d: Data) => d.to[PendingTxType].toData))
-    testSerialization[PendingTx](compile((d: Data) => d.to[PendingTx].toData))
-    testSerialization[TradingState](compile((d: Data) => d.to[TradingState].toData))
-    testSerialization[Snapshot](compile((d: Data) => d.to[Snapshot].toData))
-    testSerialization[SignedSnapshot](compile((d: Data) => d.to[SignedSnapshot].toData))
-    testSerialization[OnChainChannelState](compile((d: Data) => d.to[OnChainChannelState].toData))
-    testSerialization[OnChainState](compile((d: Data) => d.to[OnChainState].toData))
+    testSerialization[Action]
+    testSerialization[Party]
+    testSerialization[LimitOrder]
+    testSerialization[PendingTxType]
+    testSerialization[PendingTx]
+    testSerialization[TradingState]
+    testSerialization[Snapshot]
+    testSerialization[SignedSnapshot]
+    testSerialization[OnChainChannelState]
+    testSerialization[OnChainState]
 
     test("validRange") {
         val sir = compile { (i: Interval) =>
@@ -121,19 +117,18 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
         (result, expected) match
             case (Result.Success(result, budget, _, _), Expected.Success(expected)) =>
                 assert(result == expected)
-            case (Result.Failure(ex, _, _, _), Expected.Failure(expected)) =>
+            case (Result.Failure(_, _, _, _), Expected.Failure(_)) =>
             case (Result.Failure(ex, _, _, _), _) =>
                 fail(s"Unexpected failure: $ex", ex)
             case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
-    private def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](sir: SIR) = {
+    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary]: Unit = {
         import scala.language.implicitConversions
-        // println(sir.pretty.render(100))
-        val term = sir.toUplc()
+        val program = compileInline((d: Data) => d.to[A].toData).toUplc().plutusV3
         test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
             forAll { (a: A) =>
-                assertEval(Program((1, 0, 0), term $ a.toData), Success(a.toData))
+                assertEval(program $ a.toData, Success(a.toData))
             }
         }
     }

@@ -1,10 +1,7 @@
 val scala3Version = "3.3.7"
-val scalusVersion = "0.12.0"
+val scalusVersion = "0.13.0"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
-
-resolvers +=
-    "Sonatype OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots"
 
 name := "scalus"
 

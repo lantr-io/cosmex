@@ -8,13 +8,13 @@ import scalus.ledger.api.v1.IntervalBoundType.Finite
 import scalus.ledger.api.v2
 import scalus.ledger.api.v2.Value.*
 import scalus.ledger.api.v3.*
-import scalus.prelude.{*, given}
+import scalus.prelude.*
 import scalus.uplc.Program
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
 type OrderId = BigInt
-type AssetClass = (CurrencySymbol, TokenName)
+type AssetClass = (PolicyId, TokenName)
 type PubKey = ByteString
 
 case class Trade(orderId: OrderId, tradeAmount: BigInt, tradePrice: BigInt)
@@ -225,7 +225,7 @@ object CosmexContract extends DataParameterizedValidator {
     def lockedInOrders(orders: AssocMap[BigInt, LimitOrder]): Value = {
         orders.toList.foldLeft(Value.zero) { (acc, pair) =>
             pair match
-                case (orderId, LimitOrder((base, quote), orderAmount, orderPrice)) =>
+                case (_, LimitOrder((base, quote), orderAmount, orderPrice)) =>
                     val orderValue =
                         if orderAmount < 0 then assetClassValue(base, orderAmount) // Sell base asset
                         else assetClassValue(quote, orderAmount * orderPrice) // Buy quote asset
@@ -491,7 +491,7 @@ object CosmexContract extends DataParameterizedValidator {
         val transferValueIsPositive = transferValue.isPositive
 
         def cosmexInputTransferAmountToTxOutIdx(txInInfo: TxInInfo): Value = txInInfo match
-            case TxInInfo(txOutRef, TxOut(Address(cred, _), txOutValue, _, _)) =>
+            case TxInInfo(txOutRef, TxOut(Address(cred, _), _, _, _)) =>
                 cred match
                     case Credential.ScriptCredential(sh) =>
                         if sh === cosmexScriptHash then
@@ -831,13 +831,13 @@ object CosmexContract extends DataParameterizedValidator {
                                       tsExchangeBalance,
                                       tsOrders
                                     )
-                                case PendingTxType.PendingOut(a) =>
+                                case PendingTxType.PendingOut(_) =>
                                     TradingState(
                                       tsClientBalance - pendingTxValue,
                                       tsExchangeBalance,
                                       tsOrders
                                     )
-                                case PendingTxType.PendingTransfer(a) =>
+                                case PendingTxType.PendingTransfer(_) =>
                                     TradingState(
                                       tsClientBalance,
                                       tsExchangeBalance - pendingTxValue,
@@ -920,7 +920,7 @@ object CosmexContract extends DataParameterizedValidator {
                     case _ => fail("LBI")
     }
 
-    override def spend(
+    inline override def spend(
         param: Datum,
         datum: Option[Datum],
         redeemer: Datum,
@@ -945,7 +945,7 @@ object CosmexValidator {
     val compiledValidator = Compiler.compile(CosmexContract.validate)
 
     def mkCosmexValidator(params: ExchangeParams): Program = {
-        val program = compiledValidator.toUplc().plutusV3
+        val program = compiledValidator.toUplcOptimized().plutusV3
         val uplcProgram = program $ params.toData
         uplcProgram
     }
