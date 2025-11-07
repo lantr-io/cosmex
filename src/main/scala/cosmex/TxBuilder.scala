@@ -4,10 +4,12 @@ import scalus.builtin.Data.toData
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.*
+import scalus.cardano.txbuilder.LowLevelTxBuilder.ChangeOutputDiffHandler
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
-class TxBuilder(val exchangeParams: ExchangeParams, val network: Network) {
+class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
+    private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
     private val script = Script.PlutusV3(cosmexValidator.cborByteString)
@@ -59,8 +61,7 @@ class TxBuilder(val exchangeParams: ExchangeParams, val network: Network) {
         val channelOutput = TransactionOutput(
           address = scriptAddress,
           value = depositAmount,
-          datumOption = Some(DatumOption.Inline(initialState.toData)),
-          scriptRef = None
+          datumOption = DatumOption.Inline(initialState.toData)
         )
 
         // Build transaction steps
@@ -71,11 +72,18 @@ class TxBuilder(val exchangeParams: ExchangeParams, val network: Network) {
           TransactionBuilderStep.Send(channelOutput),
           // Set validity range
           TransactionBuilderStep.ValidityStartSlot(validityStartSlot),
-          TransactionBuilderStep.ValidityEndSlot(validityEndSlot)
+          TransactionBuilderStep.ValidityEndSlot(validityEndSlot),
+          TransactionBuilderStep.Fee(Coin.ada(1))
         )
 
+        val diffHandler = ChangeOutputDiffHandler(env.protocolParams, 0).changeOutputDiffHandler
+
         // Build the transaction
-        val result = TransactionBuilder.build(network, steps)
+        val result =
+            for
+                ctx <- TransactionBuilder.build(network, steps)
+                r <- ctx.finalizeContext(env.protocolParams, diffHandler, env.evaluator, Seq.empty)
+            yield r
 
         result match
             case Right(context) => context.transaction
@@ -129,6 +137,5 @@ class TxBuilder(val exchangeParams: ExchangeParams, val network: Network) {
         result match
             case Right(context) => context.transaction
             case Left(error)    => throw new RuntimeException(s"Transaction build failed: $error")
-
     }
 }

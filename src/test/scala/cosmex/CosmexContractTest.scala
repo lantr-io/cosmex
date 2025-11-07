@@ -7,10 +7,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.*
+import scalus.builtin.Data.{toData, FromData, ToData}
 import scalus.builtin.{Builtins, ByteString, Data}
-import scalus.cardano.ledger.{LedgerToPlutusTranslation, SlotConfig, Transaction, TransactionInput, TransactionOutput}
-import scalus.builtin.Data.{FromData, ToData, toData}
-import scalus.cardano.address.Network
+import scalus.cardano.ledger.*
+import scalus.cardano.txbuilder.Environment
 import scalus.ledger.api.v3.*
 import scalus.sir.SIR
 import scalus.uplc.*
@@ -44,12 +44,18 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     private val clientPkh = PubKeyHash(clientPubKeyHash)
     private val clientTxOutRef = TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
     private val validatorUplc = CosmexValidator.mkCosmexValidator(exchangeParams)
-    private val txbuilder = TxBuilder(exchangeParams, Network.Testnet)
+    val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
+
+    val testEnvironmentWithoutEvaluator: Environment = Environment(
+      cardanoInfo = CardanoInfo.mainnet,
+      evaluator = (_: Transaction, _: Map[TransactionInput, TransactionOutput]) => Seq.empty
+    )
+    private val txbuilder = TxBuilder(exchangeParams, testEnvironmentWithoutEvaluator)
 
     test(s"Cosmex Validator size is ${validatorUplc.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.cborEncoded.length
-        assert(length == 10358)
+        assert(length == 10799)
     }
 
     testSerialization[Action]()
