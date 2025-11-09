@@ -4,14 +4,16 @@ import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.Networks
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import scalus.builtin.{Builtins, ByteString}
+import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
+import scalus.cardano.ledger.LedgerToPlutusTranslation
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.node.{LedgerProvider, Provider}
 import scalus.cardano.txbuilder.{Environment, TransactionUnspentOutput}
 import scalus.ledger.api.v1.PubKeyHash
-import scalus.ledger.api.v3.{TxId, TxOutRef}
+import scalus.ledger.api.v3.{TxId, TxOutRef, Value as V3Value}
+import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.uplc.eval.ExBudget
 
 import scala.language.implicitConversions
@@ -74,7 +76,44 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         )
     }
 
-    test("open channel") {
+    // Helper: Create a snapshot and sign it with client key
+    private def mkClientSignedSnapshot(
+        clientAccount: Account,
+        clientTxOutRef: TxOutRef,
+        snapshot: Snapshot
+    ): SignedSnapshot = {
+        val signedInfo = (clientTxOutRef, snapshot)
+        import scalus.builtin.Data.toData
+        val msg = Builtins.serialiseData(signedInfo.toData)
+
+        // Sign with client private key (first 32 bytes only - Ed25519 private key)
+        val clientPrivKeyBytes = clientAccount.privateKeyBytes()
+        val clientPrivKey = ByteString.fromArray(clientPrivKeyBytes.take(32))
+        val clientSignature = platform.signEd25519(clientPrivKey, msg)
+
+        SignedSnapshot(
+          signedSnapshot = snapshot,
+          snapshotClientSignature = clientSignature,
+          snapshotExchangeSignature = ByteString.empty // Exchange hasn't signed yet
+        )
+    }
+
+    // Helper: Create initial snapshot v0 with deposit
+    private def mkInitialSnapshot(depositAmount: Value): Snapshot = {
+        import scalus.ledger.api.v3.Value as V3Value
+        val tradingState = TradingState(
+          tsClientBalance = LedgerToPlutusTranslation.getValue(depositAmount),
+          tsExchangeBalance = V3Value.zero,
+          tsOrders = AssocMap.empty
+        )
+        Snapshot(
+          snapshotTradingState = tradingState,
+          snapshotPendingTx = ScalusOption.None,
+          snapshotVersion = 0
+        )
+    }
+
+    test("open channel with TxBuilder") {
         val provider = this.provider()
         val depositUtxo = provider
             .findUtxo(
@@ -95,20 +134,170 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val value = provider.submit(openChannelTx)
         pprint.pprintln(value)
         assert(value.isRight)
+    }
 
-//        val lockUtxo = provider
-//            .findUtxo(
-//              address = scriptAddress,
-//              transactionId = Some(openChannelTx.id),
-//              datum = Some(DatumOption.Inline(datum)),
-//              minAmount = Some(Coin(lockAmount))
-//            )
-//            .toOption
-//            .get
-//        assert(lockUtxo._2.value.coin == Coin(lockAmount))
-//
-//        val revealTx = revealHtlc(provider, lockUtxo, validPreimage, receiverPkh, beforeTimeout)
-//        provider.setSlot(env.slotConfig.timeToSlot(beforeTimeout.toLong))
-//        assert(provider.submit(revealTx).isRight)
+    test("Server: open channel end-to-end") {
+        val provider = this.provider()
+        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // 1. Client builds open channel transaction
+        val depositUtxo = provider
+            .findUtxo(
+              address = clientAddress,
+              minAmount = Some(Coin.ada(500))
+            )
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(500L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount,
+          validityStartSlot = 1000,
+          validityEndSlot = 2000
+        )
+
+        // 2. Client creates and signs initial snapshot v0
+        // Extract the actual deposit amount from the transaction output to the script
+        val actualDepositAmount = openChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val firstInput = openChannelTx.body.value.inputs.toSeq.head
+        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
+        val initialSnapshot = mkInitialSnapshot(actualDepositAmount)
+        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+
+        // 3. Server validates and signs the snapshot
+        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        assert(validationResult.isRight, s"Validation failed: $validationResult")
+
+        // 4. Extract signed snapshot from server
+        val bothSignedSnapshot = server.signSnapshot(clientTxOutRef, clientSignedSnapshot)
+
+        // Verify exchange signature is not empty
+        assert(bothSignedSnapshot.snapshotExchangeSignature.bytes.nonEmpty, "Exchange signature should not be empty")
+
+        // Verify snapshot version is 0
+        assert(bothSignedSnapshot.signedSnapshot.snapshotVersion == 0, "Initial snapshot version should be 0")
+    }
+
+    test("Server: reject invalid snapshot version") {
+        val provider = this.provider()
+        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        val depositUtxo = provider
+            .findUtxo(
+              address = clientAddress,
+              minAmount = Some(Coin.ada(500))
+            )
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(500L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount,
+          validityStartSlot = 1000,
+          validityEndSlot = 2000
+        )
+
+        // Create snapshot with wrong version (1 instead of 0)
+        val firstInput = openChannelTx.body.value.inputs.toSeq.head
+        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
+        val wrongSnapshot = mkInitialSnapshot(depositAmount).copy(snapshotVersion = 1)
+        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, wrongSnapshot)
+
+        // Should fail validation
+        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        assert(validationResult.isLeft, "Should reject wrong snapshot version")
+        assert(validationResult.left.getOrElse("").contains("Invalid snapshot version"))
+    }
+
+    test("Server: reject snapshot with non-zero exchange balance") {
+        val provider = this.provider()
+        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        val depositUtxo = provider
+            .findUtxo(
+              address = clientAddress,
+              minAmount = Some(Coin.ada(500))
+            )
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(500L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount,
+          validityStartSlot = 1000,
+          validityEndSlot = 2000
+        )
+
+        // Extract the actual deposit amount from the transaction
+        val actualDepositAmount = openChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+
+        // Create snapshot with non-zero exchange balance (should fail validation)
+        // Use actualDepositAmount for client balance so it passes that check,
+        // but set exchange balance to non-zero (which should fail)
+        val firstInput = openChannelTx.body.value.inputs.toSeq.head
+        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
+        val badTradingState = TradingState(
+          tsClientBalance = LedgerToPlutusTranslation.getValue(actualDepositAmount),
+          tsExchangeBalance = LedgerToPlutusTranslation.getValue(Value.ada(100L)), // Should be zero!
+          tsOrders = AssocMap.empty
+        )
+        val badSnapshot = Snapshot(badTradingState, ScalusOption.None, 0)
+        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
+
+        // Should fail validation
+        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        assert(validationResult.isLeft, "Should reject non-zero exchange balance")
+        assert(validationResult.left.getOrElse("").contains("Exchange balance must be zero"))
+    }
+
+    test("Server: reject snapshot with wrong balance") {
+        val provider = this.provider()
+        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        val depositUtxo = provider
+            .findUtxo(
+              address = clientAddress,
+              minAmount = Some(Coin.ada(500))
+            )
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(500L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount,
+          validityStartSlot = 1000,
+          validityEndSlot = 2000
+        )
+
+        // Create snapshot with wrong balance
+        val firstInput = openChannelTx.body.value.inputs.toSeq.head
+        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
+        val badSnapshot = mkInitialSnapshot(Value.ada(400L)) // Wrong amount!
+        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
+
+        // Should fail validation
+        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        assert(validationResult.isLeft, "Should reject wrong balance")
+        assert(validationResult.left.getOrElse("").contains("doesn't match deposit"))
     }
 }

@@ -24,6 +24,14 @@ libraryDependencies += "org.scalus" %% "scalus-cardano-ledger" % scalusVersion
 libraryDependencies += "org.scalus" %% "scalus-bloxbean-cardano-client-lib" % scalusVersion
 libraryDependencies += "org.scalus" %% "scalus-testkit" % scalusVersion % Test
 libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.7.0"
+libraryDependencies ++= Seq(
+  // Tapir for API definition
+  "com.softwaremill.sttp.tapir" %% "tapir-netty-server-sync" % "1.12.2",
+  "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % "1.12.2",
+  // Argument parsing
+  "com.monovore" %% "decline" % "2.5.0",
+  "org.slf4j" % "slf4j-simple" % "2.0.17"
+)
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % "test"
