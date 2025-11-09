@@ -1,24 +1,20 @@
 package cosmex
 
-import com.bloxbean.cardano.client.transaction.spec.Transaction
-import com.bloxbean.cardano.client.transaction.util.TransactionUtil
-import scalus.builtin.Builtins
-import scalus.builtin.ByteString
-import scalus.ledger.api.v1.TxId
-import scalus.ledger.api.v1.TxOutRef
-import scalus.ledger.api.v1.Value
+import scalus.builtin.ToData.tupleToData
+import scalus.builtin.{platform, Builtins}
+import scalus.cardano.address.Address
+import scalus.cardano.ledger.*
+import scalus.cardano.ledger.Credential.ScriptHash
+import scalus.ledger.api.v3.TxOutRef
 
 import java.time.Instant
 import scala.collection.mutable.HashMap
-
-case class ServerState()
-case class Block()
 
 enum ClientRequest:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
     case CreateOrder(order: LimitOrder)
     case CancelOrder(orderId: Int)
-    case CancellAllOrders
+    case CancelAllOrders
     case Settle
     case CloseChannel
 
@@ -55,22 +51,24 @@ enum Command:
 enum Effect:
     case DoNothing
 
-case class ClientId(txOutRef: TxOutRef)
+case class ClientId(txOutRef: TransactionInput)
 case class ClientState()
 
-case class OpenChannelInfo(channelRef: TxOutRef, amount: Value, tx: Transaction, snapshot: SignedSnapshot)
+case class OpenChannelInfo(channelRef: TransactionInput, amount: Value, tx: Transaction, snapshot: SignedSnapshot)
 
-object Server {
-    val CosmexScriptAddress = "cosmex-script-address"
-    val CosmexPubKey = ByteString.fromString("cosmex-pub-key")
-    val serverState = ServerState()
+class Server(env: CardanoInfo, exchangeParams: ExchangeParams) {
+    val program = CosmexContract.mkCosmexProgram(exchangeParams)
+    val script = Script.PlutusV3(program.cborByteString)
+    val CosmexScriptAddress = Address(env.network, ScriptHash(script.scriptHash))
+    val CosmexSignKey = exchangeParams.exchangePubKey
+    val CosmexPubKey = exchangeParams.exchangePubKey
 
     val clients = HashMap.empty[ClientId, ClientState]
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
 
-    def handleClientRequest(request: ClientRequest): Unit = {
+    private def handleClientRequest(request: ClientRequest): Unit = {
         request match
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 validateOpenChannelRequest(tx, snapshot) match
@@ -83,12 +81,10 @@ object Server {
             case _ => List.empty
 
     }
-    def handleEvent(state: ServerState, event: ServerEvent): (ServerState, List[Effect]) = {
-        (state, List.empty)
-    }
+
+    def handleEvent(event: ServerEvent) = {}
 
     def validateOpenChannelRequest(tx: Transaction, snapshot: SignedSnapshot): Either[String, OpenChannelInfo] = {
-        import scala.jdk.CollectionConverters._
 
         // TODO
         // Check that the transaction is valid
@@ -98,10 +94,9 @@ object Server {
         // Check that the snapshot is valid and contains the same pair of assets
         // Check signature
 
-        tx.getBody.getOutputs.asScala.zipWithIndex.filter(_._1.getAddress == CosmexScriptAddress).toVector match
+        tx.body.value.outputs.view.map(_.value).zipWithIndex.filter(_._1.address == CosmexScriptAddress).toVector match
             case Vector((output, idx)) =>
-                val hash = ByteString.fromHex(TransactionUtil.getTxHash(tx))
-                Right(OpenChannelInfo(TxOutRef(TxId(hash), idx), Value.lovelace(output.getValue.getCoin), tx, snapshot))
+                Right(OpenChannelInfo(TransactionInput(tx.id, idx), output.value, tx, snapshot))
             case Vector() => Left("No output to Cosmex script address")
             case _        => Left("More than one output to Cosmex script address")
     }
@@ -114,7 +109,7 @@ object Server {
         val signedInfo = (clientTxOutRef, snapshot.signedSnapshot)
         import scalus.builtin.Data.toData
         val msg = Builtins.serialiseData(signedInfo.toData)
-        val cosmexSignature = ByteString.empty // TODO: sign
+        val cosmexSignature = platform.signEd25519(CosmexSignKey, msg)
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)
     }
 
