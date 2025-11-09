@@ -55,7 +55,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     test(s"Cosmex Validator size is ${validatorUplc.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = validatorUplc.cborEncoded.length
-        assert(length == 10799)
+        assert(length == 10750)
     }
 
     testSerialization[Action]()
@@ -111,7 +111,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
         )
     }
 
-    def assertEval(p: Program, expected: Expected) = {
+    private def assertEval(p: Program, expected: Expected) = {
         val result = p.term.evaluateDebug
         (result, expected) match
             case (Result.Success(result, budget, _, _), Expected.Success(expected)) =>

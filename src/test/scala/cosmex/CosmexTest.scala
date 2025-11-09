@@ -5,14 +5,14 @@ import com.bloxbean.cardano.client.common.model.Networks
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.builtin.{Builtins, ByteString}
-import scalus.cardano.address.{Address, Network}
+import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.node.{LedgerProvider, Provider}
 import scalus.cardano.txbuilder.{Environment, TransactionUnspentOutput}
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
-import scalus.uplc.eval.{ExBudget, PlutusVM}
+import scalus.uplc.eval.ExBudget
 
 import scala.language.implicitConversions
 
