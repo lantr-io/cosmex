@@ -134,8 +134,6 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
     }
 
     private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(pf: PartialFunction[Result, Any]): Any = {
-        val validator = CosmexContract.mkCosmexProgram(exchangeParams)
-
         // Get the first redeemer from the transaction
         val redeemer = tx.witnessSet.redeemers.get.value.toSeq.head
 
@@ -156,8 +154,8 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
               protocolVersion = scalus.cardano.ledger.MajorProtocolVersion(txbuilder.protocolVersion)
             )
 
-        val program = validator $ scriptContext.toData
-        val result = program.evaluateDebug
+        val applied = program $ scriptContext.toData
+        val result = applied.evaluateDebug
         if pf.isDefinedAt(result) then pf(result)
         else fail(s"Unexpected result: $result")
     }
