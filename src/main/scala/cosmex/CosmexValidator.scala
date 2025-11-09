@@ -929,7 +929,7 @@ object CosmexValidator extends DataParameterizedValidator {
 }
 
 object CosmexContract {
-    private given Compiler.Options = Compiler.Options(
+    given Compiler.Options = Compiler.Options(
       targetLoweringBackend = Compiler.TargetLoweringBackend.SumOfProductsLowering
     )
     private val compiledValidator = Compiler.compile(CosmexValidator.validate)

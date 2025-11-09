@@ -29,6 +29,7 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
     import Expected.*
 
     private given PlutusVM = PlutusVM.makePlutusV3VM()
+    import CosmexContract.given // for compiler options
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
@@ -73,9 +74,7 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
         val sir = compile { (i: Interval) =>
             CosmexValidator.validRange(i)._2
         }
-        // println(sir.prettyXTerm.render(100))
         val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV3
-        // println(uplc.prettyXTerm.render(100))
         val i = compile(Interval.between(1, 10)).toUplc().evaluate
         assertEval(uplc $ i, Success(10))
     }
@@ -122,9 +121,11 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
             case _ => fail(s"Unexpected result: $result, expected: $expected")
     }
 
-    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](): Unit = {
+    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](using
+        options: Compiler.Options
+    ): Unit = {
         import scala.language.implicitConversions
-        val program = compileInline((d: Data) => d.to[A].toData).toUplc().plutusV3
+        val program = compileInlineWithOptions(options, (d: Data) => d.to[A].toData).toUplc().plutusV3
         test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
             forAll { (a: A) =>
                 assertEval(program $ a.toData, Success(a.toData))
