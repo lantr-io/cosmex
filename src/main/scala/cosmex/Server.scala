@@ -65,9 +65,19 @@ case class ClientState(
     status: ChannelStatus
 )
 
-case class OpenChannelInfo(channelRef: TransactionInput, amount: Value, tx: Transaction, snapshot: SignedSnapshot)
+case class OpenChannelInfo(
+    channelRef: TransactionInput,
+    amount: Value,
+    tx: Transaction,
+    snapshot: SignedSnapshot
+)
 
-class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provider, exchangePrivKey: ByteString) {
+class Server(
+    env: CardanoInfo,
+    exchangeParams: ExchangeParams,
+    provider: Provider,
+    exchangePrivKey: ByteString
+) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams)
     val script = Script.PlutusV3(program.cborByteString)
     val CosmexScriptAddress = Address(env.network, ScriptHash(script.scriptHash))
@@ -116,26 +126,33 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
 
     def handleEvent(event: ServerEvent) = {}
 
-    def validateOpenChannelRequest(tx: Transaction, snapshot: SignedSnapshot): Either[String, OpenChannelInfo] = {
+    def validateOpenChannelRequest(
+        tx: Transaction,
+        snapshot: SignedSnapshot
+    ): Either[String, OpenChannelInfo] = {
         // Extract the client TxOutRef from the first input (this is the channel identifier)
         val clientTxOutRef = tx.body.value.inputs.toSeq.headOption match
             case Some(input) => TxOutRef(TxId(input.transactionId), input.index)
             case None        => return Left("Transaction has no inputs")
 
         // Find the unique output to Cosmex script address
-        val cosmexOutput = tx.body.value.outputs.view.map(_.value).zipWithIndex
+        val cosmexOutput = tx.body.value.outputs.view
+            .map(_.value)
+            .zipWithIndex
             .filter(_._1.address == CosmexScriptAddress)
             .toVector match
             case Vector((output, idx)) => (output, idx)
             case Vector()              => return Left("No output to Cosmex script address")
-            case _                     => return Left("More than one output to Cosmex script address")
+            case _ => return Left("More than one output to Cosmex script address")
 
         val (output, outputIdx) = cosmexOutput
         val depositAmount = output.value
 
         // Validate snapshot version is 0 (initial snapshot)
         if snapshot.signedSnapshot.snapshotVersion != 0 then
-            return Left(s"Invalid snapshot version: ${snapshot.signedSnapshot.snapshotVersion}, expected 0")
+            return Left(
+              s"Invalid snapshot version: ${snapshot.signedSnapshot.snapshotVersion}, expected 0"
+            )
 
         // Validate snapshot has no pending transactions
         if snapshot.signedSnapshot.snapshotPendingTx.isDefined then
@@ -145,18 +162,21 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
         val tradingState = snapshot.signedSnapshot.snapshotTradingState
 
         // Check that client balance matches deposit amount (convert types for comparison)
-        import scalus.ledger.api.v3.{Value as V3Value}
+        import scalus.ledger.api.v3.Value as V3Value
         val depositAmountV3 = LedgerToPlutusTranslation.getValue(depositAmount)
         if tradingState.tsClientBalance != depositAmountV3 then
-            return Left(s"Client balance ${tradingState.tsClientBalance} doesn't match deposit ${depositAmountV3}")
+            return Left(
+              s"Client balance ${tradingState.tsClientBalance} doesn't match deposit ${depositAmountV3}"
+            )
 
         // Check that exchange balance is zero
         if tradingState.tsExchangeBalance != V3Value.zero then
-            return Left(s"Exchange balance must be zero in initial snapshot, got ${tradingState.tsExchangeBalance}")
+            return Left(
+              s"Exchange balance must be zero in initial snapshot, got ${tradingState.tsExchangeBalance}"
+            )
 
         // Check that there are no orders
-        if !tradingState.tsOrders.isEmpty then
-            return Left("Initial snapshot must have no orders")
+        if !tradingState.tsOrders.isEmpty then return Left("Initial snapshot must have no orders")
 
         // Extract client public key from the datum (we need to check the OnChainState in the output)
         // For now, we'll assume it's validated elsewhere or extract it from the datum
@@ -210,7 +230,9 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
                 val currentVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
                 val newVersion = clientSignedSnapshot.signedSnapshot.snapshotVersion
                 if newVersion != currentVersion + 1 then
-                    return Left(s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}")
+                    return Left(
+                      s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}"
+                    )
 
                 // Verify client signature
                 // Note: We'd need to extract clientPubKey from somewhere - for now skip this check
@@ -223,7 +245,10 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
                     return Left("Order not found in new snapshot")
 
                 // Extract client TxOutRef (stored in OnChainState)
-                val clientTxOutRef = TxOutRef(TxId(clientState.channelRef.transactionId), clientState.channelRef.index)
+                val clientTxOutRef = TxOutRef(
+                  TxId(clientState.channelRef.transactionId),
+                  clientState.channelRef.index
+                )
 
                 // Sign with exchange key
                 val bothSignedSnapshot = signSnapshot(clientTxOutRef, clientSignedSnapshot)
@@ -250,7 +275,9 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
                 val currentVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
                 val newVersion = clientSignedSnapshot.signedSnapshot.snapshotVersion
                 if newVersion != currentVersion + 1 then
-                    return Left(s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}")
+                    return Left(
+                      s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}"
+                    )
 
                 // Verify the order is removed from the trading state
                 val newTradingState = clientSignedSnapshot.signedSnapshot.snapshotTradingState
@@ -258,7 +285,10 @@ class Server(env: CardanoInfo, exchangeParams: ExchangeParams, provider: Provide
                     return Left("Order still exists in new snapshot")
 
                 // Extract client TxOutRef
-                val clientTxOutRef = TxOutRef(TxId(clientState.channelRef.transactionId), clientState.channelRef.index)
+                val clientTxOutRef = TxOutRef(
+                  TxId(clientState.channelRef.transactionId),
+                  clientState.channelRef.index
+                )
 
                 // Sign with exchange key
                 val bothSignedSnapshot = signSnapshot(clientTxOutRef, clientSignedSnapshot)

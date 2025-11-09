@@ -22,8 +22,8 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
       *   - Uses the client's input as the unique channel identifier (clientTxOutRef)
       *
       * Protocol flow (from whitepaper):
-      *   1. Client creates unsigned Tx with initial deposit and ClientSignedSnapshot v0 2. Exchange replies with
-      *      BothSignedSnapshot v0 3. Client signs the Tx and publishes it on-chain
+      *   1. Client creates unsigned Tx with initial deposit and ClientSignedSnapshot v0 2. Exchange
+      *      replies with BothSignedSnapshot v0 3. Client signs the Tx and publishes it on-chain
       *
       * @param clientInput
       *   The UTxO to spend (contains client's funds for deposit)
@@ -87,12 +87,15 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
 
         result match
             case Right(context) => context.transaction
-            case Left(error)    => throw new RuntimeException(s"Channel opening transaction build failed: $error")
+            case Left(error) =>
+                throw new RuntimeException(s"Channel opening transaction build failed: $error")
     }
 
     def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {
         // Create the input (hardcoded as in original)
-        val txId = TransactionHash.fromHex("1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982")
+        val txId = TransactionHash.fromHex(
+          "1ab6879fc08345f51dc9571ac4f530bf8673e0d798758c470f9af6f98e2f3982"
+        )
         val input = TransactionInput(
           transactionId = txId,
           index = 0

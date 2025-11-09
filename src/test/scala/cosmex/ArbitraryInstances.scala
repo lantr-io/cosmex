@@ -67,7 +67,8 @@ trait ArbitraryInstances extends scalus.testing.kit.ArbitraryInstances {
         yield Snapshot(snapshotTradingState, snapshotPendingTx, snapshotVersion)
     }
 
-    val genSignature: Gen[Signature] = Gen.listOfN(64 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
+    val genSignature: Gen[Signature] =
+        Gen.listOfN(64 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
 
     given Arbitrary[SignedSnapshot] = Arbitrary {
         for
@@ -106,7 +107,9 @@ trait ArbitraryInstances extends scalus.testing.kit.ArbitraryInstances {
     given Arbitrary[OnChainState] = Arbitrary {
         for
             clientPkh <- Arbitrary.arbitrary[PubKeyHash]
-            clientPubKey <- Gen.listOfN(32 * 2, Gen.hexChar).map(h => ByteString.fromHex(h.mkString))
+            clientPubKey <- Gen
+                .listOfN(32 * 2, Gen.hexChar)
+                .map(h => ByteString.fromHex(h.mkString))
             clientTxOutRef <- Arbitrary.arbitrary[TxOutRef]
             channelState <- Arbitrary.arbitrary[OnChainChannelState]
         yield OnChainState(clientPkh, clientPubKey, clientTxOutRef, channelState)

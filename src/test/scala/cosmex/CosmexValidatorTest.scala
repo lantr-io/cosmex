@@ -25,7 +25,10 @@ enum Expected {
     case Failure(reason: String)
 }
 
-class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
+class CosmexValidatorTest
+    extends AnyFunSuite
+    with ScalaCheckPropertyChecks
+    with cosmex.ArbitraryInstances {
     import Expected.*
 
     private given PlutusVM = PlutusVM.makePlutusV3VM()
@@ -33,7 +36,8 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
-    private val exchangePubKeyHash = ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val exchangePubKeyHash =
+        ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val exchangeParams = ExchangeParams(
       exchangePkh = PubKeyHash(exchangePubKeyHash),
       contestationPeriodInMilliseconds = 5000,
@@ -41,9 +45,11 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
     )
     private val clientAccount = new Account(Networks.preview(), 2)
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
-    private val clientPubKeyHash = ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val clientPubKeyHash =
+        ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val clientPkh = PubKeyHash(clientPubKeyHash)
-    private val clientTxOutRef = TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
+    private val clientTxOutRef =
+        TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
     private val program = CosmexContract.mkCosmexProgram(exchangeParams)
     private val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
 
@@ -82,23 +88,23 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
     test("Update succeeds when there are both signatures") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val tx = txbuilder.update(state, Seq(state.clientPkh, exchangeParams.exchangePkh))
-        evalCosmexValidator(state, tx)({ case Result.Success(_, _, _, _) => })
+        evalCosmexValidator(state, tx) { case Result.Success(_, _, _, _) => }
     }
 
     test("Update fails when there is no client signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val tx = txbuilder.update(state, Seq(exchangeParams.exchangePkh))
-        evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
+        evalCosmexValidator(state, tx) { case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("clientSigned ? False"))
-        })
+        }
     }
 
     test("Update fails when there is no exchange signature") {
         val state = mkOnChainState(OnChainChannelState.OpenState)
         val tx = txbuilder.update(state, Seq(clientPkh))
-        evalCosmexValidator(state, tx)({ case Result.Failure(_, _, _, logs) =>
+        evalCosmexValidator(state, tx) { case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("exchangeSigned ? False"))
-        })
+        }
     }
 
     private def mkOnChainState(channelState: OnChainChannelState) = {
@@ -125,7 +131,8 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
         options: Compiler.Options
     ): Unit = {
         import scala.language.implicitConversions
-        val program = compileInlineWithOptions(options, (d: Data) => d.to[A].toData).toUplc().plutusV3
+        val program =
+            compileInlineWithOptions(options, (d: Data) => d.to[A].toData).toUplc().plutusV3
         test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
             forAll { (a: A) =>
                 assertEval(program $ a.toData, Success(a.toData))
@@ -133,7 +140,9 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
         }
     }
 
-    private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(pf: PartialFunction[Result, Any]): Any = {
+    private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(
+        pf: PartialFunction[Result, Any]
+    ): Any = {
         // Get the first redeemer from the transaction
         val redeemer = tx.witnessSet.redeemers.get.value.toSeq.head
 
@@ -151,7 +160,8 @@ class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with
               tx = tx,
               utxos = utxos,
               slotConfig = SlotConfig.Preprod,
-              protocolVersion = scalus.cardano.ledger.MajorProtocolVersion(txbuilder.protocolVersion)
+              protocolVersion =
+                  scalus.cardano.ledger.MajorProtocolVersion(txbuilder.protocolVersion)
             )
 
         val applied = program $ scriptContext.toData

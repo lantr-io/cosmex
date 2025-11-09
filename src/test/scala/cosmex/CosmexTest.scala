@@ -39,7 +39,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
-    private val exchangePubKeyHash = ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val exchangePubKeyHash =
+        ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val exchangeParams = ExchangeParams(
       exchangePkh = PubKeyHash(exchangePubKeyHash),
       contestationPeriodInMilliseconds = 5000,
@@ -47,7 +48,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     )
     private val clientAccount = new Account(Networks.preview(), 2)
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
-    private val clientPubKeyHash = ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val clientPubKeyHash =
+        ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val clientPkh = PubKeyHash(clientPubKeyHash)
     private val txbuilder = TxBuilder(exchangeParams, testEnvironmentWithoutEvaluator)
 
@@ -169,20 +171,28 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val firstInput = openChannelTx.body.value.inputs.toSeq.head
         val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         val initialSnapshot = mkInitialSnapshot(actualDepositAmount)
-        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
 
         // 3. Server validates and signs the snapshot
-        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        val validationResult =
+            server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
         assert(validationResult.isRight, s"Validation failed: $validationResult")
 
         // 4. Extract signed snapshot from server
         val bothSignedSnapshot = server.signSnapshot(clientTxOutRef, clientSignedSnapshot)
 
         // Verify exchange signature is not empty
-        assert(bothSignedSnapshot.snapshotExchangeSignature.bytes.nonEmpty, "Exchange signature should not be empty")
+        assert(
+          bothSignedSnapshot.snapshotExchangeSignature.bytes.nonEmpty,
+          "Exchange signature should not be empty"
+        )
 
         // Verify snapshot version is 0
-        assert(bothSignedSnapshot.signedSnapshot.snapshotVersion == 0, "Initial snapshot version should be 0")
+        assert(
+          bothSignedSnapshot.signedSnapshot.snapshotVersion == 0,
+          "Initial snapshot version should be 0"
+        )
     }
 
     test("Server: reject invalid snapshot version") {
@@ -211,10 +221,12 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val firstInput = openChannelTx.body.value.inputs.toSeq.head
         val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         val wrongSnapshot = mkInitialSnapshot(depositAmount).copy(snapshotVersion = 1)
-        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, wrongSnapshot)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, wrongSnapshot)
 
         // Should fail validation
-        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        val validationResult =
+            server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
         assert(validationResult.isLeft, "Should reject wrong snapshot version")
         assert(validationResult.left.getOrElse("").contains("Invalid snapshot version"))
     }
@@ -255,14 +267,17 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         val badTradingState = TradingState(
           tsClientBalance = LedgerToPlutusTranslation.getValue(actualDepositAmount),
-          tsExchangeBalance = LedgerToPlutusTranslation.getValue(Value.ada(100L)), // Should be zero!
+          tsExchangeBalance =
+              LedgerToPlutusTranslation.getValue(Value.ada(100L)), // Should be zero!
           tsOrders = AssocMap.empty
         )
         val badSnapshot = Snapshot(badTradingState, ScalusOption.None, 0)
-        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
 
         // Should fail validation
-        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        val validationResult =
+            server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
         assert(validationResult.isLeft, "Should reject non-zero exchange balance")
         assert(validationResult.left.getOrElse("").contains("Exchange balance must be zero"))
     }
@@ -293,10 +308,12 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val firstInput = openChannelTx.body.value.inputs.toSeq.head
         val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         val badSnapshot = mkInitialSnapshot(Value.ada(400L)) // Wrong amount!
-        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, badSnapshot)
 
         // Should fail validation
-        val validationResult = server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
+        val validationResult =
+            server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
         assert(validationResult.isLeft, "Should reject wrong balance")
         assert(validationResult.left.getOrElse("").contains("doesn't match deposit"))
     }
