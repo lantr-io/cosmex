@@ -133,7 +133,7 @@ case class ExchangeParams(
 object ExchangeParams
 
 @Compile
-object CosmexContract extends DataParameterizedValidator {
+object CosmexValidator extends DataParameterizedValidator {
 
     def findOwnInputAndIndex(inputs: List[TxInInfo], spendingTxOutRef: TxOutRef): (TxInInfo, BigInt) = {
         def go(i: BigInt, txIns: List[TxInInfo]): (TxInInfo, BigInt) = txIns match
@@ -160,7 +160,7 @@ object CosmexContract extends DataParameterizedValidator {
     def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash): Boolean =
         List.exists(signatories)(k.hash === _.hash)
 
-    inline def handleUpdate(
+    def handleUpdate(
         ownInputAddress: Address,
         ownOutput: TxOut,
         state: OnChainState,
@@ -177,7 +177,7 @@ object CosmexContract extends DataParameterizedValidator {
         clientSigned.? && exchangeSigned.? && validNewState.?
     }
 
-    inline def handleClientAbort(
+    def handleClientAbort(
         ownTxInResolvedTxOut: TxOut,
         contestSnapshotStart: PosixTime,
         signatories: List[PubKeyHash],
@@ -251,7 +251,7 @@ object CosmexContract extends DataParameterizedValidator {
                 allFunds === locked
     }
 
-    inline def handleClose(
+    def handleClose(
         initiator: Party,
         ownTxInResolvedTxOut: TxOut,
         contestSnapshotStart: PosixTime,
@@ -292,7 +292,7 @@ object CosmexContract extends DataParameterizedValidator {
                                 && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    inline def handleContestClose(
+    def handleContestClose(
         params: ExchangeParams,
         tradeContestStart: PosixTime,
         signatories: List[PubKeyHash],
@@ -346,7 +346,7 @@ object CosmexContract extends DataParameterizedValidator {
                                     ) && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    inline def handleContestTimeout(
+    def handleContestTimeout(
         contestSnapshotStart: PosixTime,
         contestationPeriodInMilliseconds: PosixTime,
         txInfoValidRange: (PosixTime, PosixTime),
@@ -384,7 +384,7 @@ object CosmexContract extends DataParameterizedValidator {
                                 timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    inline def handleTradesContestTimeout(
+    def handleTradesContestTimeout(
         params: ExchangeParams,
         start: PosixTime,
         tradeContestStart: PosixTime,
@@ -411,7 +411,7 @@ object CosmexContract extends DataParameterizedValidator {
                         timeoutPassed && expectNewState(ownOutput, ownInputAddress, newState, ownInputValue)
     }
 
-    inline def handleContestTrades(
+    def handleContestTrades(
         params: ExchangeParams,
         signatories: List[PubKeyHash],
         actionTrades: List[Trade],
@@ -460,7 +460,7 @@ object CosmexContract extends DataParameterizedValidator {
       client2--| Tx  |--client2
               |-----|
      */
-    inline def handlePayoutTransfer(
+    def handlePayoutTransfer(
         state: OnChainState,
         redeemers: SortedMap[ScriptPurpose, Redeemer],
         inputs: List[TxInInfo],
@@ -516,7 +516,7 @@ object CosmexContract extends DataParameterizedValidator {
                 )
     }
 
-    inline def handlePayoutPayout(
+    def handlePayoutPayout(
         params: ExchangeParams,
         state: OnChainState,
         clientBalance: Value,
@@ -553,7 +553,7 @@ object CosmexContract extends DataParameterizedValidator {
                             expectNewState(ownOutput, ownInputAddress, newState, newOutputValue)
     }
 
-    inline def handleOpenState(
+    def handleOpenState(
         action: Action,
         ownOutput: TxOut,
         ownTxInResolvedTxOut: TxOut,
@@ -604,7 +604,7 @@ object CosmexContract extends DataParameterizedValidator {
                 )
             case _ => fail("Invalid action")
 
-    inline def handleSnapshotContestState(
+    def handleSnapshotContestState(
         action: Action,
         contestChannelTxOutRef: TxOutRef,
         contestInitiator: Party,
@@ -647,7 +647,7 @@ object CosmexContract extends DataParameterizedValidator {
                 )
             case _ => fail("Invalid action")
 
-    inline def handleTradesContestState(
+    def handleTradesContestState(
         action: Action,
         latestTradingState: TradingState,
         ownOutput: TxOut,
@@ -685,7 +685,7 @@ object CosmexContract extends DataParameterizedValidator {
                 )
             case _ => fail("Invalid action")
 
-    inline def handlePayoutState(
+    def handlePayoutState(
         action: Action,
         clientBalance: Value,
         exchangeBalance: Value,
@@ -721,7 +721,7 @@ object CosmexContract extends DataParameterizedValidator {
                 )
             case _ => fail("Invalid action")
 
-    inline def cosmexSpending(
+    def cosmexSpending(
         params: ExchangeParams,
         state: OnChainState,
         action: Action,
@@ -928,13 +928,13 @@ object CosmexContract extends DataParameterizedValidator {
     }
 }
 
-object CosmexValidator {
+object CosmexContract {
     private given Compiler.Options = Compiler.Options(
       targetLoweringBackend = Compiler.TargetLoweringBackend.SumOfProductsLowering
     )
-    private val compiledValidator = Compiler.compile(CosmexContract.validate)
+    private val compiledValidator = Compiler.compile(CosmexValidator.validate)
 
-    def mkCosmexValidator(params: ExchangeParams): Program = {
+    def mkCosmexProgram(params: ExchangeParams): Program = {
         val program = compiledValidator.toUplcOptimized().plutusV3
         val uplcProgram = program $ params.toData
         uplcProgram

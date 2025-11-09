@@ -11,7 +11,7 @@ import scalus.ledger.api.v3.{TxId, TxOutRef}
 class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
     private val network = env.network
     val protocolVersion = 9
-    private val cosmexValidator = CosmexValidator.mkCosmexValidator(exchangeParams)
+    private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
     private val script = Script.PlutusV3(cosmexValidator.cborByteString)
 
     /** Opens a new channel by depositing funds to the Cosmex script address.

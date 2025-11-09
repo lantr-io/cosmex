@@ -25,37 +25,37 @@ enum Expected {
     case Failure(reason: String)
 }
 
-class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
+class CosmexValidatorTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     import Expected.*
 
     private given PlutusVM = PlutusVM.makePlutusV3VM()
 
     private val exchangeAccount = new Account(Networks.preview(), 1)
-    private val exchagePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
-    private val exchagePubKeyHash = ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
+    private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
+    private val exchangePubKeyHash = ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val exchangeParams = ExchangeParams(
-      exchangePkh = PubKeyHash(exchagePubKeyHash),
+      exchangePkh = PubKeyHash(exchangePubKeyHash),
       contestationPeriodInMilliseconds = 5000,
-      exchangePubKey = exchagePubKey
+      exchangePubKey = exchangePubKey
     )
     private val clientAccount = new Account(Networks.preview(), 2)
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
     private val clientPubKeyHash = ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val clientPkh = PubKeyHash(clientPubKeyHash)
     private val clientTxOutRef = TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
-    private val validatorUplc = CosmexValidator.mkCosmexValidator(exchangeParams)
-    val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
+    private val program = CosmexContract.mkCosmexProgram(exchangeParams)
+    private val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
 
-    val testEnvironmentWithoutEvaluator: Environment = Environment(
+    private val testEnvironmentWithoutEvaluator: Environment = Environment(
       cardanoInfo = CardanoInfo.mainnet,
       evaluator = (_: Transaction, _: Map[TransactionInput, TransactionOutput]) => Seq.empty
     )
     private val txbuilder = TxBuilder(exchangeParams, testEnvironmentWithoutEvaluator)
 
-    test(s"Cosmex Validator size is ${validatorUplc.cborEncoded.length}") {
+    test(s"Cosmex Validator size is ${program.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
-        val length = validatorUplc.cborEncoded.length
-        assert(length == 10750)
+        val length = program.cborEncoded.length
+        assert(length == 10910)
     }
 
     testSerialization[Action]()
@@ -71,7 +71,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
 
     test("validRange") {
         val sir = compile { (i: Interval) =>
-            CosmexContract.validRange(i)._2
+            CosmexValidator.validRange(i)._2
         }
         // println(sir.prettyXTerm.render(100))
         val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV3
@@ -133,7 +133,7 @@ class CosmexContractTest extends AnyFunSuite with ScalaCheckPropertyChecks with 
     }
 
     private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(pf: PartialFunction[Result, Any]): Any = {
-        val validator = CosmexValidator.mkCosmexValidator(exchangeParams)
+        val validator = CosmexContract.mkCosmexProgram(exchangeParams)
 
         // Get the first redeemer from the transaction
         val redeemer = tx.witnessSet.redeemers.get.value.toSeq.head
