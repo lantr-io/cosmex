@@ -1,14 +1,13 @@
 package cosmex
-import scalus.builtin.{platform, ByteString}
 import scalus.builtin.Data.toData
+import scalus.builtin.platform
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.*
-import scalus.cardano.txbuilder.LowLevelTxBuilder.ChangeOutputDiffHandler
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
-class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
+class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
     private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
@@ -39,11 +38,9 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
       *   An unsigned Transaction that opens the channel
       */
     def openChannel(
-        clientInput: TransactionUnspentOutput,
-        clientPubKey: ByteString,
-        depositAmount: Value,
-        validityStartSlot: Long,
-        validityEndSlot: Long
+        clientInput: Utxo,
+        clientPubKey: Signature,
+        depositAmount: Value
     ): Transaction = {
         // The script address where funds will be locked
         val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
@@ -70,9 +67,6 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
           TransactionBuilderStep.Spend(clientInput),
           // Send funds to the script address with initial state
           TransactionBuilderStep.Send(channelOutput),
-          // Set validity range
-          TransactionBuilderStep.ValidityStartSlot(validityStartSlot),
-          TransactionBuilderStep.ValidityEndSlot(validityEndSlot),
           TransactionBuilderStep.Fee(Coin.ada(1))
         )
 
@@ -82,7 +76,12 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
         val result =
             for
                 ctx <- TransactionBuilder.build(network, steps)
-                r <- ctx.finalizeContext(env.protocolParams, diffHandler, env.evaluator, Seq.empty)
+                r <- ctx.finalizeContext(
+                  env.protocolParams,
+                  diffHandler,
+                  PlutusScriptEvaluator.noop,
+                  Seq.empty
+                )
             yield r
 
         result match
@@ -113,7 +112,7 @@ class TxBuilder(val exchangeParams: ExchangeParams, env: Environment) {
         )
 
         // Create the UTxO to spend
-        val utxo = TransactionUnspentOutput(input, output)
+        val utxo = Utxo(input, output)
 
         // Create the witness with Scalus types
         val witness = ThreeArgumentPlutusScriptWitness(

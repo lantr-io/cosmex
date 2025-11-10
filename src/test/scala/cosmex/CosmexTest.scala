@@ -7,13 +7,13 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.ledger.LedgerToPlutusTranslation
 import scalus.cardano.ledger.rules.*
-import scalus.cardano.node.{LedgerProvider, Provider}
+import scalus.cardano.node.Provider
 import scalus.cardano.txbuilder.{Environment, TransactionUnspentOutput}
 import scalus.ledger.api.v1.PubKeyHash
-import scalus.ledger.api.v3.{TxId, TxOutRef, Value as V3Value}
+import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
+import scalus.testing.kit.MockLedgerApi
 import scalus.uplc.eval.ExBudget
 
 import scala.language.implicitConversions
@@ -22,21 +22,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     val cardanoInfo: CardanoInfo = CardanoInfo.mainnet
     val testProtocolParams: ProtocolParams = cardanoInfo.protocolParams
-    val testEnvironmentWithoutEvaluator: Environment = Environment(
-      cardanoInfo = cardanoInfo,
-      evaluator = (_: Transaction, _: Map[TransactionInput, TransactionOutput]) => Seq.empty
-    )
-
-    val testEnvironmentWithEvaluator: Environment = Environment(
-      cardanoInfo = cardanoInfo,
-      evaluator = PlutusScriptEvaluator(
-        slotConfig = cardanoInfo.slotConfig,
-        initialBudget = ExBudget.enormous,
-        protocolMajorVersion = cardanoInfo.majorProtocolVersion,
-        costModels = testProtocolParams.costModels
-      )
-    )
-
+    val testEnv: Environment = cardanoInfo
     private val exchangeAccount = new Account(Networks.preview(), 1)
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
     private val exchangePubKeyHash =
@@ -51,7 +37,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private val clientPubKeyHash =
         ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
     private val clientPkh = PubKeyHash(clientPubKeyHash)
-    private val txbuilder = TxBuilder(exchangeParams, testEnvironmentWithoutEvaluator)
+    private val txbuilder = Transactions(exchangeParams, testEnv)
 
     private val clientAddress = Address(
       cardanoInfo.network,
@@ -69,12 +55,12 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     )
 
     private def provider(): Provider = {
-        LedgerProvider(
+        MockLedgerApi(
           initialUtxos = initialUtxos,
           context = Context.testMainnet(slot = 1000),
           validators =
-              LedgerProvider.defaultValidators - MissingKeyHashesValidator - ProtocolParamsViewHashesMatchValidator - MissingRequiredDatumsValidator,
-          mutators = LedgerProvider.defaultMutators - PlutusScriptsTransactionMutator
+              MockLedgerApi.defaultValidators - MissingKeyHashesValidator - ProtocolParamsViewHashesMatchValidator - MissingRequiredDatumsValidator,
+          mutators = MockLedgerApi.defaultMutators - PlutusScriptsTransactionMutator
         )
     }
 
@@ -126,11 +112,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .get
 
         val openChannelTx = txbuilder.openChannel(
-          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientInput = depositUtxo,
           clientPubKey = clientPubKey,
-          depositAmount = Value.ada(500L),
-          validityStartSlot = 1000,
-          validityEndSlot = 2000
+          depositAmount = Value.ada(500L)
         )
 
         val value = provider.submit(openChannelTx)
@@ -154,11 +138,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val depositAmount = Value.ada(500L)
         val openChannelTx = txbuilder.openChannel(
-          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientInput = depositUtxo,
           clientPubKey = clientPubKey,
-          depositAmount = depositAmount,
-          validityStartSlot = 1000,
-          validityEndSlot = 2000
+          depositAmount = depositAmount
         )
 
         // 2. Client creates and signs initial snapshot v0
@@ -210,11 +192,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val depositAmount = Value.ada(500L)
         val openChannelTx = txbuilder.openChannel(
-          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientInput = depositUtxo,
           clientPubKey = clientPubKey,
-          depositAmount = depositAmount,
-          validityStartSlot = 1000,
-          validityEndSlot = 2000
+          depositAmount = depositAmount
         )
 
         // Create snapshot with wrong version (1 instead of 0)
@@ -246,11 +226,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val depositAmount = Value.ada(500L)
         val openChannelTx = txbuilder.openChannel(
-          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientInput = depositUtxo,
           clientPubKey = clientPubKey,
-          depositAmount = depositAmount,
-          validityStartSlot = 1000,
-          validityEndSlot = 2000
+          depositAmount = depositAmount
         )
 
         // Extract the actual deposit amount from the transaction
@@ -297,11 +275,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val depositAmount = Value.ada(500L)
         val openChannelTx = txbuilder.openChannel(
-          clientInput = TransactionUnspentOutput(depositUtxo),
+          clientInput = depositUtxo,
           clientPubKey = clientPubKey,
-          depositAmount = depositAmount,
-          validityStartSlot = 1000,
-          validityEndSlot = 2000
+          depositAmount = depositAmount
         )
 
         // Create snapshot with wrong balance
