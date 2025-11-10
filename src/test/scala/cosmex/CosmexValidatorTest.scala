@@ -11,11 +11,13 @@ import scalus.builtin.Data.{toData, FromData, ToData}
 import scalus.builtin.{Builtins, ByteString, Data}
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.Environment
+import scalus.compiler.sir.TargetLoweringBackend.SumOfProductsLowering
 import scalus.ledger.api.v3.*
 import scalus.sir.SIR
 import scalus.uplc.*
+import scalus.uplc.Term.asTerm
 import scalus.uplc.TermDSL.given
-import scalus.uplc.eval.{PlutusVM, Result}
+import scalus.uplc.eval.{ExBudget, ExCPU, ExMemory, PlutusVM, Result}
 
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
@@ -102,6 +104,24 @@ class CosmexValidatorTest
         evalCosmexValidator(state, tx) { case Result.Failure(_, _, _, logs) =>
             assert(logs.mkString("").contains("exchangeSigned ? False"))
         }
+    }
+
+    test("it's much cheaper to compute hash vs store in datum") {
+        val sir = compileWithOptions(
+          Compiler.Options.default.copy(targetLoweringBackend = SumOfProductsLowering),
+          { Builtins.blake2b_224 }
+        )
+        val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV3 $ clientPubKey.asTerm
+        val result = uplc.term.evaluateDebug
+        assert(result.budget == ExBudget(cpu = ExCPU(288956), memory = ExMemory(404)))
+        val executionUnitPrices = testProtocolParams.executionUnitPrices
+        val exUnits = result.budget
+        val computationFee =
+            (executionUnitPrices.priceMemory * exUnits.memory + executionUnitPrices.priceSteps * exUnits.cpu).ceil
+        assert(computationFee == 45L)
+        val datumFee = clientPubKeyHash.toData.toCbor.length * testProtocolParams.txFeePerByte
+        assert(datumFee == 1320L)
+        assert(computationFee < datumFee)
     }
 
     private def mkOnChainState(channelState: OnChainChannelState) = {
