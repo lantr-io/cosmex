@@ -12,6 +12,10 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
     private val script = Script.PlutusV3(cosmexValidator.cborByteString)
+    private val evaluator = PlutusScriptEvaluator(
+      cardanoInfo = env,
+      mode = EvaluatorMode.EvaluateAndComputeCost
+    )
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
       *
@@ -67,9 +71,9 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
           TransactionBuilderStep.Spend(clientInput),
           // Send funds to the script address with initial state
           TransactionBuilderStep.Send(channelOutput),
-          TransactionBuilderStep.Fee(Coin.ada(1))
         )
 
+        // FIXME: handle change properly
         val diffHandler = ChangeOutputDiffHandler(env.protocolParams, 0).changeOutputDiffHandler
 
         // Build the transaction
@@ -133,11 +137,23 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
           TransactionBuilderStep.Fee(Coin(200000)) // 0.2 ADA = 200,000 lovelace
         )
 
+        val diffHandler = ChangeOutputDiffHandler(env.protocolParams, 0).changeOutputDiffHandler
+
         // Build the transaction
-        val result = TransactionBuilder.build(network, steps)
+        val result =
+            for
+                ctx <- TransactionBuilder.build(network, steps)
+                r <- ctx.finalizeContext(
+                  env.protocolParams,
+                  diffHandler,
+                  evaluator,
+                  Seq.empty
+                )
+            yield r
 
         result match
             case Right(context) => context.transaction
-            case Left(error)    => throw new RuntimeException(s"Transaction build failed: $error")
+            case Left(error) =>
+                throw new RuntimeException(s"Channel opening transaction build failed: $error")
     }
 }
