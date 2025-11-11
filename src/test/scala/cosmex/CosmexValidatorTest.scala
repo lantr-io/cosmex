@@ -107,6 +107,7 @@ class CosmexValidatorTest
     }
 
     test("it's much cheaper to compute hash vs store in datum") {
+        // what's cheaper: storing clientPubKeyHash in datum vs computing it from clientPubKey?
         val sir = compileWithOptions(
           Compiler.Options.default.copy(targetLoweringBackend = SumOfProductsLowering),
           { Builtins.blake2b_224 }

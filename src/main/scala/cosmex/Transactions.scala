@@ -146,7 +146,7 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
                 r <- ctx.finalizeContext(
                   env.protocolParams,
                   diffHandler,
-                  evaluator,
+                  PlutusScriptEvaluator.noop,
                   Seq.empty
                 )
             yield r
