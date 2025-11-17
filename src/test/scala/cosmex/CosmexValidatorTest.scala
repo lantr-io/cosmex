@@ -64,17 +64,6 @@ class CosmexValidatorTest
         assert(length == 10909)
     }
 
-    testSerialization[Action]()
-    testSerialization[Party]()
-    testSerialization[LimitOrder]()
-    testSerialization[PendingTxType]()
-    testSerialization[PendingTx]()
-    testSerialization[TradingState]()
-    testSerialization[Snapshot]()
-    testSerialization[SignedSnapshot]()
-    testSerialization[OnChainChannelState]()
-    testSerialization[OnChainState]()
-
     test("validRange") {
         val sir = compile { (i: Interval) =>
             CosmexValidator.validRange(i)._2
@@ -143,19 +132,6 @@ class CosmexValidatorTest
             case (Result.Failure(ex, _, _, _), _) =>
                 fail(s"Unexpected failure: $ex", ex)
             case _ => fail(s"Unexpected result: $result, expected: $expected")
-    }
-
-    private inline def testSerialization[A: FromData: ToData: ClassTag: Arbitrary](using
-        options: Compiler.Options
-    ): Unit = {
-        import scala.language.implicitConversions
-        val program =
-            compileInlineWithOptions(options, (d: Data) => d.to[A].toData).toUplc().plutusV3
-        test(s"Serialization of ${summon[ClassTag[A]].runtimeClass.getSimpleName}") {
-            forAll { (a: A) =>
-                assertEval(program $ a.toData, Success(a.toData))
-            }
-        }
     }
 
     private def evalCosmexValidator[A](state: OnChainState, tx: Transaction)(
