@@ -36,10 +36,10 @@ jobs:
             ${{ runner.os }}-sbt-
 
       - name: Check formatting
-        run: sbtn scalafmtCheckAll scalafmtSbtCheck
+        run: sbt scalafmtCheckAll scalafmtSbtCheck
 
       - name: Run tests
-        run: sbtn test
+        run: sbt test
 
       - name: Report build status
         uses: sarisia/actions-status-discord@v1
