@@ -61,7 +61,7 @@ class CosmexValidatorTest
     test(s"Cosmex Validator size is ${program.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = program.cborEncoded.length
-        assert(length == 10910)
+        assert(length == 10909)
     }
 
     testSerialization[Action]()
