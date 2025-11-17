@@ -58,40 +58,12 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
           channelState = OnChainChannelState.OpenState
         )
 
-        // Create the output with the deposited funds and initial state
-        val channelOutput = TransactionOutput(
-          address = scriptAddress,
-          value = depositAmount,
-          datumOption = DatumOption.Inline(initialState.toData)
-        )
-
-        // Build transaction steps
-        val steps = Seq(
-          // Spend the client's input (no witness needed for unsigned tx)
-          TransactionBuilderStep.Spend(clientInput),
-          // Send funds to the script address with initial state
-          TransactionBuilderStep.Send(channelOutput),
-        )
-
-        // FIXME: handle change properly
-        val diffHandler = ChangeOutputDiffHandler(env.protocolParams, 0).changeOutputDiffHandler
-
-        // Build the transaction
-        val result =
-            for
-                ctx <- TransactionBuilder.build(network, steps)
-                r <- ctx.finalizeContext(
-                  env.protocolParams,
-                  diffHandler,
-                  PlutusScriptEvaluator.noop,
-                  Seq.empty
-                )
-            yield r
-
-        result match
-            case Right(context) => context.transaction
-            case Left(error) =>
-                throw new RuntimeException(s"Channel opening transaction build failed: $error")
+        TxBuilder(env)
+            .spend(clientInput)
+            .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+            .changeTo(clientInput.output.address)
+            .build()
+            .transaction
     }
 
     def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {

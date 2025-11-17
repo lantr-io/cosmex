@@ -8,15 +8,11 @@ import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
-import scalus.cardano.node.Provider
-import scalus.cardano.txbuilder.{Environment, TransactionUnspentOutput}
+import scalus.cardano.txbuilder.Environment
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
-import scalus.uplc.eval.ExBudget
-
-import scala.language.implicitConversions
 
 class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
 
@@ -54,7 +50,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           )
     )
 
-    private def provider(): Provider = {
+    private def newEmulator(): MockLedgerApi = {
         MockLedgerApi(
           initialUtxos = initialUtxos,
           context = Context.testMainnet(slot = 1000),
@@ -102,7 +98,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     }
 
     test("open channel with TxBuilder") {
-        val provider = this.provider()
+        val provider = this.newEmulator()
         val depositUtxo = provider
             .findUtxo(
               address = clientAddress,
@@ -118,12 +114,13 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         )
 
         val value = provider.submit(openChannelTx)
+        pprint.pprintln(openChannelTx)
         pprint.pprintln(value)
         assert(value.isRight)
     }
 
     test("Server: open channel end-to-end") {
-        val provider = this.provider()
+        val provider = this.newEmulator()
         val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
@@ -178,7 +175,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     }
 
     test("Server: reject invalid snapshot version") {
-        val provider = this.provider()
+        val provider = this.newEmulator()
         val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
@@ -212,7 +209,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     }
 
     test("Server: reject snapshot with non-zero exchange balance") {
-        val provider = this.provider()
+        val provider = this.newEmulator()
         val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
@@ -261,7 +258,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     }
 
     test("Server: reject snapshot with wrong balance") {
-        val provider = this.provider()
+        val provider = this.newEmulator()
         val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
