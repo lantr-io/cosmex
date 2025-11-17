@@ -613,9 +613,8 @@ object CosmexValidator extends DataParameterizedValidator {
                                 case Credential.ScriptCredential(hash) =>
                                     fail("Invalid payout")
                 else
-                    val min = (a: BigInt, b: BigInt) => if a < b then a else b
                     val availableForPayment =
-                        Value.zero // FIXME: Value.unionWith(min)(clientBalance, ownInputValue)
+                        Value.zero // FIXME: Value.unionWith((a: BigInt, b: BigInt) => if a < b then a else b)(clientBalance, ownInputValue)
                     val newOutputValue = ownInputValue - availableForPayment
                     val newClientBalance = clientBalance - availableForPayment
                     state match

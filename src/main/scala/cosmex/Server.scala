@@ -10,6 +10,7 @@ import scalus.cardano.node.Provider
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
 import java.time.Instant
+import scala.annotation.unused
 import scala.collection.mutable.HashMap
 
 enum ClientRequest:
@@ -75,7 +76,7 @@ case class OpenChannelInfo(
 class Server(
     env: CardanoInfo,
     exchangeParams: ExchangeParams,
-    provider: Provider,
+    @unused provider: Provider,
     exchangePrivKey: ByteString
 ) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams)
@@ -130,10 +131,9 @@ class Server(
         tx: Transaction,
         snapshot: SignedSnapshot
     ): Either[String, OpenChannelInfo] = {
-        // Extract the client TxOutRef from the first input (this is the channel identifier)
-        val clientTxOutRef = tx.body.value.inputs.toSeq.headOption match
-            case Some(input) => TxOutRef(TxId(input.transactionId), input.index)
-            case None        => return Left("Transaction has no inputs")
+        // Validate transaction has at least one input
+        if tx.body.value.inputs.toSeq.headOption.isEmpty then
+            return Left("Transaction has no inputs")
 
         // Find the unique output to Cosmex script address
         val cosmexOutput = tx.body.value.outputs.view
@@ -217,7 +217,7 @@ class Server(
     def handleCreateOrder(
         clientId: ClientId,
         orderId: OrderId,
-        order: LimitOrder,
+        @unused order: LimitOrder,
         clientSignedSnapshot: SignedSnapshot
     ): Either[String, SignedSnapshot] = {
         clients.get(clientId) match
@@ -322,7 +322,7 @@ class Server(
         println(tx)
     }
 
-    def reply(response: ClientResponse): List[ServerEvent] = {
+    def reply(@unused response: ClientResponse): List[ServerEvent] = {
         List.empty
     }
 }

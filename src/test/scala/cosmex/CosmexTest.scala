@@ -32,7 +32,6 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
     private val clientPubKeyHash =
         ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
-    private val clientPkh = PubKeyHash(clientPubKeyHash)
     private val txbuilder = Transactions(exchangeParams, testEnv)
 
     private val clientAddress = Address(

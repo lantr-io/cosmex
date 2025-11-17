@@ -12,10 +12,6 @@ class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
     private val script = Script.PlutusV3(cosmexValidator.cborByteString)
-    private val evaluator = PlutusScriptEvaluator(
-      cardanoInfo = env,
-      mode = EvaluatorMode.EvaluateAndComputeCost
-    )
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
       *

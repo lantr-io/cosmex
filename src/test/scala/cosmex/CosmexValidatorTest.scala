@@ -2,12 +2,11 @@ package cosmex
 
 import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.Networks
-import org.scalacheck.Arbitrary
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.*
 import scalus.Compiler.*
-import scalus.builtin.Data.{toData, FromData, ToData}
+import scalus.builtin.Data.toData
 import scalus.builtin.{Builtins, ByteString, Data}
 import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.Environment
@@ -17,10 +16,9 @@ import scalus.sir.SIR
 import scalus.uplc.*
 import scalus.uplc.Term.asTerm
 import scalus.uplc.TermDSL.given
-import scalus.uplc.eval.{ExBudget, ExCPU, ExMemory, PlutusVM, Result}
+import scalus.uplc.eval.{PlutusVM, Result}
 
 import scala.language.implicitConversions
-import scala.reflect.ClassTag
 
 enum Expected {
     case Success(value: Term)
@@ -103,11 +101,11 @@ class CosmexValidatorTest
         )
         val uplc = sir.toUplcOptimized(generateErrorTraces = true).plutusV3 $ clientPubKey.asTerm
         val result = uplc.term.evaluateDebug
-        assert(result.budget == ExBudget(cpu = ExCPU(288956), memory = ExMemory(404)))
+        assert(result.budget == ExUnits(memory = 404, steps = 288956))
         val executionUnitPrices = testProtocolParams.executionUnitPrices
         val exUnits = result.budget
         val computationFee =
-            (executionUnitPrices.priceMemory * exUnits.memory + executionUnitPrices.priceSteps * exUnits.cpu).ceil
+            (executionUnitPrices.priceMemory * exUnits.memory + executionUnitPrices.priceSteps * exUnits.steps).ceil
         assert(computationFee == 45L)
         val datumFee = clientPubKeyHash.toData.toCbor.length * testProtocolParams.txFeePerByte
         assert(datumFee == 1320L)
