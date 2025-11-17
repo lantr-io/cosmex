@@ -1,5 +1,5 @@
 val scala3Version = "3.3.7"
-val scalusVersion = "0.13.0+244-5b5bd03e-SNAPSHOT"
+val scalusVersion = "0.13.0+285-b30d5141-SNAPSHOT"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
@@ -26,8 +26,8 @@ libraryDependencies += "org.scalus" %% "scalus-testkit" % scalusVersion % Test
 libraryDependencies += "com.bloxbean.cardano" % "cardano-client-lib" % "0.7.0"
 libraryDependencies ++= Seq(
   // Tapir for API definition
-  "com.softwaremill.sttp.tapir" %% "tapir-netty-server-sync" % "1.12.2",
-  "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % "1.12.2",
+  "com.softwaremill.sttp.tapir" %% "tapir-netty-server-sync" % "1.12.3",
+  "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % "1.12.3",
   // Argument parsing
   "com.monovore" %% "decline" % "2.5.0",
   "org.slf4j" % "slf4j-simple" % "2.0.17"
