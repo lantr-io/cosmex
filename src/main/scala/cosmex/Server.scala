@@ -214,11 +214,10 @@ class Server(
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)
     }
 
-    def handleCreateOrder(
+    private def updateTradingState(
         clientId: ClientId,
-        orderId: OrderId,
-        @unused order: LimitOrder,
-        clientSignedSnapshot: SignedSnapshot
+        clientSignedSnapshot: SignedSnapshot,
+        validateTradingState: TradingState => Either[String, Unit]
     ): Either[String, SignedSnapshot] = {
         clients.get(clientId) match
             case None => Left("Client not found")
@@ -234,15 +233,11 @@ class Server(
                       s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}"
                     )
 
-                // Verify client signature
-                // Note: We'd need to extract clientPubKey from somewhere - for now skip this check
-                // if !verifyClientSignature(clientPubKey, clientTxOutRef, clientSignedSnapshot) then
-                //     return Left("Invalid client signature")
-
-                // Verify the order is added to the trading state
+                // Validate trading state using the provided validation function
                 val newTradingState = clientSignedSnapshot.signedSnapshot.snapshotTradingState
-                if !newTradingState.tsOrders.toList.exists(_._1 == orderId) then
-                    return Left("Order not found in new snapshot")
+                validateTradingState(newTradingState) match
+                    case Left(error) => return Left(error)
+                    case Right(_)    => ()
 
                 // Extract client TxOutRef (stored in OnChainState)
                 val clientTxOutRef = TxOutRef(
@@ -260,44 +255,35 @@ class Server(
                 Right(bothSignedSnapshot)
     }
 
+    def handleCreateOrder(
+        clientId: ClientId,
+        orderId: OrderId,
+        @unused order: LimitOrder,
+        clientSignedSnapshot: SignedSnapshot
+    ): Either[String, SignedSnapshot] = {
+        updateTradingState(
+          clientId,
+          clientSignedSnapshot,
+          tradingState =>
+              if !tradingState.tsOrders.toList.exists(_._1 == orderId) then
+                  Left("Order not found in new snapshot")
+              else Right(())
+        )
+    }
+
     def handleCancelOrder(
         clientId: ClientId,
         orderId: OrderId,
         clientSignedSnapshot: SignedSnapshot
     ): Either[String, SignedSnapshot] = {
-        clients.get(clientId) match
-            case None => Left("Client not found")
-            case Some(clientState) =>
-                if clientState.status != ChannelStatus.Open then
-                    return Left(s"Channel is not open, status: ${clientState.status}")
-
-                // Verify snapshot version increments by 1
-                val currentVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
-                val newVersion = clientSignedSnapshot.signedSnapshot.snapshotVersion
-                if newVersion != currentVersion + 1 then
-                    return Left(
-                      s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}"
-                    )
-
-                // Verify the order is removed from the trading state
-                val newTradingState = clientSignedSnapshot.signedSnapshot.snapshotTradingState
-                if newTradingState.tsOrders.toList.exists(_._1 == orderId) then
-                    return Left("Order still exists in new snapshot")
-
-                // Extract client TxOutRef
-                val clientTxOutRef = TxOutRef(
-                  TxId(clientState.channelRef.transactionId),
-                  clientState.channelRef.index
-                )
-
-                // Sign with exchange key
-                val bothSignedSnapshot = signSnapshot(clientTxOutRef, clientSignedSnapshot)
-
-                // Update stored state
-                val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
-                clients.put(clientId, updatedState)
-
-                Right(bothSignedSnapshot)
+        updateTradingState(
+          clientId,
+          clientSignedSnapshot,
+          tradingState =>
+              if tradingState.tsOrders.toList.exists(_._1 == orderId) then
+                  Left("Order still exists in new snapshot")
+              else Right(())
+        )
     }
 
     def getLatestSnapshot(clientId: ClientId): Option[SignedSnapshot] = {
