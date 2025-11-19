@@ -416,6 +416,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         // Store Bob's client state (skip validation for simplicity)
         val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
+
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
@@ -429,7 +430,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceSellOrder = mkSellOrder(
           pair = (ADA, USDM),
           amount = 100_000_000, // 100 ADA
-          price = 50_000_000 // 0.50 USDM/ADA
+          price = 500_000 // 0.50 USDM/ADA
         )
 
         val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
@@ -446,7 +447,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobBuyOrder = mkBuyOrder(
           pair = (ADA, USDM),
           amount = 70_000_000, // 70 ADA
-          price = 55_000_000 // 0.55 USDM/ADA
+          price = 550_000 // 0.55 USDM/ADA
         )
 
         val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
@@ -464,7 +465,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           s"Trade amount should be 70 ADA, got ${trade.tradeAmount}"
         )
         assert(
-          trade.tradePrice == 50_000_000,
+          trade.tradePrice == 500_000,
           s"Trade price should be 0.50, got ${trade.tradePrice}"
         )
 
@@ -472,7 +473,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobFinalBalance = bobSnapshot1.signedSnapshot.snapshotTradingState.tsClientBalance
         val expectedBobADA = 50_000_000 + 70_000_000 // 50 + 70 = 120 ADA
         val expectedBobUSDM =
-            500_000_000 - (70_000_000 * 50_000_000 / 1_000_000) // 500 - 35 = 465 USDM
+            500_000_000 - (70_000_000 * 500_000 / 1_000_000) // 500 - 35 = 465 USDM
 
         println(s"Bob's final balance: $bobFinalBalance")
         println(s"Expected Bob ADA: $expectedBobADA")
