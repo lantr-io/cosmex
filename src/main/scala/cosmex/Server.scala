@@ -43,6 +43,7 @@ enum ClientResponse:
     case AllOrdersCancelled
     case Settled
     case ChannelClosed
+    case TradeNotification(trade: Trade, newBalance: scalus.ledger.api.v3.Value, snapshotVersion: BigInt)
 
 enum ServerEvent:
     case ClientEvent(clientId: Int, action: ClientRequest)
