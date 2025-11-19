@@ -1,9 +1,10 @@
 package cosmex
 
 import com.bloxbean.cardano.client.account.Account
-import com.bloxbean.cardano.client.common.model.Networks
+import com.bloxbean.cardano.client.common.model.{Network, Networks}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+import scalus.builtin.ByteString.hex
 import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
@@ -15,11 +16,14 @@ import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
 
 class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
-
-    val cardanoInfo: CardanoInfo = CardanoInfo.mainnet
-    val testProtocolParams: ProtocolParams = cardanoInfo.protocolParams
-    val testEnv: Environment = cardanoInfo
-    private val exchangeAccount = new Account(Networks.preview(), 1)
+    // Environment
+    private val cardanoInfo: CardanoInfo = CardanoInfo.mainnet
+    private val network: Network = Networks.preview()
+    private val testProtocolParams: ProtocolParams = cardanoInfo.protocolParams
+    private val testEnv: Environment = cardanoInfo
+    // Accounts and keys
+    private val exchangeAccount = new Account(network, 1)
+    private val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
     private val exchangePubKeyHash =
         ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
@@ -28,13 +32,13 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
       contestationPeriodInMilliseconds = 5000,
       exchangePubKey = exchangePubKey
     )
-    private val clientAccount = new Account(Networks.preview(), 2)
+    private val clientAccount = new Account(network, 2)
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
     private val clientPubKeyHash =
         ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
 
     // Bob's account for testing multi-client scenarios
-    private val bobAccount = new Account(Networks.preview(), 3)
+    private val bobAccount = new Account(network, 3)
     private val bobPubKey = ByteString.fromArray(bobAccount.publicKeyBytes())
     private val bobPubKeyHash =
         ByteString.fromArray(bobAccount.hdKeyPair().getPublicKey.getKeyHash)
@@ -51,7 +55,12 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
       Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
     )
 
-    val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+    private val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+    // Define USDM token for initial UTxOs
+    // ScriptHash is Hash[Blake2b_224, HashPurpose.ScriptHash]
+    private val usdmPolicyId: ScriptHash =
+        Hash.scriptHash(hex"c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad")
+    private val usdmAssetName = AssetName(ByteString.fromString("USDM"))
 
     val initialUtxos = Map(
       TransactionInput(genesisHash, 0) ->
@@ -62,7 +71,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
       TransactionInput(genesisHash, 1) ->
           TransactionOutput(
             address = bobAddress,
-            value = Value.ada(1000)
+            value = Value.ada(1000) + Value.asset(usdmPolicyId, usdmAssetName, 500_000_000)
           )
     )
 
@@ -115,16 +124,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     // Define asset classes for testing
     // PolicyId and TokenName are type aliases to ByteString
-    private val ADA: AssetClass = (ByteString.empty, ByteString.empty)  // ADA is empty PolicyId and TokenName
-    private val USDM_POLICY_ID: PolicyId = ByteString.fromHex("a" * 56)  // Mock policy ID
-    private val USDM_TOKEN_NAME: TokenName = ByteString.fromString("USDM")
-    private val USDM: AssetClass = (USDM_POLICY_ID, USDM_TOKEN_NAME)
+    private val ADA: AssetClass = (ByteString.empty, ByteString.empty)
+    private val USDM: AssetClass = (usdmPolicyId, usdmAssetName.bytes)
 
     // Helper: Create a buy order (positive amount)
     private def mkBuyOrder(pair: Pair, amount: BigInt, price: BigInt): LimitOrder = {
         LimitOrder(
           orderPair = pair,
-          orderAmount = amount,  // Positive for BUY
+          orderAmount = amount, // Positive for BUY
           orderPrice = price
         )
     }
@@ -133,7 +140,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private def mkSellOrder(pair: Pair, amount: BigInt, price: BigInt): LimitOrder = {
         LimitOrder(
           orderPair = pair,
-          orderAmount = -amount,  // Negative for SELL
+          orderAmount = -amount, // Negative for SELL
           orderPrice = price
         )
     }
@@ -334,7 +341,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     test("Alice and Bob trade ADA/USDM with order matching") {
         val provider = this.newEmulator()
-        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
         // 1. Alice opens channel with 900 ADA + 0 USDM (leave room for fees)
@@ -358,8 +365,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .find(_.address == server.CosmexScriptAddress)
             .get
             .value
-        val aliceFirstInput = aliceOpenChannelTx.body.value.inputs.toSeq.head
-        val aliceClientTxOutRef = TxOutRef(TxId(aliceFirstInput.transactionId), aliceFirstInput.index)
+        val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), 0)
         val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
         val aliceClientSignedSnapshot =
             mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
@@ -388,41 +394,28 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .toOption
             .get
 
-        val bobDepositAmount = Value.ada(50L)
+        val bobDepositAmount =
+            Value.ada(50L) + Value.asset(usdmPolicyId, usdmAssetName, 500_000_000)
+
         val bobOpenChannelTx = txbuilder.openChannel(
           clientInput = bobDepositUtxo,
           clientPubKey = bobPubKey,
           depositAmount = bobDepositAmount
         )
-
-        val bobActualDeposit = bobOpenChannelTx.body.value.outputs.view
-            .map(_.value)
-            .find(_.address == server.CosmexScriptAddress)
+        val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
             .get
-            .value
-        val bobFirstInput = bobOpenChannelTx.body.value.inputs.toSeq.head
-        val bobClientTxOutRef = TxOutRef(TxId(bobFirstInput.transactionId), bobFirstInput.index)
 
-        // Bob's initial snapshot with 50 ADA + 500 USDM (simulated)
-        import scalus.ledger.api.v3.Value as V3Value
-        import CosmexValidator.assetClassValue
-        val bobInitialBalance = assetClassValue(ADA, 50_000_000) +
-            assetClassValue(USDM, 500_000_000)  // 500 USDM
-        val bobTradingState = TradingState(
-          tsClientBalance = bobInitialBalance,
-          tsExchangeBalance = V3Value.zero,
-          tsOrders = AssocMap.empty
-        )
-        val bobInitialSnapshot = Snapshot(
-          snapshotTradingState = bobTradingState,
-          snapshotPendingTx = ScalusOption.None,
-          snapshotVersion = 0
-        )
+        val bobActualDeposit = bobChannelTxOut._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+
+        // Bob's initial snapshot with actual deposit (50 ADA + 500 USDM)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
         val bobClientSignedSnapshot =
             mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
 
         // Store Bob's client state (skip validation for simplicity)
-        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, 0))
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
@@ -435,8 +428,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Price in smallest units: 0.50 USDM/ADA = 50_000_000 (assuming 100M scale)
         val aliceSellOrder = mkSellOrder(
           pair = (ADA, USDM),
-          amount = 100_000_000,  // 100 ADA
-          price = 50_000_000     // 0.50 USDM/ADA
+          amount = 100_000_000, // 100 ADA
+          price = 50_000_000 // 0.50 USDM/ADA
         )
 
         val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
@@ -452,8 +445,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // 4. Bob submits BUY order: 70 ADA @ 0.55 USDM/ADA
         val bobBuyOrder = mkBuyOrder(
           pair = (ADA, USDM),
-          amount = 70_000_000,   // 70 ADA
-          price = 55_000_000     // 0.55 USDM/ADA
+          amount = 70_000_000, // 70 ADA
+          price = 55_000_000 // 0.55 USDM/ADA
         )
 
         val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
@@ -466,25 +459,34 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(bobTrades.length == 1, "Should have exactly one trade")
 
         val trade = bobTrades.head
-        assert(trade.tradeAmount == 70_000_000, s"Trade amount should be 70 ADA, got ${trade.tradeAmount}")
-        assert(trade.tradePrice == 50_000_000, s"Trade price should be 0.50, got ${trade.tradePrice}")
+        assert(
+          trade.tradeAmount == 70_000_000,
+          s"Trade amount should be 70 ADA, got ${trade.tradeAmount}"
+        )
+        assert(
+          trade.tradePrice == 50_000_000,
+          s"Trade price should be 0.50, got ${trade.tradePrice}"
+        )
 
         // 6. Verify Bob's balance after trade: 120 ADA + 465 USDM
         val bobFinalBalance = bobSnapshot1.signedSnapshot.snapshotTradingState.tsClientBalance
-        val expectedBobADA = 50_000_000 + 70_000_000  // 50 + 70 = 120 ADA
-        val expectedBobUSDM = 500_000_000 - (70_000_000 * 50_000_000 / 1_000_000)  // 500 - 35 = 465 USDM
+        val expectedBobADA = 50_000_000 + 70_000_000 // 50 + 70 = 120 ADA
+        val expectedBobUSDM =
+            500_000_000 - (70_000_000 * 50_000_000 / 1_000_000) // 500 - 35 = 465 USDM
 
-        pprint.pprintln(s"Bob's final balance: $bobFinalBalance")
-        pprint.pprintln(s"Expected Bob ADA: $expectedBobADA")
-        pprint.pprintln(s"Expected Bob USDM: $expectedBobUSDM")
+        println(s"Bob's final balance: $bobFinalBalance")
+        println(s"Expected Bob ADA: $expectedBobADA")
+        println(s"Expected Bob USDM: $expectedBobUSDM")
 
         // 7. Verify order book: Alice's order should be partially filled (30 ADA remaining)
         val remainingOrders = OrderBook.getAllOrders(server.orderBook)
-        pprint.pprintln(s"Remaining orders in book: $remainingOrders")
+        println(s"Remaining orders in book: $remainingOrders")
 
         assert(remainingOrders.nonEmpty, "Order book should have Alice's remaining order")
         val (_, remainingOrder) = remainingOrders.head
-        assert(remainingOrder.orderAmount == -30_000_000,
-          s"Alice's remaining order should be 30 ADA, got ${remainingOrder.orderAmount}")
+        assert(
+          remainingOrder.orderAmount == -30_000_000,
+          s"Alice's remaining order should be 30 ADA, got ${remainingOrder.orderAmount}"
+        )
     }
 }

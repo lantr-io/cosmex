@@ -2,9 +2,6 @@ package cosmex
 
 import scala.annotation.tailrec
 
-type OrderId = BigInt
-type Pair = (AssetClass, AssetClass)
-
 case class OrderBookEntry(orderId: OrderId, order: LimitOrder)
 
 case class OrderBook(
