@@ -86,6 +86,9 @@ class Server(
     val CosmexPubKey = exchangeParams.exchangePubKey
 
     val clients = HashMap.empty[ClientId, ClientState]
+    var orderBook: OrderBook = OrderBook.empty
+    var nextOrderId: OrderId = 1
+    val orderOwners = HashMap.empty[OrderId, ClientId]  // Maps order ID to client
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
@@ -214,10 +217,78 @@ class Server(
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)
     }
 
-    private def updateTradingState(
+    def handleCreateOrder(
         clientId: ClientId,
-        clientSignedSnapshot: SignedSnapshot,
-        validateTradingState: TradingState => Either[String, Unit]
+        order: LimitOrder
+    ): Either[String, (SignedSnapshot, List[Trade])] = {
+        clients.get(clientId) match
+            case None => Left("Client not found")
+            case Some(clientState) =>
+                if clientState.status != ChannelStatus.Open then
+                    return Left(s"Channel is not open, status: ${clientState.status}")
+
+                // Assign order ID
+                val orderId = nextOrderId
+                nextOrderId += 1
+
+                // Add order to client's trading state
+                val currentSnapshot = clientState.latestSnapshot.signedSnapshot
+                val currentTradingState = currentSnapshot.snapshotTradingState
+
+                import scalus.prelude.AssocMap
+                val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
+                val tradingStateWithOrder = currentTradingState.copy(tsOrders = newOrders)
+
+                // Match against order book
+                val matchResult = OrderBook.matchOrder(orderBook, orderId, order)
+
+                // Apply trades to trading state
+                import CosmexValidator.applyTrade
+                val tradingStateAfterTrades = matchResult.trades.foldLeft(tradingStateWithOrder) {
+                    (ts, trade) => applyTrade(ts, trade)
+                }
+
+                // Update order book with remaining order (if any)
+                orderBook = matchResult.updatedBook
+                if matchResult.remainingAmount != 0 then
+                    orderBook = OrderBook.addOrder(orderBook, orderId,
+                      order.copy(orderAmount = matchResult.remainingAmount))
+                    orderOwners.put(orderId, clientId)
+
+                // Create new snapshot
+                val newSnapshot = Snapshot(
+                  snapshotTradingState = tradingStateAfterTrades,
+                  snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                  snapshotVersion = currentSnapshot.snapshotVersion + 1
+                )
+
+                // Extract client TxOutRef
+                val clientTxOutRef = TxOutRef(
+                  TxId(clientState.channelRef.transactionId),
+                  clientState.channelRef.index
+                )
+
+                // Sign snapshot (need both client and exchange signatures)
+                // For now, we'll create a SignedSnapshot with empty client signature
+                // In a real scenario, client would sign first
+                val signedSnapshot = SignedSnapshot(
+                  signedSnapshot = newSnapshot,
+                  snapshotClientSignature = ByteString.empty,  // Client should sign
+                  snapshotExchangeSignature = ByteString.empty
+                )
+
+                val bothSignedSnapshot = signSnapshot(clientTxOutRef, signedSnapshot)
+
+                // Update stored state
+                val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
+                clients.put(clientId, updatedState)
+
+                Right((bothSignedSnapshot, matchResult.trades))
+    }
+
+    def handleCancelOrder(
+        clientId: ClientId,
+        orderId: OrderId
     ): Either[String, SignedSnapshot] = {
         clients.get(clientId) match
             case None => Left("Client not found")
@@ -225,65 +296,45 @@ class Server(
                 if clientState.status != ChannelStatus.Open then
                     return Left(s"Channel is not open, status: ${clientState.status}")
 
-                // Verify snapshot version increments by 1
-                val currentVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
-                val newVersion = clientSignedSnapshot.signedSnapshot.snapshotVersion
-                if newVersion != currentVersion + 1 then
-                    return Left(
-                      s"Invalid snapshot version: $newVersion, expected ${currentVersion + 1}"
-                    )
+                // Remove order from client's trading state
+                val currentSnapshot = clientState.latestSnapshot.signedSnapshot
+                val currentTradingState = currentSnapshot.snapshotTradingState
 
-                // Validate trading state using the provided validation function
-                val newTradingState = clientSignedSnapshot.signedSnapshot.snapshotTradingState
-                validateTradingState(newTradingState) match
-                    case Left(error) => return Left(error)
-                    case Right(_)    => ()
+                import scalus.prelude.AssocMap
+                val newOrders = AssocMap.delete(currentTradingState.tsOrders)(orderId)
+                val newTradingState = currentTradingState.copy(tsOrders = newOrders)
 
-                // Extract client TxOutRef (stored in OnChainState)
+                // Remove from order book if present
+                orderBook = OrderBook.removeOrder(orderBook, orderId)
+                orderOwners.remove(orderId)
+
+                // Create new snapshot
+                val newSnapshot = Snapshot(
+                  snapshotTradingState = newTradingState,
+                  snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                  snapshotVersion = currentSnapshot.snapshotVersion + 1
+                )
+
+                // Extract client TxOutRef
                 val clientTxOutRef = TxOutRef(
                   TxId(clientState.channelRef.transactionId),
                   clientState.channelRef.index
                 )
 
-                // Sign with exchange key
-                val bothSignedSnapshot = signSnapshot(clientTxOutRef, clientSignedSnapshot)
+                // Sign snapshot
+                val signedSnapshot = SignedSnapshot(
+                  signedSnapshot = newSnapshot,
+                  snapshotClientSignature = ByteString.empty,
+                  snapshotExchangeSignature = ByteString.empty
+                )
+
+                val bothSignedSnapshot = signSnapshot(clientTxOutRef, signedSnapshot)
 
                 // Update stored state
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
                 clients.put(clientId, updatedState)
 
                 Right(bothSignedSnapshot)
-    }
-
-    def handleCreateOrder(
-        clientId: ClientId,
-        orderId: OrderId,
-        @unused order: LimitOrder,
-        clientSignedSnapshot: SignedSnapshot
-    ): Either[String, SignedSnapshot] = {
-        updateTradingState(
-          clientId,
-          clientSignedSnapshot,
-          tradingState =>
-              if !tradingState.tsOrders.toList.exists(_._1 == orderId) then
-                  Left("Order not found in new snapshot")
-              else Right(())
-        )
-    }
-
-    def handleCancelOrder(
-        clientId: ClientId,
-        orderId: OrderId,
-        clientSignedSnapshot: SignedSnapshot
-    ): Either[String, SignedSnapshot] = {
-        updateTradingState(
-          clientId,
-          clientSignedSnapshot,
-          tradingState =>
-              if tradingState.tsOrders.toList.exists(_._1 == orderId) then
-                  Left("Order still exists in new snapshot")
-              else Right(())
-        )
     }
 
     def getLatestSnapshot(clientId: ClientId): Option[SignedSnapshot] = {

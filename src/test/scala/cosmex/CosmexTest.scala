@@ -9,7 +9,7 @@ import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.txbuilder.Environment
-import scalus.ledger.api.v1.PubKeyHash
+import scalus.ledger.api.v1.{PolicyId, PubKeyHash, TokenName}
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
@@ -32,11 +32,23 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private val clientPubKey = ByteString.fromArray(clientAccount.publicKeyBytes())
     private val clientPubKeyHash =
         ByteString.fromArray(clientAccount.hdKeyPair().getPublicKey.getKeyHash)
+
+    // Bob's account for testing multi-client scenarios
+    private val bobAccount = new Account(Networks.preview(), 3)
+    private val bobPubKey = ByteString.fromArray(bobAccount.publicKeyBytes())
+    private val bobPubKeyHash =
+        ByteString.fromArray(bobAccount.hdKeyPair().getPublicKey.getKeyHash)
+
     private val txbuilder = Transactions(exchangeParams, testEnv)
 
     private val clientAddress = Address(
       cardanoInfo.network,
       Credential.KeyHash(AddrKeyHash.fromByteString(clientPubKeyHash))
+    )
+
+    private val bobAddress = Address(
+      cardanoInfo.network,
+      Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
     )
 
     val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
@@ -45,6 +57,11 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
       TransactionInput(genesisHash, 0) ->
           TransactionOutput(
             address = clientAddress,
+            value = Value.ada(1000)
+          ),
+      TransactionInput(genesisHash, 1) ->
+          TransactionOutput(
+            address = bobAddress,
             value = Value.ada(1000)
           )
     )
@@ -93,6 +110,31 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           snapshotTradingState = tradingState,
           snapshotPendingTx = ScalusOption.None,
           snapshotVersion = 0
+        )
+    }
+
+    // Define asset classes for testing
+    // PolicyId and TokenName are type aliases to ByteString
+    private val ADA: AssetClass = (ByteString.empty, ByteString.empty)  // ADA is empty PolicyId and TokenName
+    private val USDM_POLICY_ID: PolicyId = ByteString.fromHex("a" * 56)  // Mock policy ID
+    private val USDM_TOKEN_NAME: TokenName = ByteString.fromString("USDM")
+    private val USDM: AssetClass = (USDM_POLICY_ID, USDM_TOKEN_NAME)
+
+    // Helper: Create a buy order (positive amount)
+    private def mkBuyOrder(pair: Pair, amount: BigInt, price: BigInt): LimitOrder = {
+        LimitOrder(
+          orderPair = pair,
+          orderAmount = amount,  // Positive for BUY
+          orderPrice = price
+        )
+    }
+
+    // Helper: Create a sell order (negative amount)
+    private def mkSellOrder(pair: Pair, amount: BigInt, price: BigInt): LimitOrder = {
+        LimitOrder(
+          orderPair = pair,
+          orderAmount = -amount,  // Negative for SELL
+          orderPrice = price
         )
     }
 
@@ -288,5 +330,161 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             server.validateOpenChannelRequest(openChannelTx, clientSignedSnapshot)
         assert(validationResult.isLeft, "Should reject wrong balance")
         assert(validationResult.left.getOrElse("").contains("doesn't match deposit"))
+    }
+
+    test("Alice and Bob trade ADA/USDM with order matching") {
+        val provider = this.newEmulator()
+        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // 1. Alice opens channel with 900 ADA + 0 USDM (leave room for fees)
+        val aliceDepositUtxo = provider
+            .findUtxo(
+              address = clientAddress,
+              minAmount = Some(Coin.ada(900))
+            )
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(900L)
+        val aliceOpenChannelTx = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+
+        val aliceActualDeposit = aliceOpenChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val aliceFirstInput = aliceOpenChannelTx.body.value.inputs.toSeq.head
+        val aliceClientTxOutRef = TxOutRef(TxId(aliceFirstInput.transactionId), aliceFirstInput.index)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        // Server validates and signs Alice's channel
+        val aliceValidation =
+            server.validateOpenChannelRequest(aliceOpenChannelTx, aliceClientSignedSnapshot)
+        assert(aliceValidation.isRight, s"Alice channel validation failed: $aliceValidation")
+
+        // Store Alice's client state
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, 0))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clients.put(aliceClientId, aliceClientState)
+
+        // 2. Bob opens channel with 50 ADA + 500 USDM (we'll simulate USDM in the balance)
+        val bobDepositUtxo = provider
+            .findUtxo(
+              address = bobAddress,
+              minAmount = Some(Coin.ada(50))
+            )
+            .toOption
+            .get
+
+        val bobDepositAmount = Value.ada(50L)
+        val bobOpenChannelTx = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+
+        val bobActualDeposit = bobOpenChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val bobFirstInput = bobOpenChannelTx.body.value.inputs.toSeq.head
+        val bobClientTxOutRef = TxOutRef(TxId(bobFirstInput.transactionId), bobFirstInput.index)
+
+        // Bob's initial snapshot with 50 ADA + 500 USDM (simulated)
+        import scalus.ledger.api.v3.Value as V3Value
+        import CosmexValidator.assetClassValue
+        val bobInitialBalance = assetClassValue(ADA, 50_000_000) +
+            assetClassValue(USDM, 500_000_000)  // 500 USDM
+        val bobTradingState = TradingState(
+          tsClientBalance = bobInitialBalance,
+          tsExchangeBalance = V3Value.zero,
+          tsOrders = AssocMap.empty
+        )
+        val bobInitialSnapshot = Snapshot(
+          snapshotTradingState = bobTradingState,
+          snapshotPendingTx = ScalusOption.None,
+          snapshotVersion = 0
+        )
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        // Store Bob's client state (skip validation for simplicity)
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, 0))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clients.put(bobClientId, bobClientState)
+
+        // 3. Alice submits SELL order: 100 ADA @ 0.50 USDM/ADA
+        // Price in smallest units: 0.50 USDM/ADA = 50_000_000 (assuming 100M scale)
+        val aliceSellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000,  // 100 ADA
+          price = 50_000_000     // 0.50 USDM/ADA
+        )
+
+        val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
+        assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
+
+        val (aliceSnapshot1, aliceTrades) = aliceOrderResult.toOption.get
+        assert(aliceTrades.isEmpty, "Alice's order should not match anything (no trades)")
+        assert(aliceSnapshot1.signedSnapshot.snapshotVersion == 1, "Alice snapshot should be v1")
+
+        // Verify Alice's order is in the order book
+        assert(server.orderBook.sellOrders.nonEmpty, "Order book should have Alice's sell order")
+
+        // 4. Bob submits BUY order: 70 ADA @ 0.55 USDM/ADA
+        val bobBuyOrder = mkBuyOrder(
+          pair = (ADA, USDM),
+          amount = 70_000_000,   // 70 ADA
+          price = 55_000_000     // 0.55 USDM/ADA
+        )
+
+        val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
+        assert(bobOrderResult.isRight, s"Bob order creation failed: $bobOrderResult")
+
+        val (bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
+
+        // 5. Verify trade execution: 70 ADA @ 0.50 (Alice's ask price)
+        assert(bobTrades.nonEmpty, "Bob's order should match Alice's order")
+        assert(bobTrades.length == 1, "Should have exactly one trade")
+
+        val trade = bobTrades.head
+        assert(trade.tradeAmount == 70_000_000, s"Trade amount should be 70 ADA, got ${trade.tradeAmount}")
+        assert(trade.tradePrice == 50_000_000, s"Trade price should be 0.50, got ${trade.tradePrice}")
+
+        // 6. Verify Bob's balance after trade: 120 ADA + 465 USDM
+        val bobFinalBalance = bobSnapshot1.signedSnapshot.snapshotTradingState.tsClientBalance
+        val expectedBobADA = 50_000_000 + 70_000_000  // 50 + 70 = 120 ADA
+        val expectedBobUSDM = 500_000_000 - (70_000_000 * 50_000_000 / 1_000_000)  // 500 - 35 = 465 USDM
+
+        pprint.pprintln(s"Bob's final balance: $bobFinalBalance")
+        pprint.pprintln(s"Expected Bob ADA: $expectedBobADA")
+        pprint.pprintln(s"Expected Bob USDM: $expectedBobUSDM")
+
+        // 7. Verify order book: Alice's order should be partially filled (30 ADA remaining)
+        val remainingOrders = OrderBook.getAllOrders(server.orderBook)
+        pprint.pprintln(s"Remaining orders in book: $remainingOrders")
+
+        assert(remainingOrders.nonEmpty, "Order book should have Alice's remaining order")
+        val (_, remainingOrder) = remainingOrders.head
+        assert(remainingOrder.orderAmount == -30_000_000,
+          s"Alice's remaining order should be 30 ADA, got ${remainingOrder.orderAmount}")
     }
 }
