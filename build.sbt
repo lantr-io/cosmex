@@ -30,9 +30,8 @@ libraryDependencies ++= Seq(
   "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % "1.12.3",
   // Ox for structured concurrency (needed by Netty server)
   "com.softwaremill.ox" %% "core" % "1.0.1",
-  // JSON serialization with jsoniter-scala
-  "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % "2.38.4",
-  "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % "2.38.4" % "compile-internal",
+  // JSON serialization with ujson
+  "com.lihaoyi" %% "ujson" % "4.4.1",
   // Argument parsing
   "com.monovore" %% "decline" % "2.5.0",
   "org.slf4j" % "slf4j-simple" % "2.0.17"

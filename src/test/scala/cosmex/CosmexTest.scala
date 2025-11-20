@@ -385,6 +385,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         )
         server.clients.put(aliceClientId, aliceClientState)
 
+        import upickle.default.write
+        println(write(aliceClientState))
+
         // 2. Bob opens channel with 50 ADA + 500 USDM (we'll simulate USDM in the balance)
         val bobDepositUtxo = provider
             .findUtxo(
