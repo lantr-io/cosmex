@@ -5,7 +5,6 @@ import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.ledger.Credential.ScriptHash
 import scalus.cardano.ledger.LedgerToPlutusTranslation
 import scalus.cardano.node.Provider
 import scalus.ledger.api.v3.{PosixTime, PubKeyHash, TxId, TxOutRef}
@@ -38,47 +37,16 @@ object JsonCodecs {
         )
     given rwTransactionInput: ReadWriter[TransactionInput] = macroRW
 
-    given rwTxId: ReadWriter[TxId] = readwriter[ujson.Value].bimap[TxId](
-      { txId =>
-          txId match {
-              case TxId(hash) => ujson.Str(hash.toHex)
-          }
-      },
-      {
-          case ujson.Str(hex) => TxId(ByteString.fromHex(hex))
-          case other          => throw new Exception(s"Cannot parse TxId from $other")
-      }
-    )
+    given rwTxId: ReadWriter[TxId] = readwriter[ByteString].bimap(_.hash, b => TxId(b))
 
-    given rwTxOutRef: ReadWriter[TxOutRef] = readwriter[ujson.Obj].bimap[TxOutRef](
-      { ref =>
-          ref match {
-              case TxOutRef(txId, idx) =>
-                  ujson.Obj(
-                    "txId" -> writeJs(txId)(using rwTxId),
-                    "txIdx" -> writeJs(idx)(using rwBigInt)
-                  )
-          }
-      },
-      { obj =>
-          TxOutRef(
-            read[TxId](obj("txId"))(using rwTxId),
-            read[BigInt](obj("txIdx"))(using rwBigInt)
-          )
-      }
-    )
+    given rwTxOutRef: ReadWriter[TxOutRef] = macroRW
 
-    given rwAssetName: ReadWriter[AssetName] = readwriter[ujson.Value].bimap[AssetName](
-      { an => ujson.Str(an.bytes.toHex) },
-      {
-          case ujson.Str(hex) => AssetName(ByteString.fromHex(hex))
-          case other          => throw new Exception(s"Cannot parse AssetName from $other")
-      }
-    )
+    given rwAssetName: ReadWriter[AssetName] =
+        readwriter[ByteString].bimap(_.bytes, b => AssetName(b))
 
-    given rwPolicyId: ReadWriter[PolicyId] = readwriter[ujson.Value].bimap[PolicyId](
-      { pid => ujson.Str(pid.toString) },
-      { case _ => throw new Exception("PolicyId deserialization not implemented") }
+    given rwPolicyId: ReadWriter[PolicyId] = readwriter[ByteString].bimap[PolicyId](
+      { pid => pid },
+      { bs => ScriptHash.fromByteString(bs) }
     )
 
     // Simplified Value codecs - serialize as string for now
@@ -273,33 +241,33 @@ object JsonCodecs {
     )
 
     given rwAction: ReadWriter[Action] = readwriter[ujson.Obj].bimap[Action](
-        {
-            case Action.Update => ujson.Obj("action" -> "Update")
-            case Action.ClientAbort => ujson.Obj("action" -> "ClientAbort")
-            case Action.Close(party, signedSnapshot) =>
-                ujson.Obj(
-                    "action" -> "Close",
-                    "party" -> writeJs(party)(using rwParty),
-                    "signedSnapshot" -> writeJs(signedSnapshot)(using rwSignedSnapshot)
-                )
-            case Action.Trades(trades, cancelOthers) =>
-                ujson.Obj(
-                    "action" -> "Trades",
-                    "actionTrades" -> ujson.Arr(
-                        trades.asScala.map(t => writeJs(t)(using rwTrade): ujson.Value).toSeq *
-                    ),
-                    "actionCancelOthers" -> ujson.Bool(cancelOthers)
-                )
-            case Action.Payout => ujson.Obj("action" -> "Payout")
-            case Action.Transfer(txOutIndex, value) =>
-                ujson.Obj(
-                    "action" -> "Transfer",
-                    "txOutIndex" -> writeJs(txOutIndex)(using rwBigInt),
-                    "value" -> writeJs(value)(using rwPlutusValue)
-                )
-            case Action.Timeout => ujson.Obj("action" -> "Timeout")
-        },
-        { _ => throw new Exception("Action deserialization not implemented") }
+      {
+          case Action.Update      => ujson.Obj("action" -> "Update")
+          case Action.ClientAbort => ujson.Obj("action" -> "ClientAbort")
+          case Action.Close(party, signedSnapshot) =>
+              ujson.Obj(
+                "action" -> "Close",
+                "party" -> writeJs(party)(using rwParty),
+                "signedSnapshot" -> writeJs(signedSnapshot)(using rwSignedSnapshot)
+              )
+          case Action.Trades(trades, cancelOthers) =>
+              ujson.Obj(
+                "action" -> "Trades",
+                "actionTrades" -> ujson.Arr(
+                  trades.asScala.map(t => writeJs(t)(using rwTrade): ujson.Value).toSeq*
+                ),
+                "actionCancelOthers" -> ujson.Bool(cancelOthers)
+              )
+          case Action.Payout => ujson.Obj("action" -> "Payout")
+          case Action.Transfer(txOutIndex, value) =>
+              ujson.Obj(
+                "action" -> "Transfer",
+                "txOutIndex" -> writeJs(txOutIndex)(using rwBigInt),
+                "value" -> writeJs(value)(using rwPlutusValue)
+              )
+          case Action.Timeout => ujson.Obj("action" -> "Timeout")
+      },
+      { _ => throw new Exception("Action deserialization not implemented") }
     )
 
     // OnChainChannelState enum codec
@@ -415,7 +383,7 @@ class Server(
 ) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams)
     val script = Script.PlutusV3(program.cborByteString)
-    val CosmexScriptAddress = Address(env.network, ScriptHash(script.scriptHash))
+    val CosmexScriptAddress = Address(env.network, Credential.ScriptHash(script.scriptHash))
     val CosmexSignKey = exchangePrivKey
     val CosmexPubKey = exchangeParams.exchangePubKey
 
