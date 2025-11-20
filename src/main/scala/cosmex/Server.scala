@@ -1,13 +1,14 @@
 package cosmex
 
-import upickle.default.*
 import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.ledger.LedgerToPlutusTranslation
 import scalus.cardano.node.Provider
-import scalus.ledger.api.v3.{PosixTime, PubKeyHash, TxId, TxOutRef}
+import scalus.ledger.api.v1.TokenName
+import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
+import scalus.prelude.Ord
+import upickle.default.*
 
 import java.time.Instant
 import scala.annotation.unused
@@ -50,58 +51,35 @@ object JsonCodecs {
     )
 
     // Simplified Value codecs - serialize as string for now
-    given rwPlutusValue: ReadWriter[scalus.ledger.api.v3.Value] =
-        readwriter[ujson.Value].bimap[scalus.ledger.api.v3.Value](
-          { value => ujson.Str(value.toString) },
+    given rwSortedMap[A: ReadWriter: Ord, B: ReadWriter]
+        : ReadWriter[scalus.prelude.SortedMap[A, B]] =
+        readwriter[ujson.Value].bimap[scalus.prelude.SortedMap[A, B]](
+          smap =>
+              ujson.Arr.from(smap.toList.asScala.map { case (k, v) =>
+                  ujson.Obj("k" -> writeJs(k), "v" -> writeJs(v))
+              }.toSeq),
           {
-              case ujson.Str(_) =>
-                  throw new Exception("Plutus Value deserialization not implemented")
-              case other => throw new Exception(s"Cannot parse Plutus Value from $other")
+              case ujson.Arr(a) =>
+                  scalus.prelude.SortedMap.from(
+                    a.map(v => read[A](v.obj("k")) -> read[B](v.obj("v")))
+                  )
+              case other => throw new Exception(s"Cannot parse SortedMap from $other")
           }
         )
-
-    given rwLedgerValue: ReadWriter[Value] = readwriter[ujson.Value].bimap[Value](
-      { value => ujson.Str(value.toString) },
-      {
-          case ujson.Str(_) => throw new Exception("Ledger Value deserialization not implemented")
-          case other        => throw new Exception(s"Cannot parse Ledger Value from $other")
-      }
-    )
+    given rwCoin: ReadWriter[Coin] = macroRW
+    given rwMultiAsset: ReadWriter[MultiAsset] = macroRW
+    given rwLedgerValue: ReadWriter[Value] = macroRW
+    given rwPlutusValue: ReadWriter[scalus.ledger.api.v1.Value] =
+        readwriter[Value]
+            .bimap(
+              value => value.toLedgerValue,
+              value => LedgerToPlutusTranslation.getValue(value),
+            )
 
     // CosmexValidator types
-    given rwPendingTxType: ReadWriter[PendingTxType] = readwriter[ujson.Obj].bimap[PendingTxType](
-      {
-          case PendingTxType.PendingIn => ujson.Obj("type" -> "PendingIn")
-          case PendingTxType.PendingOut(idx) =>
-              ujson.Obj("type" -> "PendingOut", "txOutIndex" -> writeJs(idx)(using rwBigInt))
-          case PendingTxType.PendingTransfer(idx) =>
-              ujson.Obj("type" -> "PendingTransfer", "txOutIndex" -> writeJs(idx)(using rwBigInt))
-      },
-      obj =>
-          obj("type").str match {
-              case "PendingIn" => PendingTxType.PendingIn
-              case "PendingOut" =>
-                  PendingTxType.PendingOut(read[BigInt](obj("txOutIndex"))(using rwBigInt))
-              case "PendingTransfer" =>
-                  PendingTxType.PendingTransfer(read[BigInt](obj("txOutIndex"))(using rwBigInt))
-              case other => throw new Exception(s"Unknown PendingTxType: $other")
-          }
-    )
+    given rwPendingTxType: ReadWriter[PendingTxType] = macroRWAll
 
-    given rwPendingTx: ReadWriter[PendingTx] = readwriter[ujson.Obj].bimap[PendingTx](
-      tx =>
-          ujson.Obj(
-            "pendingTxValue" -> writeJs(tx.pendingTxValue)(using rwPlutusValue),
-            "pendingTxType" -> writeJs(tx.pendingTxType)(using rwPendingTxType),
-            "pendingTxSpentTxOutRef" -> writeJs(tx.pendingTxSpentTxOutRef)(using rwTxOutRef)
-          ),
-      obj =>
-          PendingTx(
-            read[scalus.ledger.api.v3.Value](obj("pendingTxValue")),
-            read[PendingTxType](obj("pendingTxType")),
-            read[TxOutRef](obj("pendingTxSpentTxOutRef"))
-          )
-    )
+    given rwPendingTx: ReadWriter[PendingTx] = macroRW
 
     given rwLimitOrder: ReadWriter[LimitOrder] = readwriter[ujson.Obj].bimap[LimitOrder](
       order =>
@@ -313,7 +291,7 @@ object JsonCodecs {
     )
 }
 
-import JsonCodecs.given
+import cosmex.JsonCodecs.given
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
