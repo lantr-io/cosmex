@@ -6,7 +6,7 @@ import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
 import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
-import scalus.prelude.Ord
+import scalus.prelude.{Eq, Ord}
 import upickle.default.*
 
 import java.time.Instant
@@ -76,6 +76,32 @@ object JsonCodecs {
               case other => throw new Exception(s"Cannot parse SortedMap from $other")
           }
         )
+
+    given rwList[A: ReadWriter]: ReadWriter[scalus.prelude.List[A]] =
+        readwriter[ujson.Value].bimap[scalus.prelude.List[A]](
+          list => ujson.Arr.from(list.asScala.map(elem => writeJs(elem))),
+          {
+              case ujson.Arr(a) =>
+                  scalus.prelude.List.from(a.map(v => read[A](v)))
+              case other => throw new Exception(s"Cannot parse List from $other")
+          }
+        )
+
+    given rwAssocMap[A: ReadWriter: Eq, B: ReadWriter]: ReadWriter[scalus.prelude.AssocMap[A, B]] =
+        readwriter[ujson.Value].bimap[scalus.prelude.AssocMap[A, B]](
+          amap =>
+              ujson.Arr.from(amap.toList.asScala.map { case (k, v) =>
+                  ujson.Obj("k" -> writeJs(k), "v" -> writeJs(v))
+              }.toSeq),
+          {
+              case ujson.Arr(a) =>
+                  scalus.prelude.AssocMap.fromList(
+                    scalus.prelude.List.from(a.map(v => (read[A](v.obj("k")), read[B](v.obj("v")))))
+                  )
+              case other => throw new Exception(s"Cannot parse AssocMap from $other")
+          }
+        )
+
     given rwCoin: ReadWriter[Coin] = macroRW
     given rwMultiAsset: ReadWriter[MultiAsset] = macroRW
     given rwLedgerValue: ReadWriter[Value] = macroRW
@@ -93,22 +119,7 @@ object JsonCodecs {
 
     given rwLimitOrder: ReadWriter[LimitOrder] = macroRW
     given rwTrade: ReadWriter[Trade] = macroRW
-    given rwTradingState: ReadWriter[TradingState] = readwriter[ujson.Obj].bimap[TradingState](
-      state => {
-          val ordersJson = state.tsOrders.toList.asScala.map { case (orderId, order) =>
-              ujson.Obj(
-                "orderId" -> writeJs(orderId)(using rwBigInt),
-                "order" -> writeJs(order)(using rwLimitOrder)
-              )
-          }
-          ujson.Obj(
-            "tsClientBalance" -> writeJs(state.tsClientBalance)(using rwPlutusValue),
-            "tsExchangeBalance" -> writeJs(state.tsExchangeBalance)(using rwPlutusValue),
-            "tsOrders" -> ujson.Arr(ordersJson.toSeq*)
-          )
-      },
-      { _ => throw new Exception("TradingState deserialization not implemented") }
-    )
+    given rwTradingState: ReadWriter[TradingState] = macroRW
 
     given rwSnapshot: ReadWriter[Snapshot] = macroRW
     given rwSignedSnapshot: ReadWriter[SignedSnapshot] = macroRW
@@ -162,9 +173,7 @@ object JsonCodecs {
           case Action.Trades(trades, cancelOthers) =>
               ujson.Obj(
                 "action" -> "Trades",
-                "actionTrades" -> ujson.Arr(
-                  trades.asScala.map(t => writeJs(t)(using rwTrade): ujson.Value).toSeq*
-                ),
+                "actionTrades" -> writeJs(trades),
                 "actionCancelOthers" -> ujson.Bool(cancelOthers)
               )
           case Action.Payout => ujson.Obj("action" -> "Payout")
