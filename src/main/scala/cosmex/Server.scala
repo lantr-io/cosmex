@@ -5,7 +5,6 @@ import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
-import scalus.ledger.api.v1.TokenName
 import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
 import scalus.prelude.Ord
 import upickle.default.*
@@ -51,6 +50,17 @@ object JsonCodecs {
     )
 
     // Simplified Value codecs - serialize as string for now
+    given [A: ReadWriter]: ReadWriter[scalus.prelude.Option[A]] =
+        readwriter[ujson.Value].bimap[scalus.prelude.Option[A]](
+          {
+              case scalus.prelude.Option.Some(value) => writeJs(value)
+              case scalus.prelude.Option.None        => ujson.Null
+          },
+          {
+              case ujson.Null => scalus.prelude.Option.None: scalus.prelude.Option[A]
+              case other      => scalus.prelude.Option.Some(read[A](other))
+          }
+        )
     given rwSortedMap[A: ReadWriter: Ord, B: ReadWriter]
         : ReadWriter[scalus.prelude.SortedMap[A, B]] =
         readwriter[ujson.Value].bimap[scalus.prelude.SortedMap[A, B]](
@@ -81,42 +91,8 @@ object JsonCodecs {
 
     given rwPendingTx: ReadWriter[PendingTx] = macroRW
 
-    given rwLimitOrder: ReadWriter[LimitOrder] = readwriter[ujson.Obj].bimap[LimitOrder](
-      order =>
-          ujson.Obj(
-            "orderPair" -> ujson.Arr(
-              ujson.Arr(writeJs(order.orderPair._1._1), writeJs(order.orderPair._1._2)),
-              ujson.Arr(writeJs(order.orderPair._2._1), writeJs(order.orderPair._2._2))
-            ),
-            "orderAmount" -> writeJs(order.orderAmount)(using rwBigInt),
-            "orderPrice" -> writeJs(order.orderPrice)(using rwBigInt)
-          ),
-      obj =>
-          LimitOrder(
-            (
-              (read[ByteString](obj("orderPair")(0)(0)), read[ByteString](obj("orderPair")(0)(1))),
-              (read[ByteString](obj("orderPair")(1)(0)), read[ByteString](obj("orderPair")(1)(1)))
-            ),
-            read[BigInt](obj("orderAmount"))(using rwBigInt),
-            read[BigInt](obj("orderPrice"))(using rwBigInt)
-          )
-    )
-
-    given rwTrade: ReadWriter[Trade] = readwriter[ujson.Obj].bimap[Trade](
-      trade =>
-          ujson.Obj(
-            "orderId" -> writeJs(trade.orderId)(using rwBigInt),
-            "tradeAmount" -> writeJs(trade.tradeAmount)(using rwBigInt),
-            "tradePrice" -> writeJs(trade.tradePrice)(using rwBigInt)
-          ),
-      obj =>
-          Trade(
-            read[BigInt](obj("orderId"))(using rwBigInt),
-            read[BigInt](obj("tradeAmount"))(using rwBigInt),
-            read[BigInt](obj("tradePrice"))(using rwBigInt)
-          )
-    )
-
+    given rwLimitOrder: ReadWriter[LimitOrder] = macroRW
+    given rwTrade: ReadWriter[Trade] = macroRW
     given rwTradingState: ReadWriter[TradingState] = readwriter[ujson.Obj].bimap[TradingState](
       state => {
           val ordersJson = state.tsOrders.toList.asScala.map { case (orderId, order) =>
@@ -134,36 +110,8 @@ object JsonCodecs {
       { _ => throw new Exception("TradingState deserialization not implemented") }
     )
 
-    given rwSnapshot: ReadWriter[Snapshot] = readwriter[ujson.Obj].bimap[Snapshot](
-      snapshot => {
-          import scalus.prelude.Option as POption
-          ujson.Obj(
-            "snapshotTradingState" -> writeJs(snapshot.snapshotTradingState)(using rwTradingState),
-            "snapshotPendingTx" -> (snapshot.snapshotPendingTx match {
-                case POption.Some(tx) => writeJs(tx)(using rwPendingTx)
-                case POption.None     => ujson.Null
-            }),
-            "snapshotVersion" -> writeJs(snapshot.snapshotVersion)(using rwBigInt)
-          )
-      },
-      { _ => throw new Exception("Snapshot deserialization not implemented") }
-    )
-
-    given rwSignedSnapshot: ReadWriter[SignedSnapshot] =
-        readwriter[ujson.Obj].bimap[SignedSnapshot](
-          signed =>
-              ujson.Obj(
-                "signedSnapshot" -> writeJs(signed.signedSnapshot)(using rwSnapshot),
-                "snapshotClientSignature" -> writeJs(signed.snapshotClientSignature),
-                "snapshotExchangeSignature" -> writeJs(signed.snapshotExchangeSignature)
-              ),
-          obj =>
-              SignedSnapshot(
-                read[Snapshot](obj("signedSnapshot")),
-                read[ByteString](obj("snapshotClientSignature")),
-                read[ByteString](obj("snapshotExchangeSignature"))
-              )
-        )
+    given rwSnapshot: ReadWriter[Snapshot] = macroRW
+    given rwSignedSnapshot: ReadWriter[SignedSnapshot] = macroRW
 
     // Transaction codec (simplified - expand as needed)
     given rwTransaction: ReadWriter[Transaction] = readwriter[String].bimap[Transaction](
@@ -179,23 +127,17 @@ object JsonCodecs {
 
     // PubKeyHash from scalus v1
     given rwPubKeyHashV1: ReadWriter[scalus.ledger.api.v1.PubKeyHash] =
-        readwriter[String].bimap[scalus.ledger.api.v1.PubKeyHash](
-          pkh => pkh.hash.toHex,
-          hex => scalus.ledger.api.v1.PubKeyHash(ByteString.fromHex(hex))
+        readwriter[ByteString].bimap[scalus.ledger.api.v1.PubKeyHash](
+          pkh => pkh.hash,
+          bs => scalus.ledger.api.v1.PubKeyHash(bs)
         )
-
-    // PubKeyHash from scalus v3
-    given rwPubKeyHashV3: ReadWriter[PubKeyHash] = readwriter[String].bimap[PubKeyHash](
-      pkh => pkh.hash.toHex,
-      hex => PubKeyHash(ByteString.fromHex(hex))
-    )
 
     // ExchangeParams
     given rwExchangeParams: ReadWriter[ExchangeParams] =
         readwriter[ujson.Obj].bimap[ExchangeParams](
           params =>
               ujson.Obj(
-                "exchangePkh" -> writeJs(params.exchangePkh)(using rwPubKeyHashV3),
+                "exchangePkh" -> writeJs(params.exchangePkh),
                 "exchangePubKey" -> writeJs(params.exchangePubKey),
                 "contestationPeriodInMilliseconds" -> writeJs(
                   params.contestationPeriodInMilliseconds
@@ -282,7 +224,7 @@ object JsonCodecs {
     given rwOnChainState: ReadWriter[OnChainState] = readwriter[ujson.Obj].bimap[OnChainState](
       state =>
           ujson.Obj(
-            "clientPkh" -> writeJs(state.clientPkh)(using rwPubKeyHashV3),
+            "clientPkh" -> writeJs(state.clientPkh),
             "clientPubKey" -> writeJs(state.clientPubKey),
             "clientTxOutRef" -> writeJs(state.clientTxOutRef)(using rwTxOutRef),
             "channelState" -> writeJs(state.channelState)(using rwOnChainChannelState)
