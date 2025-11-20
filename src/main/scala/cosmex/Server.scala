@@ -133,18 +133,7 @@ object JsonCodecs {
         )
 
     // ExchangeParams
-    given rwExchangeParams: ReadWriter[ExchangeParams] =
-        readwriter[ujson.Obj].bimap[ExchangeParams](
-          params =>
-              ujson.Obj(
-                "exchangePkh" -> writeJs(params.exchangePkh),
-                "exchangePubKey" -> writeJs(params.exchangePubKey),
-                "contestationPeriodInMilliseconds" -> writeJs(
-                  params.contestationPeriodInMilliseconds
-                )(using rwBigInt)
-              ),
-          { _ => throw new Exception("ExchangeParams deserialization not implemented") }
-        )
+    given rwExchangeParams: ReadWriter[ExchangeParams] = macroRW
 
     // Action enum
     given rwParty: ReadWriter[Party] = readwriter[ujson.Obj].bimap[Party](
@@ -191,46 +180,9 @@ object JsonCodecs {
     )
 
     // OnChainChannelState enum codec
-    given rwOnChainChannelState: ReadWriter[OnChainChannelState] =
-        readwriter[ujson.Obj].bimap[OnChainChannelState](
-          {
-              case OnChainChannelState.OpenState => ujson.Obj("state" -> "OpenState")
-              case OnChainChannelState
-                      .SnapshotContestState(snapshot, start, initiator, channelRef) =>
-                  ujson.Obj(
-                    "state" -> "SnapshotContestState",
-                    "contestSnapshot" -> writeJs(snapshot)(using rwSnapshot),
-                    "contestSnapshotStart" -> ujson.Str(start.toString),
-                    "contestInitiator" -> writeJs(initiator)(using rwParty),
-                    "contestChannelTxOutRef" -> writeJs(channelRef)(using rwTxOutRef)
-                  )
-              case OnChainChannelState.TradesContestState(latestTradingState, tradeContestStart) =>
-                  ujson.Obj(
-                    "state" -> "TradesContestState",
-                    "latestTradingState" -> writeJs(latestTradingState)(using rwTradingState),
-                    "tradeContestStart" -> ujson.Str(tradeContestStart.toString)
-                  )
-              case OnChainChannelState.PayoutState(clientBalance, exchangeBalance) =>
-                  ujson.Obj(
-                    "state" -> "PayoutState",
-                    "clientBalance" -> writeJs(clientBalance)(using rwPlutusValue),
-                    "exchangeBalance" -> writeJs(exchangeBalance)(using rwPlutusValue)
-                  )
-          },
-          { _ => throw new Exception("OnChainChannelState deserialization not implemented") }
-        )
-
+    given rwOnChainChannelState: ReadWriter[OnChainChannelState] = macroRWAll
     // OnChainState codec
-    given rwOnChainState: ReadWriter[OnChainState] = readwriter[ujson.Obj].bimap[OnChainState](
-      state =>
-          ujson.Obj(
-            "clientPkh" -> writeJs(state.clientPkh),
-            "clientPubKey" -> writeJs(state.clientPubKey),
-            "clientTxOutRef" -> writeJs(state.clientTxOutRef)(using rwTxOutRef),
-            "channelState" -> writeJs(state.channelState)(using rwOnChainChannelState)
-          ),
-      { _ => throw new Exception("OnChainState deserialization not implemented") }
-    )
+    given rwOnChainState: ReadWriter[OnChainState] = macroRW
 }
 
 import cosmex.JsonCodecs.given
