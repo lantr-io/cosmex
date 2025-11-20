@@ -162,8 +162,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         )
 
         val value = provider.submit(openChannelTx)
-        pprint.pprintln(openChannelTx)
-        pprint.pprintln(value)
+//        pprint.pprintln(openChannelTx)
+//        pprint.pprintln(value)
         assert(value.isRight)
     }
 
