@@ -74,7 +74,7 @@ object AliceDemo {
         )
 
         // Create transaction builder
-        val txbuilder = Transactions(exchangeParams, cardanoInfo)
+        val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
 
         // Connect to WebSocket server
         println("\n[2] Connecting to WebSocket server...")

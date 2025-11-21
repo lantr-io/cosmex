@@ -43,7 +43,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private val bobPubKeyHash =
         ByteString.fromArray(bobAccount.hdKeyPair().getPublicKey.getKeyHash)
 
-    private val txbuilder = Transactions(exchangeParams, testEnv)
+    private val txbuilder = CosmexTransactions(exchangeParams, testEnv)
 
     private val clientAddress = Address(
       cardanoInfo.network,

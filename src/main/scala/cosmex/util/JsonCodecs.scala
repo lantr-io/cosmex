@@ -8,6 +8,7 @@ import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
 import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
 import scalus.prelude.{Eq, Ord}
+import scalus.serialization.cbor.Cbor
 import upickle.default.*
 
 import java.time.Instant
@@ -16,6 +17,8 @@ import scala.collection.mutable.HashMap
 
 import cosmex.*
 import cosmex.given
+
+import scalus.utils.Hex.*
 
 object JsonCodecs {
     // Basic type codecs
@@ -130,8 +133,8 @@ object JsonCodecs {
 
     // Transaction codec (simplified - expand as needed)
     given rwTransaction: ReadWriter[Transaction] = readwriter[String].bimap[Transaction](
-        tx => tx.id.toString, // Simplified - just serialize the ID
-        _ => throw new Exception("Transaction deserialization not implemented")
+        tx => tx.toCbor.toHex, // Simplified - just serialize the ID
+        hex => Cbor.decode(hex.hexToBytes)
     )
 
     // Instant codec for timestamps

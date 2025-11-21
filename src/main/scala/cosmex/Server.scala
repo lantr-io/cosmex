@@ -1,7 +1,9 @@
 package cosmex
 
 import scalus.builtin.ToData.tupleToData
-import scalus.builtin.{platform, Builtins, ByteString}
+import scalus.builtin.{Builtins, ByteString, platform}
+
+import scala.collection.concurrent.{TrieMap, Map as ConcurrentMap}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
@@ -12,9 +14,9 @@ import upickle.default.*
 import java.time.Instant
 import scala.annotation.unused
 import scala.collection.mutable.HashMap
-
-
 import cosmex.util.JsonCodecs.given
+
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
@@ -88,10 +90,10 @@ class Server(
     val CosmexSignKey = exchangePrivKey
     val CosmexPubKey = exchangeParams.exchangePubKey
 
-    val clients = HashMap.empty[ClientId, ClientState]
-    var orderBook: OrderBook = OrderBook.empty
-    var nextOrderId: OrderId = 1
-    val orderOwners = HashMap.empty[OrderId, ClientId] // Maps order ID to client
+    val clients = TrieMap.empty[ClientId, ClientState]
+    var orderBookRef: AtomicReference[OrderBook] = new AtomicReference(OrderBook.empty)
+    var nextOrderId: AtomicLong = new AtomicLong(0L)
+    val orderOwners = TrieMap.empty[OrderId, ClientId] // Maps order ID to client
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
@@ -231,8 +233,8 @@ class Server(
                     return Left(s"Channel is not open, status: ${clientState.status}")
 
                 // Assign order ID
-                val orderId = nextOrderId
-                nextOrderId += 1
+                val longOrderId = nextOrderId.getAndIncrement()
+                val orderId = BigInt(longOrderId)
 
                 // Add order to client's trading state
                 val currentSnapshot = clientState.latestSnapshot.signedSnapshot
@@ -242,8 +244,26 @@ class Server(
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
                 val tradingStateWithOrder = currentTradingState.copy(tsOrders = newOrders)
 
-                // Match against order book
-                val matchResult = OrderBook.matchOrder(orderBook, orderId, order)
+                var orderBookUpdated = false
+                var matchResult: OrderBook.MatchResult = null
+                while(!orderBookUpdated) do
+                    val orderBook = orderBookRef.get()
+                    // Match against order book
+                    matchResult = OrderBook.matchOrder(orderBook, orderId, order)
+
+
+                    // Update order book with remaining order (if any)
+                    var newOrderBook = matchResult.updatedBook
+                    if matchResult.remainingAmount != 0 then
+                        newOrderBook = OrderBook.addOrder(
+                            newOrderBook,
+                            orderId,
+                            order.copy(orderAmount = matchResult.remainingAmount)
+                        )
+                    if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
+                       orderBookUpdated = true
+
+                orderOwners.put(orderId, clientId)
 
                 // Apply trades to trading state
                 import CosmexValidator.applyTrade
@@ -251,21 +271,11 @@ class Server(
                     (ts, trade) => applyTrade(ts, trade)
                 }
 
-                // Update order book with remaining order (if any)
-                orderBook = matchResult.updatedBook
-                if matchResult.remainingAmount != 0 then
-                    orderBook = OrderBook.addOrder(
-                      orderBook,
-                      orderId,
-                      order.copy(orderAmount = matchResult.remainingAmount)
-                    )
-                    orderOwners.put(orderId, clientId)
-
                 // Create new snapshot
                 val newSnapshot = Snapshot(
-                  snapshotTradingState = tradingStateAfterTrades,
-                  snapshotPendingTx = currentSnapshot.snapshotPendingTx,
-                  snapshotVersion = currentSnapshot.snapshotVersion + 1
+                        snapshotTradingState = tradingStateAfterTrades,
+                        snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                        snapshotVersion = currentSnapshot.snapshotVersion + 1
                 )
 
                 // Extract client TxOutRef
@@ -310,8 +320,14 @@ class Server(
                 val newOrders = AssocMap.delete(currentTradingState.tsOrders)(orderId)
                 val newTradingState = currentTradingState.copy(tsOrders = newOrders)
 
-                // Remove from order book if present
-                orderBook = OrderBook.removeOrder(orderBook, orderId)
+                var orderBookUpdated = false
+                while(!orderBookUpdated) do {
+                    // Remove from order book if present
+                    val orderBook: OrderBook = orderBookRef.get()
+                    val newOrderBook = OrderBook.removeOrder(orderBook, orderId)
+                    orderBookUpdated = orderBookRef.compareAndSet(orderBook, newOrderBook)
+                }
+
                 orderOwners.remove(orderId)
 
                 // Create new snapshot

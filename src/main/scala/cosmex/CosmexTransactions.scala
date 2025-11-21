@@ -7,7 +7,7 @@ import scalus.cardano.txbuilder.*
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
-class Transactions(val exchangeParams: ExchangeParams, env: Environment) {
+class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
     private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)

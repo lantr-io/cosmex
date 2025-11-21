@@ -1,7 +1,7 @@
 package cosmex.ws
 
 import cosmex.{ClientRequest, ClientResponse}
-import cosmex.JsonCodecs.given
+import cosmex.util.JsonCodecs.given
 import upickle.default.*
 
 import java.net.URI

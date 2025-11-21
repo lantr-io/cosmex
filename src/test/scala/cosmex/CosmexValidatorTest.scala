@@ -54,7 +54,7 @@ class CosmexValidatorTest
     private val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
 
     private val testEnv: Environment = CardanoInfo.mainnet
-    private val txbuilder = Transactions(exchangeParams, testEnv)
+    private val txbuilder = CosmexTransactions(exchangeParams, testEnv)
 
     test(s"Cosmex Validator size is ${program.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)

@@ -1,13 +1,18 @@
 package cosmex.ws
 
+import scala.util.control.NonFatal
+
 import cosmex.*
 import ox.*
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, OxStreams}
 import upickle.default.*
 
+
+
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
+
 
     // WebSocket endpoint - text-based messages
     val wsEndpoint =
@@ -43,7 +48,7 @@ object CosmexWebSocketServer {
                         println(s"[Server] Sent response: ${response.getClass.getSimpleName}")
                         responseJson
                     } catch {
-                        case e: Exception =>
+                        case NonFatal(e) =>
                             println(s"[Server] Error handling message: ${e.getMessage}")
                             e.printStackTrace()
                             val errorResponse = ClientResponse.Error(e.getMessage)
@@ -108,7 +113,7 @@ object CosmexWebSocketServer {
                 }
 
             case ClientRequest.CreateOrder(clientId, order) =>
-                val orderIdBefore = server.nextOrderId
+                val orderIdBefore = server.nextOrderId.get()
                 server.handleCreateOrder(clientId, order) match {
                     case Left(error) =>
                         ClientResponse.Error(error)
