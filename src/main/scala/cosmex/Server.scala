@@ -102,7 +102,7 @@ object JsonCodecs {
           }
         )
 
-    given rwCoin: ReadWriter[Coin] = macroRW
+    given rwCoin: ReadWriter[Coin] = readwriter[Long].bimap(_.value, Coin.apply)
     given rwMultiAsset: ReadWriter[MultiAsset] = macroRW
     given rwLedgerValue: ReadWriter[Value] = macroRW
     given rwPlutusValue: ReadWriter[scalus.ledger.api.v1.Value] =
