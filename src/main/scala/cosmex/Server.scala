@@ -198,11 +198,12 @@ import cosmex.JsonCodecs.given
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
-    case CreateOrder(order: LimitOrder)
-    case CancelOrder(orderId: Int)
-    case CancelAllOrders
-    case Settle
-    case CloseChannel
+    case CreateOrder(clientId: ClientId, order: LimitOrder)
+    case CancelOrder(clientId: ClientId, orderId: Int)
+    case Deposit(clientId: ClientId, amount: Value)
+    case Withdraw(clientId: ClientId, amount: Value)
+    case GetBalance(clientId: ClientId)
+    case GetOrders(clientId: ClientId)
 
 type ChainSlot = Long
 
@@ -221,11 +222,10 @@ enum BlockchainEvent derives ReadWriter:
 enum ClientResponse derives ReadWriter:
     case ChannelOpened(snapshot: SignedSnapshot)
     case Error(message: String)
-    case OrderCreated(orderId: Int)
-    case OrderCancelled(orderId: Int)
-    case AllOrdersCancelled
-    case Settled
-    case ChannelClosed
+    case OrderCreated(orderId: OrderId)
+    case OrderCancelled(orderId: OrderId)
+    case Balance(balance: scalus.ledger.api.v3.Value)
+    case Orders(orders: scalus.prelude.AssocMap[OrderId, LimitOrder])
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)

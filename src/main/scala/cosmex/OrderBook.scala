@@ -5,8 +5,8 @@ import scala.annotation.tailrec
 case class OrderBookEntry(orderId: OrderId, order: LimitOrder)
 
 case class OrderBook(
-    buyOrders: List[OrderBookEntry],  // Sorted by price descending (highest bid first)
-    sellOrders: List[OrderBookEntry]  // Sorted by price ascending (lowest ask first)
+    buyOrders: List[OrderBookEntry], // Sorted by price descending (highest bid first)
+    sellOrders: List[OrderBookEntry] // Sorted by price ascending (lowest ask first)
 )
 
 object OrderBook {
@@ -68,8 +68,7 @@ object OrderBook {
             remainingAmount: BigInt,
             trades: List[Trade]
         ): (List[OrderBookEntry], BigInt, List[Trade]) = {
-            if remainingAmount == 0 || sellOrders.isEmpty then
-                (sellOrders, remainingAmount, trades)
+            if remainingAmount == 0 || sellOrders.isEmpty then (sellOrders, remainingAmount, trades)
             else
                 val sellEntry = sellOrders.head
                 val sellOrder = sellEntry.order
@@ -129,8 +128,7 @@ object OrderBook {
             remainingAmount: BigInt,
             trades: List[Trade]
         ): (List[OrderBookEntry], BigInt, List[Trade]) = {
-            if remainingAmount == 0 || buyOrders.isEmpty then
-                (buyOrders, remainingAmount, trades)
+            if remainingAmount == 0 || buyOrders.isEmpty then (buyOrders, remainingAmount, trades)
             else
                 val buyEntry = buyOrders.head
                 val buyOrder = buyEntry.order
