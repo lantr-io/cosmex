@@ -113,15 +113,13 @@ object CosmexWebSocketServer {
                 }
 
             case ClientRequest.CreateOrder(clientId, order) =>
-                val orderIdBefore = server.nextOrderId.get()
                 server.handleCreateOrder(clientId, order) match {
                     case Left(error) =>
                         ClientResponse.Error(error)
-                    case Right((snapshot, trades)) =>
+                    case Right((orderId, snapshot, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
-                        val orderId = orderIdBefore
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
-                        ClientResponse.OrderCreated(orderId)
+                        ClientResponse.OrderCreated(BigInt(orderId))
                 }
 
             case ClientRequest.CancelOrder(clientId, orderId) =>

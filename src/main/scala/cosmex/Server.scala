@@ -133,7 +133,9 @@ class Server(
 
     }
 
-    def handleEvent(event: ServerEvent) = {}
+    def handleEvent(event: ServerEvent) = {
+        
+    }
 
     def validateOpenChannelRequest(
         tx: Transaction,
@@ -225,7 +227,7 @@ class Server(
     def handleCreateOrder(
         clientId: ClientId,
         order: LimitOrder
-    ): Either[String, (SignedSnapshot, List[Trade])] = {
+    ): Either[String, (Long, SignedSnapshot, List[Trade])] = {
         clients.get(clientId) match
             case None => Left("Client not found")
             case Some(clientState) =>
@@ -299,7 +301,7 @@ class Server(
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
                 clients.put(clientId, updatedState)
 
-                Right((bothSignedSnapshot, matchResult.trades))
+                Right((longOrderId, bothSignedSnapshot, matchResult.trades))
     }
 
     def handleCancelOrder(

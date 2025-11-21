@@ -439,7 +439,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
         assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
 
-        val (aliceSnapshot1, aliceTrades) = aliceOrderResult.toOption.get
+        val (aliceOrderId, aliceSnapshot1, aliceTrades) = aliceOrderResult.toOption.get
         assert(aliceTrades.isEmpty, "Alice's order should not match anything (no trades)")
         assert(aliceSnapshot1.signedSnapshot.snapshotVersion == 1, "Alice snapshot should be v1")
 
@@ -456,7 +456,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
         assert(bobOrderResult.isRight, s"Bob order creation failed: $bobOrderResult")
 
-        val (bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
+        val (bobOrderId, bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
 
         // 5. Verify trade execution: 70 ADA @ 0.50 (Alice's ask price)
         assert(bobTrades.nonEmpty, "Bob's order should match Alice's order")
