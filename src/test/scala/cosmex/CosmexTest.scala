@@ -444,7 +444,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(aliceSnapshot1.signedSnapshot.snapshotVersion == 1, "Alice snapshot should be v1")
 
         // Verify Alice's order is in the order book
-        assert(server.orderBook.sellOrders.nonEmpty, "Order book should have Alice's sell order")
+        assert(server.orderBookRef.get.sellOrders.nonEmpty, "Order book should have Alice's sell order")
 
         // 4. Bob submits BUY order: 70 ADA @ 0.55 USDM/ADA
         val bobBuyOrder = mkBuyOrder(
@@ -483,7 +483,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println(s"Expected Bob USDM: $expectedBobUSDM")
 
         // 7. Verify order book: Alice's order should be partially filled (30 ADA remaining)
-        val remainingOrders = OrderBook.getAllOrders(server.orderBook)
+        val remainingOrders = OrderBook.getAllOrders(server.orderBookRef.get)
         println(s"Remaining orders in book: $remainingOrders")
 
         assert(remainingOrders.nonEmpty, "Order book should have Alice's remaining order")
