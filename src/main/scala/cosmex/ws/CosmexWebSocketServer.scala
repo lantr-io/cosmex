@@ -8,11 +8,8 @@ import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, OxStreams}
 import upickle.default.*
 
-
-
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
-
 
     // WebSocket endpoint - text-based messages
     val wsEndpoint =

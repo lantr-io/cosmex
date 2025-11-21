@@ -1,9 +1,9 @@
 package cosmex
 
 import scalus.builtin.ToData.tupleToData
-import scalus.builtin.{Builtins, ByteString, platform}
+import scalus.builtin.{platform, Builtins, ByteString}
 
-import scala.collection.concurrent.{TrieMap, Map as ConcurrentMap}
+import scala.collection.concurrent.{Map as ConcurrentMap, TrieMap}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
@@ -133,9 +133,7 @@ class Server(
 
     }
 
-    def handleEvent(event: ServerEvent) = {
-        
-    }
+    def handleEvent(event: ServerEvent) = {}
 
     def validateOpenChannelRequest(
         tx: Transaction,
@@ -248,22 +246,21 @@ class Server(
 
                 var orderBookUpdated = false
                 var matchResult: OrderBook.MatchResult = null
-                while(!orderBookUpdated) do
+                while !orderBookUpdated do
                     val orderBook = orderBookRef.get()
                     // Match against order book
                     matchResult = OrderBook.matchOrder(orderBook, orderId, order)
-
 
                     // Update order book with remaining order (if any)
                     var newOrderBook = matchResult.updatedBook
                     if matchResult.remainingAmount != 0 then
                         newOrderBook = OrderBook.addOrder(
-                            newOrderBook,
-                            orderId,
-                            order.copy(orderAmount = matchResult.remainingAmount)
+                          newOrderBook,
+                          orderId,
+                          order.copy(orderAmount = matchResult.remainingAmount)
                         )
-                    if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
-                       orderBookUpdated = true
+                    if orderBookRef.compareAndSet(orderBook, newOrderBook) then
+                        orderBookUpdated = true
 
                 orderOwners.put(orderId, clientId)
 
@@ -275,9 +272,9 @@ class Server(
 
                 // Create new snapshot
                 val newSnapshot = Snapshot(
-                        snapshotTradingState = tradingStateAfterTrades,
-                        snapshotPendingTx = currentSnapshot.snapshotPendingTx,
-                        snapshotVersion = currentSnapshot.snapshotVersion + 1
+                  snapshotTradingState = tradingStateAfterTrades,
+                  snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                  snapshotVersion = currentSnapshot.snapshotVersion + 1
                 )
 
                 // Extract client TxOutRef
@@ -323,7 +320,7 @@ class Server(
                 val newTradingState = currentTradingState.copy(tsOrders = newOrders)
 
                 var orderBookUpdated = false
-                while(!orderBookUpdated) do {
+                while !orderBookUpdated do {
                     // Remove from order book if present
                     val orderBook: OrderBook = orderBookRef.get()
                     val newOrderBook = OrderBook.removeOrder(orderBook, orderId)
