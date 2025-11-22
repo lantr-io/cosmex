@@ -22,7 +22,7 @@ import sttp.tapir.server.netty.sync.NettySyncServerBinding
 
 import scala.collection.immutable.IndexedSeq
 import scala.concurrent.duration.*
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 import upickle.default.*
 
 class MultiClientDemoTest extends AnyFunSuite with Matchers {
@@ -210,8 +210,32 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                 fail(s"[$name] Error waiting for OpenChannel response: ${e.getMessage}")
                         }
 
-                        // Wait for potential trade execution
-                        Thread.sleep(2000)
+                        // Wait for potential trade execution (OrderExecuted notifications)
+                        println(s"[$name] Waiting for potential order matching...")
+                        var attempts = 0
+                        val maxAttempts = 10
+                        var tradeReceived = false
+                        
+                        while (attempts < maxAttempts && !tradeReceived) {
+                            client.receiveMessage(timeoutSeconds = 1) match {
+                                case Success(msgJson) =>
+                                    Try(read[ClientResponse](msgJson)) match {
+                                        case Success(ClientResponse.OrderExecuted(trade)) =>
+                                            println(s"[$name] ✓ Order executed! Trade: ${trade.orderId}, amount: ${trade.tradeAmount}, price: ${trade.tradePrice}")
+                                            tradeReceived = true
+                                        case Success(other) =>
+                                            println(s"[$name] Received other message: ${other.getClass.getSimpleName}")
+                                        case Failure(e) =>
+                                            println(s"[$name] Failed to parse message: ${e.getMessage}")
+                                    }
+                                case Failure(_) =>
+                                    attempts += 1
+                            }
+                        }
+                        
+                        if (!tradeReceived && attempts >= maxAttempts) {
+                            println(s"[$name] No trade executed within timeout")
+                        }
 
                     } finally {
                         if (client != null) {

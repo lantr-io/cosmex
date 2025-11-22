@@ -255,6 +255,9 @@ class Server(
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
                 val tradingStateWithOrder = currentTradingState.copy(tsOrders = newOrders)
 
+                // Register order owner BEFORE matching so notifications can be sent
+                orderOwners.put(orderId, clientId)
+
                 var orderBookUpdated = false
                 var matchResult: OrderBook.MatchResult = null
                 while !orderBookUpdated do
@@ -272,17 +275,18 @@ class Server(
                         )
                     if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
                        orderBookUpdated = true
+                       
+                // Send trade notifications to order owners
                 if (matchResult.trades.nonEmpty) then
                    matchResult.trades.foreach{ trade =>
                        orderOwners.get(trade.orderId).foreach{
                               ownerClientId  =>
                                 clientChannels.get(ownerClientId).foreach{ channel =>
+                                    println(s"[Server] Sending trade notification to client: $ownerClientId, trade: ${trade.orderId}")
                                     channel.send(trade)
                                 }
                        }
                    }
-
-                orderOwners.put(orderId, clientId)
 
                 // Apply trades to trading state
                 import CosmexValidator.applyTrade
