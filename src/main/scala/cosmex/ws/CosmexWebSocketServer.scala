@@ -4,7 +4,7 @@ import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 import cosmex.*
 import ox.*
-import ox.channels.Channel
+import ox.channels.{Channel, Source}
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
@@ -35,26 +35,28 @@ object CosmexWebSocketServer {
             val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[Trade])
             (in: Flow[String]) =>
                 println(s"[Server] WebSocket handler started for client: ${clientId}")
-                val handleRequestFlow = in.map { msg =>
+                val handleRequestFlow = in.mapConcat { msg =>
                     println(s"[Server] Raw message received: ${msg.take(100)}...")
                     try {
                         // Parse incoming JSON as ClientRequest
                         val request = read[ClientRequest](msg)
                         println(s"[Server] Received request: ${request.getClass.getSimpleName}")
 
-                        // Handle the request
-                        val response = handleRequest(server, request)
+                        // Handle the request - returns List[ClientResponse]
+                        val responses = handleRequest(server, request)
 
-                        // Send response back
-                        val responseJson = write(response)
-                        println(s"[Server] Sent response: ${response.getClass.getSimpleName}")
-                        responseJson
+                        // Convert each response to JSON and return as List
+                        responses.map { response =>
+                            val responseJson = write(response)
+                            println(s"[Server] Sent response: ${response.getClass.getSimpleName}")
+                            responseJson
+                        }
                     } catch {
                         case NonFatal(e) =>
                             println(s"[Server] Error handling message: ${e.getMessage}")
                             e.printStackTrace()
                             val errorResponse = ClientResponse.Error(e.getMessage)
-                            write(errorResponse)
+                            List(write(errorResponse))
                     }
                 }
                 val orderExecutionFlow = Flow.fromSource(channel).map { trade =>
@@ -101,12 +103,17 @@ object CosmexWebSocketServer {
     }
     
     /** Handle a client request and return a response */
-    def handleRequest(server: Server, request: ClientRequest): ClientResponse = {
-        request match {
+    /** Handle a single client request and return a sequence of responses
+      * 
+      * Most requests return a single response, but CreateOrder returns OrderCreated
+      * followed by OrderExecuted for each trade (ensures correct ordering)
+      */
+    def handleRequest(server: Server, request: ClientRequest): List[ClientResponse] = {
+        val responses = request match {
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 // Validate the opening request
                 val validation = server.validateOpenChannelRequest(tx, snapshot)
-                validation match {
+                val response = validation match {
                     case Left(error) =>
                         ClientResponse.Error(error)
                     case Right(_) =>
@@ -148,31 +155,58 @@ object CosmexWebSocketServer {
                         println(s"[Server] Channel opened for client: ${clientId}, status: ${channelStatus}")
                         ClientResponse.ChannelOpened(signedSnapshot)
                 }
+                List(response)
 
             case ClientRequest.CreateOrder(clientId, order) =>
                 server.handleCreateOrder(clientId, order) match {
                     case Left(error) =>
-                        ClientResponse.Error(error)
+                        List(ClientResponse.Error(error))
                     case Right((orderId, snapshot, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
-                        ClientResponse.OrderCreated(BigInt(orderId))
+                        
+                        // Split trades into:
+                        // 1. Trades for THIS client (incoming order) - return immediately
+                        // 2. Trades for OTHER clients (matched orders) - send via ox channel
+                        val incomingOrderId = BigInt(orderId)
+                        println(s"[Server] Processing ${trades.size} trades for order $incomingOrderId")
+                        trades.foreach(t => println(s"[Server]   Trade: orderId=${t.orderId}, amount=${t.tradeAmount}"))
+                        
+                        val (myTrades, otherTrades) = trades.partition(_.orderId == incomingOrderId)
+                        println(s"[Server] Split: ${myTrades.size} for this client, ${otherTrades.size} for others")
+                        
+                        // Send notifications to OTHER clients via ox channel (async)
+                        otherTrades.foreach { trade =>
+                            server.orderOwners.get(trade.orderId).foreach { ownerClientId =>
+                                server.clientChannels.get(ownerClientId).foreach { channel =>
+                                    println(s"[Server] Queuing trade notification to client: $ownerClientId, trade: ${trade.orderId}")
+                                    channel.send(trade)
+                                }
+                            }
+                        }
+                        
+                        // Return OrderCreated FIRST, then OrderExecuted for THIS client's trades
+                        val orderCreated = ClientResponse.OrderCreated(BigInt(orderId))
+                        val myOrderExecuted = myTrades.map(trade => ClientResponse.OrderExecuted(trade))
+                        
+                        println(s"[Server] Returning ${1 + myOrderExecuted.size} responses (OrderCreated + ${myOrderExecuted.size} OrderExecuted)")
+                        orderCreated :: myOrderExecuted
                 }
 
             case ClientRequest.CancelOrder(clientId, orderId) =>
                 // TODO: Implement cancel order
-                ClientResponse.Error("CancelOrder not implemented yet")
+                List(ClientResponse.Error("CancelOrder not implemented yet"))
 
             case ClientRequest.Deposit(clientId, amount) =>
                 // TODO: Implement deposit
-                ClientResponse.Error("Deposit not implemented yet")
+                List(ClientResponse.Error("Deposit not implemented yet"))
 
             case ClientRequest.Withdraw(clientId, amount) =>
                 // TODO: Implement withdraw
-                ClientResponse.Error("Withdraw not implemented yet")
+                List(ClientResponse.Error("Withdraw not implemented yet"))
 
             case ClientRequest.GetBalance(clientId) =>
-                server.clientStates.get(clientId) match {
+                val response = server.clientStates.get(clientId) match {
                     case Some(state) =>
                         val balance =
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
@@ -180,9 +214,10 @@ object CosmexWebSocketServer {
                     case None =>
                         ClientResponse.Error("Client not found")
                 }
+                List(response)
 
             case ClientRequest.GetOrders(clientId) =>
-                server.clientStates.get(clientId) match {
+                val response = server.clientStates.get(clientId) match {
                     case Some(state) =>
                         val orders =
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders
@@ -190,6 +225,8 @@ object CosmexWebSocketServer {
                     case None =>
                         ClientResponse.Error("Client not found")
                 }
+                List(response)
         }
+        responses
     }
 }

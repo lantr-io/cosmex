@@ -79,10 +79,16 @@ object OrderBook {
                     val tradeAmount = remainingAmount.min(sellAmount)
                     val tradePrice = sellOrder.orderPrice // Match at ask price
 
-                    // Create trade for the buy order
-                    val trade = Trade(
+                    // Create trades for BOTH sides of the match
+                    val buyTrade = Trade(
                       orderId = buyOrderId,
                       tradeAmount = tradeAmount,
+                      tradePrice = tradePrice
+                    )
+                    
+                    val sellTrade = Trade(
+                      orderId = sellEntry.orderId,
+                      tradeAmount = -tradeAmount,  // Negative for SELL side
                       tradePrice = tradePrice
                     )
 
@@ -99,7 +105,7 @@ object OrderBook {
                             // Fully filled - remove from book
                             sellOrders.tail
 
-                    loop(updatedSellOrders, newRemaining, trade :: trades)
+                    loop(updatedSellOrders, newRemaining, sellTrade :: buyTrade :: trades)
                 else
                     // No more matches
                     (sellOrders, remainingAmount, trades)
@@ -139,10 +145,16 @@ object OrderBook {
                     val tradeAmount = remainingAmount.min(buyAmount)
                     val tradePrice = sellOrder.orderPrice // Match at bid price
 
-                    // Create trade for the sell order (negative amount for SELL)
-                    val trade = Trade(
+                    // Create trades for BOTH sides of the match
+                    val sellTrade = Trade(
                       orderId = sellOrderId,
-                      tradeAmount = -tradeAmount,
+                      tradeAmount = -tradeAmount,  // Negative for SELL side
+                      tradePrice = tradePrice
+                    )
+                    
+                    val buyTrade = Trade(
+                      orderId = buyEntry.orderId,
+                      tradeAmount = tradeAmount,  // Positive for BUY side
                       tradePrice = tradePrice
                     )
 
@@ -159,7 +171,7 @@ object OrderBook {
                             // Fully filled - remove from book
                             buyOrders.tail
 
-                    loop(updatedBuyOrders, newRemaining, trade :: trades)
+                    loop(updatedBuyOrders, newRemaining, buyTrade :: sellTrade :: trades)
                 else
                     // No more matches
                     (buyOrders, remainingAmount, trades)

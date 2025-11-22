@@ -276,17 +276,8 @@ class Server(
                     if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
                        orderBookUpdated = true
                        
-                // Send trade notifications to order owners
-                if (matchResult.trades.nonEmpty) then
-                   matchResult.trades.foreach{ trade =>
-                       orderOwners.get(trade.orderId).foreach{
-                              ownerClientId  =>
-                                clientChannels.get(ownerClientId).foreach{ channel =>
-                                    println(s"[Server] Sending trade notification to client: $ownerClientId, trade: ${trade.orderId}")
-                                    channel.send(trade)
-                                }
-                       }
-                   }
+                // Note: Trade notifications are now sent from CosmexWebSocketServer.handleRequest
+                // This ensures OrderCreated is sent before OrderExecuted for the initiating client
 
                 // Apply trades to trading state
                 import CosmexValidator.applyTrade
