@@ -46,8 +46,9 @@ class SimpleWebSocketClient(serverUrl: String) {
                     }
                 } catch {
                     case e: Exception =>
-                        if (!e.getMessage.contains("closed")) {
-                            System.err.println(s"[Client] Error receiving: ${e.getMessage}")
+                        val msg = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
+                        if (!msg.contains("closed")) {
+                            System.err.println(s"[Client] Error receiving: $msg")
                         }
                 }
                 ()

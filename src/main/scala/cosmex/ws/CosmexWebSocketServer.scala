@@ -4,7 +4,7 @@ import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 import cosmex.*
 import ox.*
-import ox.channels.{Channel, Source}
+import ox.channels.{Channel, Source, ChannelClosedUnion}
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
@@ -65,14 +65,32 @@ object CosmexWebSocketServer {
                    println(s"[Server] Sent order execution: Order ID ${trade.orderId}")
                    responseJson
                 }
-                val retval = handleRequestFlow.merge(orderExecutionFlow)
+                
+                // Register cleanup handler BEFORE merging
                 in.onComplete(
-                  // actially we should have something like ref-counting here, because
-                  // multiple connections from same clientId may exist
-                  println(s"[Server] Connection closed for client: ${clientId}"),
+                  println(s"[Server] Connection closing for client: ${clientId}"),
+                  // Close the channel so Flow.fromSource completes
+                  channel.done(),
+                  // Drain any remaining items from channel to complete the flow
+                  supervised {
+                      fork {
+                          try {
+                              import ChannelClosedUnion.isValue
+                              while (channel.receiveOrClosed().isValue) {
+                                  // Drain the channel
+                              }
+                              println(s"[Server] Channel drained for client: ${clientId}")
+                          } catch {
+                              case e: Exception => 
+                                  println(s"[Server] Error draining channel for client $clientId: ${e.getMessage}")
+                                  e.printStackTrace()
+                          }
+                      }
+                  },
                   server.clientChannels.remove(clientId)
                 )
-                retval
+                
+                handleRequestFlow.merge(orderExecutionFlow)
         }
     }
 
