@@ -34,14 +34,17 @@ libraryDependencies ++= Seq(
   "com.lihaoyi" %% "ujson" % "4.4.1",
   // Argument parsing
   "com.monovore" %% "decline" % "2.5.0",
-  "org.slf4j" % "slf4j-simple" % "2.0.17"
+  "org.slf4j" % "slf4j-simple" % "2.0.17",
+  // Configuration
+  "com.typesafe" % "config" % "1.4.3"
 )
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % "test"
 libraryDependencies += "com.lihaoyi" %% "pprint" % "0.9.4" % "test"
 libraryDependencies ++= Seq(
-  "com.softwaremill.sttp.client4" %% "core" % "4.0.13" % "test"
+  "com.softwaremill.sttp.client4" %% "core" % "4.0.13",
+  "com.softwaremill.sttp.client4" %% "ox" % "4.0.13"
 )
 
 addCommandAlias(

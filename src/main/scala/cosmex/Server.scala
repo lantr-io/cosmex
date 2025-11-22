@@ -397,7 +397,15 @@ class Server(
     }
 
     def sendTx(tx: Transaction): Unit = {
-        println(tx)
+        provider.submit(tx) match {
+            case Left(error) => println(s"[Server] Transaction submission failed: $error")
+            case Right(_)    => println(s"[Server] Transaction submitted: ${tx.id.toHex.take(16)}...")
+        }
+    }
+    
+    /** Check if a transaction output exists on-chain (i.e., transaction is confirmed) */
+    def isUtxoConfirmed(txOutRef: TransactionInput): Boolean = {
+        provider.findUtxo(txOutRef).isRight
     }
 
     def reply(@unused response: ClientResponse): List[ServerEvent] = {

@@ -16,34 +16,34 @@ import scalus.testing.kit.MockLedgerApi
 
 import scala.util.{Failure, Success}
 
-/** Demonstration of Alice opening a channel and creating a SELL order
+/** Demonstration of Bob opening a channel and creating a BUY order
   *
-  * Alice's scenario:
-  *   - Opens channel with 1000 ADA
-  *   - Creates SELL order: 100 ADA @ 0.50 USDM/ADA
-  *   - Waits for matching with Bob's BUY order
+  * Bob's scenario:
+  *   - Opens channel with 500 ADA + 1000 USDM
+  *   - Creates BUY order: 100 ADA @ 0.55 USDM/ADA
+  *   - Waits for matching with Alice's SELL order
   *   - Displays trade execution and final balances
   */
-object AliceDemo {
+object BobDemo {
 
     def main(args: Array[String]): Unit = {
         // Load configuration
         val config = DemoConfig.load()
 
         println("=" * 60)
-        println("COSMEX Demo: Alice Opens Channel & Creates SELL Order")
+        println("COSMEX Demo: Bob Opens Channel & Creates BUY Order")
         println("=" * 60)
 
         // Setup
         val cardanoInfo = CardanoInfo.mainnet
 
-        // Create Alice's account from config
-        println("\n[1] Creating Alice's account from config...")
-        val aliceAccount = config.alice.createAccount()
-        val alicePubKey = config.alice.getPubKey()
-        val alicePubKeyHash = config.alice.getPubKeyHash()
-        println(s"    Alice Seed: ${config.alice.seed}")
-        println(s"    Alice PubKeyHash: ${alicePubKeyHash.toHex}")
+        // Create Bob's account from config
+        println("\n[1] Creating Bob's account from config...")
+        val bobAccount = config.bob.createAccount()
+        val bobPubKey = config.bob.getPubKey()
+        val bobPubKeyHash = config.bob.getPubKeyHash()
+        println(s"    Bob Seed: ${config.bob.seed}")
+        println(s"    Bob PubKeyHash: ${bobPubKeyHash.toHex}")
 
         // Create exchange parameters from config
         val exchangeParams = config.exchange.createParams()
@@ -53,19 +53,19 @@ object AliceDemo {
         )
         println(s"    Exchange PubKeyHash: ${exchangePubKeyHash.toHex}")
 
-        // Create Alice's address
-        val aliceAddress = Address(
+        // Create Bob's address
+        val bobAddress = Address(
           config.network.scalusNetwork,
-          Credential.KeyHash(AddrKeyHash.fromByteString(alicePubKeyHash))
+          Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
         )
 
-        // Setup mock ledger with Alice's initial UTxO
+        // Setup mock ledger with Bob's initial UTxO
         val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
-        // Get Alice's initial balance from config
-        val aliceInitialValue = config.alice.getInitialValue()
-        println(s"\n    Alice's Initial Balance:")
-        config.alice.initialBalance.foreach { case (asset, amount) =>
+        // Get Bob's initial balance from config
+        val bobInitialValue = config.bob.getInitialValue()
+        println(s"\n    Bob's Initial Balance:")
+        config.bob.initialBalance.foreach { case (asset, amount) =>
             val assetInfo = config.assets.getAsset(asset)
             val displayAmount = amount.toDouble / math.pow(10, assetInfo.decimals)
             println(s"      - $displayAmount ${assetInfo.symbol}")
@@ -74,8 +74,8 @@ object AliceDemo {
         val initialUtxos = Map(
           TransactionInput(genesisHash, 0) ->
               TransactionOutput(
-                address = aliceAddress,
-                value = aliceInitialValue
+                address = bobAddress,
+                value = bobInitialValue
               )
         )
 
@@ -110,33 +110,32 @@ object AliceDemo {
             }
 
         try {
-            // Step 1: Open channel with deposit
+            // Step 1: Open channel with initial deposit
             println("\n[3] Opening channel with deposit...")
 
-            // Find Alice's UTxO
+            // Find Bob's UTxO
             val depositUtxo = provider
                 .findUtxo(
-                  address = aliceAddress,
+                  address = bobAddress,
                   minAmount = Some(Coin(100_000L)) // Minimum for tx
                 )
                 .toOption
                 .get
 
             // Build opening transaction with full balance
-            val depositAmount = aliceInitialValue
+            val depositAmount = bobInitialValue
             val openChannelTx = txbuilder.openChannel(
               clientInput = depositUtxo,
-              clientPubKey = alicePubKey,
+              clientPubKey = bobPubKey,
               depositAmount = depositAmount
             )
 
             println(s"    Transaction built: ${openChannelTx.id.toHex.take(16)}...")
 
             // Extract actual deposit amount from transaction output
-            // (The server's CosmexScriptAddress)
             val actualDepositAmount = openChannelTx.body.value.outputs.view
                 .map(_.value)
-                .headOption // For mock, just take first output
+                .headOption
                 .getOrElse(openChannelTx.body.value.outputs.toSeq.head.value)
 
             // Create client TxOutRef from first input
@@ -146,7 +145,7 @@ object AliceDemo {
             // Create and sign initial snapshot (version 0)
             val initialSnapshot = mkInitialSnapshot(actualDepositAmount.value)
             val clientSignedSnapshot =
-                mkClientSignedSnapshot(aliceAccount, clientTxOutRef, initialSnapshot)
+                mkClientSignedSnapshot(bobAccount, clientTxOutRef, initialSnapshot)
 
             println(s"    Snapshot v${initialSnapshot.snapshotVersion} created and signed")
 
@@ -162,19 +161,19 @@ object AliceDemo {
                       s"    Exchange signature: ${signedSnapshot.snapshotExchangeSignature.toHex.take(32)}..."
                     )
 
-                    // Step 2: Create a SELL order from config
-                    println("\n[4] Creating SELL order from config...")
+                    // Step 2: Create a BUY order from config
+                    println("\n[4] Creating BUY order from config...")
 
-                    val orderConfig = config.alice.defaultOrder.getOrElse {
-                        throw new IllegalStateException("No default order configured for Alice")
+                    val orderConfig = config.bob.defaultOrder.getOrElse {
+                        throw new IllegalStateException("No default order configured for Bob")
                     }
 
                     println(
                       s"    Order: ${orderConfig.side} ${orderConfig.amount} ${orderConfig.baseAsset} @ ${orderConfig.price}"
                     )
 
-                    // Create the SELL order
-                    val sellOrder = LimitOrder(
+                    // Create the BUY order
+                    val buyOrder = LimitOrder(
                       orderPair = orderConfig.getPair(),
                       orderAmount = orderConfig.getSignedAmount(),
                       orderPrice = orderConfig.price
@@ -184,7 +183,7 @@ object AliceDemo {
                     val clientId = ClientId(TransactionInput(openChannelTx.id, 0))
 
                     // Send CreateOrder request
-                    val orderRequest = ClientRequest.CreateOrder(clientId, sellOrder)
+                    val orderRequest = ClientRequest.CreateOrder(clientId, buyOrder)
                     client.sendRequest(orderRequest, timeoutSeconds = 10) match {
                         case Success(ClientResponse.OrderCreated(orderId)) =>
                             println(s"    ✓ Order created successfully!")
@@ -205,11 +204,27 @@ object AliceDemo {
                             // Wait for potential trade execution
                             println("\n[5] Waiting for order matching...")
                             println(
-                              "    (If Bob creates a matching BUY order, trade will execute automatically)"
+                              "    (If Alice creates a matching SELL order, trade will execute automatically)"
                             )
 
                             // Listen for trade notifications
                             Thread.sleep(5000) // Wait 5 seconds for potential matches
+
+                            // Query final balance
+                            println("\n[6] Querying final balance...")
+                            val balanceRequest = ClientRequest.GetBalance(clientId)
+                            client.sendRequest(balanceRequest, timeoutSeconds = 10) match {
+                                case Success(ClientResponse.Balance(balance)) =>
+                                    println(s"    Current balance:")
+                                    // TODO: Parse and display balance properly
+                                    println(s"    $balance")
+
+                                case Success(other) =>
+                                    println(s"    Unexpected response: $other")
+
+                                case Failure(e) =>
+                                    println(s"    Error: ${e.getMessage}")
+                            }
 
                             println("\n" + "=" * 60)
                             println("Demo completed successfully!")
@@ -238,7 +253,7 @@ object AliceDemo {
         } finally {
             // Cleanup
             client.close()
-            println("\n[6] Disconnected from server")
+            println("\n[7] Disconnected from server")
         }
     }
 }

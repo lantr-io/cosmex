@@ -3,6 +3,7 @@ package cosmex.util
 import cosmex.*
 import scalus.builtin.ByteString
 import scalus.cardano.ledger.*
+
 import scalus.ledger.api.v1
 import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
 import scalus.prelude
@@ -38,6 +39,11 @@ object JsonCodecs {
     given rwPolicyId: ReadWriter[PolicyId] = readwriter[ByteString].bimap[PolicyId](
       { pid => pid },
       { bs => ScriptHash.fromByteString(bs) }
+    )
+
+    given rwTransaction: ReadWriter[Transaction] = readwriter[String].bimap[Transaction](
+      t => t.toCbor.toHex,
+      s => Transaction.fromCbor(scalus.utils.Hex.hexToBytes(s))
     )
 
     // Simplified Value codecs - serialize as string for now
@@ -106,12 +112,6 @@ object JsonCodecs {
 
     given rwSnapshot: ReadWriter[Snapshot] = macroRW
     given rwSignedSnapshot: ReadWriter[SignedSnapshot] = macroRW
-
-    // Transaction codec (simplified - expand as needed)
-    given rwTransaction: ReadWriter[Transaction] = readwriter[String].bimap[Transaction](
-      _.toCbor.toHex, // Simplified - just serialize the ID
-      hex => Cbor.decode(hex.hexToBytes)
-    )
 
     // Instant codec for timestamps
     given rwInstant: ReadWriter[Instant] = readwriter[String].bimap[Instant](

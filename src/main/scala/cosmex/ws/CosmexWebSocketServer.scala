@@ -6,11 +6,11 @@ import cosmex.*
 import ox.*
 import ox.channels.Channel
 import sttp.tapir.*
-import sttp.tapir.server.netty.sync.{NettySyncServer, OxStreams}
+import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
+import cats.Id // Import Id
 
-
-
+import cats.Id // Import Id
 
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
@@ -23,16 +23,8 @@ object CosmexWebSocketServer {
               webSocketBody[String, CodecFormat.TextPlain, String, CodecFormat.TextPlain](OxStreams)
             )
 
-    /** Run the WebSocket server with the given Server instance */
-    def run(server: Server, port: Int = 8080)(using Ox): Unit = {
-        println("=" * 60)
-        println("COSMEX WebSocket Server")
-        println("=" * 60)
-        println(s"Listening on: ws://localhost:$port/ws")
-        println("=" * 60)
-
-        // Define WebSocket logic
-        val wsServerEndpoint = wsEndpoint.handleSuccess { (clientTrId, clientTrIdx) =>
+    private def wsLogic(server: Server) = {
+        wsEndpoint.handleSuccess { (clientTrId, clientTrIdx) =>
             import ox.flow.Flow
             val clientTrInput = scalus.cardano.ledger.TransactionInput(
               scalus.cardano.ledger.TransactionHash.fromHex(clientTrId),
@@ -42,7 +34,9 @@ object CosmexWebSocketServer {
             // in future: creater some policy for overflow
             val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[Trade])
             (in: Flow[String]) =>
+                println(s"[Server] WebSocket handler started for client: ${clientId}")
                 val handleRequestFlow = in.map { msg =>
+                    println(s"[Server] Raw message received: ${msg.take(100)}...")
                     try {
                         // Parse incoming JSON as ClientRequest
                         val request = read[ClientRequest](msg)
@@ -78,20 +72,34 @@ object CosmexWebSocketServer {
                 )
                 retval
         }
+    }
 
-        // Start server
-        val binding = NettySyncServer()
-            .port(port)
-            .addEndpoint(wsServerEndpoint)
-            .start()
-
+    /** Run the WebSocket server with the given Server instance (for main application - runs forever) */
+    def run(server: Server, port: Int = 8080)(using Ox): Unit = {
+        val binding = runBinding(server, port)
         println("\n[Server] Ready to accept connections. Press ENTER to stop.")
         scala.io.StdIn.readLine()
-
         println("\n[Server] Shutting down...")
         binding.stop()
     }
 
+    /** Run the WebSocket server and return the binding (for testing) */
+    def runBinding(server: Server, port: Int = 8080)(using Ox): NettySyncServerBinding = {
+        println("=" * 60)
+        println("COSMEX WebSocket Server")
+        println("=" * 60)
+        println(s"Listening on: ws://localhost:$port/ws")
+        println("=" * 60)
+
+        val wsServerEndpoint = wsLogic(server)
+
+        // Start server
+        NettySyncServer()
+            .port(port)
+            .addEndpoint(wsServerEndpoint)
+            .start()
+    }
+    
     /** Handle a client request and return a response */
     def handleRequest(server: Server, request: ClientRequest): ClientResponse = {
         request match {
@@ -122,15 +130,22 @@ object CosmexWebSocketServer {
                             .value
                             .value // TransactionOutput.value.value = Value
 
+                        // Submit transaction to blockchain
+                        server.sendTx(tx)
+                        
+                        // Check if transaction is confirmed (for MockLedgerApi it's immediate)
+                        val txConfirmed = server.isUtxoConfirmed(channelRef)
+                        val channelStatus = if (txConfirmed) ChannelStatus.Open else ChannelStatus.PendingOpen
+                        
                         val clientState = ClientState(
                           latestSnapshot = signedSnapshot,
                           channelRef = channelRef,
                           lockedValue = actualDeposit,
-                          status = ChannelStatus.Open
+                          status = channelStatus
                         )
                         server.clientStates.put(clientId, clientState)
 
-                        println(s"[Server] Channel opened for client: ${clientId}")
+                        println(s"[Server] Channel opened for client: ${clientId}, status: ${channelStatus}")
                         ClientResponse.ChannelOpened(signedSnapshot)
                 }
 
