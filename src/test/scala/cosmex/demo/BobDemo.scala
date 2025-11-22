@@ -14,7 +14,8 @@ import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
 
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
+import upickle.default.*
 
 /** Demonstration of Bob opening a channel and creating a BUY order
   *
@@ -208,7 +209,38 @@ object BobDemo {
                             )
 
                             // Listen for trade notifications
-                            Thread.sleep(5000) // Wait 5 seconds for potential matches
+                            var orderExecuted = false
+                            var attempts = 0
+                            val maxAttempts = 10
+                            
+                            while (!orderExecuted && attempts < maxAttempts) {
+                                client.receiveMessage(1) match {
+                                    case Success(msgJson) =>
+                                        Try(read[ClientResponse](msgJson)) match {
+                                            case Success(ClientResponse.OrderExecuted(trade)) =>
+                                                println("\n    ✓ Order matched and executed!")
+                                                println(f"      Trade ID: ${trade.orderId}")
+                                                println(f"      Amount: ${trade.tradeAmount}")
+                                                println(f"      Price: ${trade.tradePrice}")
+                                                orderExecuted = true
+                                                
+                                            case Success(other) =>
+                                                println(s"    Received: ${other.getClass.getSimpleName}")
+                                                
+                                            case Failure(e) =>
+                                                println(s"    Failed to parse message: ${e.getMessage}")
+                                        }
+                                        
+                                    case Failure(_) =>
+                                        // Timeout, continue waiting
+                                        attempts += 1
+                                }
+                            }
+                            
+                            if (!orderExecuted) {
+                                println("\n    No matching orders found within timeout period")
+                                println("    Order remains in the order book")
+                            }
 
                             // Query final balance
                             println("\n[6] Querying final balance...")
