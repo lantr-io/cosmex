@@ -2,7 +2,8 @@ package cosmex.cardano
 
 import com.bloxbean.cardano.client.api.UtxoSupplier
 import com.bloxbean.cardano.client.backend.api.BackendService
-import com.bloxbean.cardano.yaci.test.YaciCardanoContainer
+import com.bloxbean.cardano.yaci.test.{YaciCardanoContainer, Funding}
+import cosmex.util.TransactionStatusProvider
 import scalus.cardano.ledger.{Coin, Transaction, Utxo, ProtocolParams, TransactionHash, DatumOption, TransactionInput, Utxos, TransactionOutput, Value}
 import scalus.cardano.address.Address
 import scalus.builtin.ByteString
@@ -29,23 +30,35 @@ class YaciTestcontainerProvider private (
     private val container: YaciCardanoContainer,
     private val backendService: BackendService,
     private val utxoSupplier: UtxoSupplier
-) extends scalus.cardano.node.Provider {
+) extends scalus.cardano.node.Provider with TransactionStatusProvider {
 
 
   /** Submit a transaction to the Yaci testcontainer blockchain */
   override def submit(tx: Transaction): Either[RuntimeException, Unit] = {
     Try {
       println(s"[YaciProvider] Submitting transaction: ${tx.id.toHex.take(16)}...")
-      
+
       // Convert Scalus Transaction to CBOR bytes
       val txCborBytes = tx.toCbor
-      
-      // Submit via backend service
+
+      // Use BackendService (Blockfrost-compatible API) for better error handling
       val result = backendService.getTransactionService.submitTransaction(txCborBytes)
-      
+
+      println(s"[YaciProvider] Submit result - isSuccessful: ${result.isSuccessful}")
+      println(s"[YaciProvider] Submit result - response: ${result.getResponse}")
+
+      if (result.getValue != null) {
+        println(s"[YaciProvider] Submit result - value (txHash): ${result.getValue}")
+      }
+
       if (result.isSuccessful) {
-        println(s"[YaciProvider] Transaction submitted: ${result.getValue}")
-        ()
+        val txHash = result.getValue
+        if (txHash != null && txHash.matches("[0-9a-fA-F]{64}")) {
+          println(s"[YaciProvider] Transaction accepted: $txHash")
+          ()
+        } else {
+          throw new RuntimeException(s"Submit API returned invalid transaction hash: $txHash")
+        }
       } else {
         throw new RuntimeException(s"Transaction submission failed: ${result.getResponse}")
       }
@@ -55,18 +68,54 @@ class YaciTestcontainerProvider private (
     }
   }
 
+  /** Check if a transaction has been confirmed on-chain
+    *
+    * @param txHash Transaction hash to check
+    * @return Right(true) if confirmed, Right(false) if not found, Left(error) on failure
+    */
+  def isTransactionConfirmed(txHash: String): Either[RuntimeException, Boolean] = {
+    Try {
+      val txService = backendService.getTransactionService
+      println(s"[YaciProvider] Checking transaction status for: ${txHash.take(16)}...")
+      val txContent = txService.getTransaction(txHash)
+
+      println(s"[YaciProvider] getTransaction() isSuccessful: ${txContent.isSuccessful}")
+      if (!txContent.isSuccessful) {
+        println(s"[YaciProvider] getTransaction() response: ${txContent.getResponse}")
+      }
+
+      if (txContent.isSuccessful) {
+        val txData = txContent.getValue
+        // Transaction is confirmed if it has a block number/hash
+        val isConfirmed = txData.getBlock != null && !txData.getBlock.isEmpty
+        println(s"[YaciProvider] Transaction block: ${txData.getBlock}, isConfirmed: $isConfirmed")
+        if (isConfirmed) {
+          println(s"[YaciProvider] Transaction ${ txHash.take(16)}... confirmed in block ${txData.getBlock}")
+        }
+        isConfirmed
+      } else {
+        // Transaction not found or error
+        println(s"[YaciProvider] Transaction ${txHash.take(16)}... not found in blockchain")
+        false
+      }
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Failed to check transaction status: ${e.getMessage}", e)
+    }
+  }
+
   override def findUtxo(input: TransactionInput): Either[RuntimeException, Utxo] = {
     Try {
       val txHash = input.transactionId.toHex
       val outputIndex = input.index
-      
-      // Query all UTxOs for this txHash and filter by index
-      val allUtxos = utxoSupplier.getAll(txHash).asScala.toSeq
-      val maybeUtxo = allUtxos.find(_.getOutputIndex == outputIndex.toInt)
-      
-      maybeUtxo.map { bloxbeanUtxo =>
+
+      // Use getTxOutput (same as QuickTxBuilder.completeAndWait uses)
+      val maybeUtxo = utxoSupplier.getTxOutput(txHash, outputIndex.toInt)
+
+      if (maybeUtxo.isPresent) {
+        val bloxbeanUtxo = maybeUtxo.get()
         convertBloxbeanUtxo(bloxbeanUtxo, txHash, outputIndex)
-      }.getOrElse {
+      } else {
         throw new RuntimeException(s"UTxO not found: $txHash#$outputIndex")
       }
     }.toEither.left.map {
@@ -219,24 +268,82 @@ object YaciTestcontainerProvider {
 
   /** Start a new Yaci DevKit testcontainer */
   def start(): YaciTestcontainerProvider = {
+    start(Seq.empty)
+  }
+
+  /** Start a new Yaci DevKit testcontainer with initial funding
+    *
+    * @param initialFunding List of (address, amount in lovelace) pairs for initial funding
+    */
+  def start(initialFunding: Seq[(String, Long)]): YaciTestcontainerProvider = {
     println("[YaciProvider] Starting Yaci DevKit testcontainer...")
-    
-    // Create and start container
+
+    // Create container with initial funding
     val container = new YaciCardanoContainer()
-    container.start()
-    
+      .withLogConsumer(frame => println(s"[YaciContainer] ${frame.getUtf8String.trim}"))
+
+    // Prepare all funding entries
+    val fundingEntries = initialFunding.map { case (address, amount) =>
+      val amountInAda = amount / 1_000_000
+      println(s"[YaciProvider] Adding initial funding: $address -> $amountInAda ADA")
+      new Funding(address, amountInAda)
+    }
+
+    // Add all funding at once (withInitialFunding accepts varargs)
+    val containerWithFunding = if (fundingEntries.nonEmpty) {
+      container.withInitialFunding(fundingEntries: _*)
+    } else {
+      container
+    }
+
+    containerWithFunding.start()
+
     println("[YaciProvider] Container started, waiting for node to be ready...")
-    
-    // Wait for node to initialize
-    Thread.sleep(10000)
-    
+
     // Get backend service and UTXO supplier
-    val backendService = container.getBackendService
-    val utxoSupplier = container.getUtxoSupplier
-    
+    val backendService = containerWithFunding.getBackendService
+    val utxoSupplier = containerWithFunding.getUtxoSupplier
+
+    // Poll for initial funding transactions with timeout
+    if (initialFunding.nonEmpty) {
+      println("[YaciProvider] Polling for initial funding transactions...")
+      val maxWaitSeconds = 30
+      val pollIntervalMs = 2000
+      val maxAttempts = (maxWaitSeconds * 1000) / pollIntervalMs
+
+      var attempt = 0
+      var fundingComplete = false
+
+      while (attempt < maxAttempts && !fundingComplete) {
+        attempt += 1
+
+        // Check if all funded addresses have UTxOs
+        val addressesWithUtxos = initialFunding.count { case (address, amount) =>
+          val utxoCount = Try(utxoSupplier.getAll(address).size()).getOrElse(0)
+          val hasUtxos = utxoCount > 0
+          if (attempt == 1 || attempt % 5 == 0) {
+            println(s"[YaciProvider]   $address: $utxoCount UTxOs")
+          }
+          hasUtxos
+        }
+
+        if (addressesWithUtxos == initialFunding.size) {
+          fundingComplete = true
+          println(s"[YaciProvider] All ${initialFunding.size} addresses funded successfully")
+        } else {
+          println(s"[YaciProvider] Attempt $attempt: $addressesWithUtxos/${initialFunding.size} addresses funded, waiting...")
+          Thread.sleep(pollIntervalMs)
+        }
+      }
+
+      if (!fundingComplete) {
+        println(s"[YaciProvider] Warning: Funding may not be complete after ${maxWaitSeconds}s")
+      }
+    }
+
     println("[YaciProvider] Yaci DevKit testcontainer ready")
-    
-    new YaciTestcontainerProvider(container, backendService, utxoSupplier)
+
+    new YaciTestcontainerProvider(containerWithFunding, backendService, utxoSupplier)
   }
 
   /** Create provider with custom configuration */
@@ -246,7 +353,7 @@ object YaciTestcontainerProvider {
       epochLength: Int = 432000
   ): YaciTestcontainerProvider = {
     println(s"[YaciProvider] Starting with config: network=$network, slotLength=$slotLength")
-    
+
     // For now, use default start - custom config can be added later
     start()
   }

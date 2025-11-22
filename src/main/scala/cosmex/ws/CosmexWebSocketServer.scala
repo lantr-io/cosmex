@@ -31,8 +31,8 @@ object CosmexWebSocketServer {
               clientTrIdx
             )
             val clientId = ClientId(clientTrInput)
-            // in future: creater some policy for overflow
-            val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[Trade])
+            // in future: create some policy for overflow
+            val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[ClientResponse])
             (in: Flow[String]) =>
                 println(s"[Server] WebSocket handler started for client: ${clientId}")
                 val handleRequestFlow = in.mapConcat { msg =>
@@ -59,10 +59,16 @@ object CosmexWebSocketServer {
                             List(write(errorResponse))
                     }
                 }
-                val orderExecutionFlow = Flow.fromSource(channel).map { trade =>
-                   val response = ClientResponse.OrderExecuted(trade)
+                val asyncResponseFlow = Flow.fromSource(channel).map { response =>
                    val responseJson = write(response)
-                   println(s"[Server] Sent order execution: Order ID ${trade.orderId}")
+                   response match {
+                       case ClientResponse.OrderExecuted(trade) =>
+                           println(s"[Server] Sent async order execution: Order ID ${trade.orderId}")
+                       case ClientResponse.ChannelOpened(_) =>
+                           println(s"[Server] Sent async ChannelOpened")
+                       case other =>
+                           println(s"[Server] Sent async response: ${other.getClass.getSimpleName}")
+                   }
                    responseJson
                 }
                 
@@ -90,7 +96,7 @@ object CosmexWebSocketServer {
                   server.clientChannels.remove(clientId)
                 )
                 
-                handleRequestFlow.merge(orderExecutionFlow)
+                handleRequestFlow.merge(asyncResponseFlow)
         }
     }
 
@@ -122,7 +128,7 @@ object CosmexWebSocketServer {
     
     /** Handle a client request and return a response */
     /** Handle a single client request and return a sequence of responses
-      * 
+      *
       * Most requests return a single response, but CreateOrder returns OrderCreated
       * followed by OrderExecuted for each trade (ensures correct ordering)
       */
@@ -130,10 +136,9 @@ object CosmexWebSocketServer {
         val responses = request match {
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 // Validate the opening request
-                val validation = server.validateOpenChannelRequest(tx, snapshot)
-                val response = validation match {
+                server.validateOpenChannelRequest(tx, snapshot) match {
                     case Left(error) =>
-                        ClientResponse.Error(error)
+                        List(ClientResponse.Error(error))
                     case Right(_) =>
                         // Extract client TxOutRef from first input
                         val firstInput = tx.body.value.inputs.toSeq.head
@@ -155,25 +160,74 @@ object CosmexWebSocketServer {
                             .value
                             .value // TransactionOutput.value.value = Value
 
-                        // Submit transaction to blockchain
-                        server.sendTx(tx)
-                        
-                        // Check if transaction is confirmed (for MockLedgerApi it's immediate)
-                        val txConfirmed = server.isUtxoConfirmed(channelRef)
-                        val channelStatus = if (txConfirmed) ChannelStatus.Open else ChannelStatus.PendingOpen
-                        
+                        // Create client state with PendingOpen status
                         val clientState = ClientState(
                           latestSnapshot = signedSnapshot,
                           channelRef = channelRef,
                           lockedValue = actualDeposit,
-                          status = channelStatus
+                          status = ChannelStatus.PendingOpen
                         )
                         server.clientStates.put(clientId, clientState)
 
-                        println(s"[Server] Channel opened for client: ${clientId}, status: ${channelStatus}")
-                        ClientResponse.ChannelOpened(signedSnapshot)
+                        // Submit transaction to blockchain (non-blocking)
+                        server.provider.submit(tx) match {
+                            case Left(submitError) =>
+                                println(s"[Server] Transaction submission failed: $submitError")
+                                return List(ClientResponse.Error(s"Transaction submission failed: ${submitError.getMessage}"))
+                            case Right(_) =>
+                                println(s"[Server] Transaction submitted: ${tx.id.toHex.take(16)}...")
+                        }
+
+                        // Get the client's async response channel
+                        server.clientChannels.get(clientId) match {
+                            case None =>
+                                val errorMsg = s"Internal error: No async channel for client ${clientId}"
+                                println(s"[Server] ERROR: $errorMsg")
+                                List(ClientResponse.Error(errorMsg))
+
+                            case Some(channel) =>
+                                // Launch background thread to wait for confirmation using submitAndWait
+                                val pollingThread = new Thread(() => {
+                                    println(s"[Server] Starting background confirmation wait for: ${clientId}")
+
+                                    // Use submitAndWait extension (handles both transaction status and UTxO polling)
+                                    // Transaction already submitted, so we just poll for first output
+                                    import cosmex.util.submitAndWait
+                                    var attempts = 0
+                                    val maxAttempts = 60
+                                    val delayMs = 1000
+
+                                    var confirmed = false
+                                    while (attempts < maxAttempts && !confirmed) {
+                                        server.provider.findUtxo(channelRef) match {
+                                            case Right(_) =>
+                                                println(s"[Server] Channel confirmed after ${attempts + 1} attempt(s): ${clientId}")
+                                                server.updateChannelStatus(clientId, ChannelStatus.Open)
+                                                channel.send(ClientResponse.ChannelOpened(signedSnapshot))
+                                                confirmed = true
+                                            case Left(_) =>
+                                                attempts += 1
+                                                if (attempts < maxAttempts) {
+                                                    if (attempts % 5 == 0) {
+                                                        println(s"[Server] Still waiting for confirmation... (attempt ${attempts}/${maxAttempts})")
+                                                    }
+                                                    Thread.sleep(delayMs)
+                                                }
+                                        }
+                                    }
+
+                                    if (!confirmed) {
+                                        println(s"[Server] Channel confirmation timeout for: ${clientId}")
+                                        channel.send(ClientResponse.Error("Transaction confirmation timeout"))
+                                    }
+                                })
+                                pollingThread.setDaemon(true)
+                                pollingThread.start()
+
+                                println(s"[Server] Channel pending for client: ${clientId}")
+                                List(ClientResponse.ChannelPending(tx.id.toHex))
+                        }
                 }
-                List(response)
 
             case ClientRequest.CreateOrder(clientId, order) =>
                 server.handleCreateOrder(clientId, order) match {
@@ -198,7 +252,7 @@ object CosmexWebSocketServer {
                             server.orderOwners.get(trade.orderId).foreach { ownerClientId =>
                                 server.clientChannels.get(ownerClientId).foreach { channel =>
                                     println(s"[Server] Queuing trade notification to client: $ownerClientId, trade: ${trade.orderId}")
-                                    channel.send(trade)
+                                    channel.send(ClientResponse.OrderExecuted(trade))
                                 }
                             }
                         }

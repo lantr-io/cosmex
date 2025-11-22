@@ -1,5 +1,5 @@
 val scala3Version = "3.3.7"
-val scalusVersion = "0.13.0+306-e2efa43e-SNAPSHOT"
+val scalusVersion = "0.13.0+343-984ee645-SNAPSHOT"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
@@ -50,12 +50,15 @@ libraryDependencies ++= Seq(
 // Yaci DevKit for local blockchain testing
 libraryDependencies ++= Seq(
   "com.bloxbean.cardano" % "yaci-cardano-test" % "0.1.0" % Test,
+  "com.bloxbean.cardano" % "cardano-client-backend" % "0.7.0" % Test,
+  "com.bloxbean.cardano" % "cardano-client-backend-blockfrost" % "0.7.0" % Test,
   "org.testcontainers" % "testcontainers" % "1.19.3" % Test
 )
 
 // Test configuration
 Test / parallelExecution := false  // Required for Yaci DevKit testcontainers
 Test / javaOptions ++= Seq("-Xmx2g")  // Increase memory for blockchain tests
+Test / classLoaderLayeringStrategy := ClassLoaderLayeringStrategy.Flat  // Fix classloading for yaci-devkit
 
 addCommandAlias(
   "quick",

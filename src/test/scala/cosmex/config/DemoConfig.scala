@@ -167,11 +167,27 @@ case class DemoConfig(config: Config) {
   sealed trait ClientConfig {
     def name: String
     def seed: Int
+    def mnemonic: Option[String]
     def initialBalance: Map[String, Long]
     def defaultOrder: Option[OrderConfig]
 
-    /** Create account from config */
-    def createAccount(): Account = new Account(network.bloxbeanNetwork, seed)
+    /** Create account from config (using mnemonic if available, otherwise seed) */
+    def createAccount(): Account = {
+      mnemonic match {
+        case Some(words) =>
+          // Create account from mnemonic phrase with seed as account index
+          // This allows different addresses from the same mnemonic
+          import com.bloxbean.cardano.client.crypto.cip1852.DerivationPath.createExternalAddressDerivationPathForAccount
+          Account.createFromMnemonic(
+            network.bloxbeanNetwork,
+            words,
+            createExternalAddressDerivationPathForAccount(seed)
+          )
+        case None =>
+          // Fallback to seed-based account
+          new Account(network.bloxbeanNetwork, seed)
+      }
+    }
 
     /** Get public key hash */
     def getPubKeyHash(): ByteString = {
@@ -245,6 +261,14 @@ case class DemoConfig(config: Config) {
     val name = "Alice"
     val seed: Int = config.getInt("alice.seed")
 
+    val mnemonic: Option[String] = {
+      if (config.hasPath("alice.mnemonic")) {
+        Some(config.getString("alice.mnemonic"))
+      } else {
+        None
+      }
+    }
+
     val initialBalance: Map[String, Long] = {
       val balanceConfig = config.getConfig("alice.initialBalance")
       balanceConfig.entrySet().asScala.map { entry =>
@@ -270,6 +294,14 @@ case class DemoConfig(config: Config) {
   object bob extends ClientConfig {
     val name = "Bob"
     val seed: Int = config.getInt("bob.seed")
+
+    val mnemonic: Option[String] = {
+      if (config.hasPath("bob.mnemonic")) {
+        Some(config.getString("bob.mnemonic"))
+      } else {
+        None
+      }
+    }
 
     val initialBalance: Map[String, Long] = {
       val balanceConfig = config.getConfig("bob.initialBalance")
@@ -315,14 +347,14 @@ case class DemoConfig(config: Config) {
   }
   
   /** Create blockchain provider based on configuration
-    * 
+    *
     * Note: For mock provider with initial UTxOs, use createMockProvider() instead
     */
   def createProvider(): scalus.cardano.node.Provider = {
     import cosmex.cardano.YaciTestcontainerProvider
     import scalus.testing.kit.MockLedgerApi
     import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
-    
+
     blockchain.provider.toLowerCase match {
       case "mock" =>
         println(s"[Config] Using MockLedgerApi provider (empty initial state)")
@@ -332,15 +364,46 @@ case class DemoConfig(config: Config) {
           validators = MockLedgerApi.defaultValidators - WrongNetworkValidator,
           mutators = MockLedgerApi.defaultMutators
         )
-        
+
       case "yaci-devkit" | "yaci" =>
-        println(s"[Config] Using Yaci DevKit provider")
+        println(s"[Config] Using Yaci DevKit provider (without initial funding)")
+        println(s"[Config] Use createProviderWithFunding() to provide initial funding")
         YaciTestcontainerProvider.start()
-        
+
       case other =>
         throw new IllegalArgumentException(
           s"Unsupported blockchain provider: $other. " +
           s"Supported providers: mock, yaci-devkit, preprod, preview"
+        )
+    }
+  }
+
+  /** Create blockchain provider with initial funding for specific addresses
+    *
+    * @param initialFunding List of (bech32 address, amount in lovelace) pairs
+    */
+  def createProviderWithFunding(
+      initialFunding: Seq[(String, Long)]
+  ): scalus.cardano.node.Provider = {
+    import cosmex.cardano.YaciTestcontainerProvider
+    import scalus.testing.kit.MockLedgerApi
+    import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
+
+    blockchain.provider.toLowerCase match {
+      case "mock" =>
+        // Mock provider doesn't support this method - should use test-specific setup
+        println(s"[Config] Warning: Mock provider doesn't support createProviderWithFunding")
+        println(s"[Config] Use test-specific UTxO setup for MockLedgerApi")
+        createProvider()
+
+      case "yaci-devkit" | "yaci" =>
+        println(s"[Config] Using Yaci DevKit provider with initial funding")
+        YaciTestcontainerProvider.start(initialFunding)
+
+      case other =>
+        throw new IllegalArgumentException(
+          s"Unsupported blockchain provider: $other. " +
+          s"Supported providers: mock, yaci-devkit"
         )
     }
   }

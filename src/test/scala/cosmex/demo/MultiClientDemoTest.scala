@@ -12,7 +12,7 @@ import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.txbuilder.Environment
+import scalus.cardano.txbuilder.{Environment, TransactionSigner}
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.ledger.rules.Context
 import scalus.ledger.api.v3.{TxId, TxOutRef}
@@ -64,7 +64,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
               case "mock" =>
                 // For MockLedgerApi, we need to initialize with genesis UTxOs
                 val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
-                
+
                 val initialUtxos = Map(
                   TransactionInput(genesisHash, 0) ->
                       TransactionOutput(address = aliceAddress, value = aliceInitialValue + Value.lovelace(100_000_000L)),
@@ -79,15 +79,35 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       MissingKeyHashesValidator -
                       ProtocolParamsViewHashesMatchValidator -
                       MissingRequiredDatumsValidator -
-                      WrongNetworkValidator,
+                      WrongNetworkValidator -
+                      VerifiedSignaturesInWitnessesValidator,  // Disable signature validation for testing
                   mutators = MockLedgerApi.defaultMutators -
                       PlutusScriptsTransactionMutator
                 )
-                
+
               case "yaci-devkit" | "yaci" =>
-                // Yaci DevKit will have its own initial funding via container
-                config.createProvider()
-                
+                // Yaci DevKit with initial funding for Alice and Bob
+                import scalus.cardano.address.ShelleyAddress
+
+                // Get bech32 addresses for funding
+                val aliceBech32 = aliceAddress.asInstanceOf[ShelleyAddress].toBech32.get
+                val bobBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
+
+                // Calculate total funding needed (initial balance + 100 ADA for fees/collateral)
+                // Note: yaci-devkit can only fund ADA, so we only use the coin value
+                val aliceFunding = (aliceInitialValue.coin.value + 100_000_000L)
+                val bobFunding = (bobInitialValue.coin.value + 100_000_000L)
+
+                println(s"[Test] Funding Alice with ${aliceFunding / 1_000_000} ADA")
+                println(s"[Test] Funding Bob with ${bobFunding / 1_000_000} ADA")
+
+                val initialFunding = Seq(
+                  (aliceBech32, aliceFunding),
+                  (bobBech32, bobFunding)
+                )
+
+                config.createProviderWithFunding(initialFunding)
+
               case other =>
                 throw new IllegalArgumentException(s"Unsupported provider for test: $other")
             }
@@ -134,21 +154,99 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     try {
                         println(s"\n[$name] Starting scenario...")
 
-                        // For testing, create a mock genesis UTxO
-                        val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
+                        // Get UTxO for the client
+                        val depositUtxo = config.blockchain.provider.toLowerCase match {
+                          case "mock" =>
+                            // For MockLedgerApi, use the pre-created genesis UTxO
+                            val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
+                            Utxo(
+                              input = genesisInput,
+                              output = TransactionOutput(address = address, value = initialValue + Value.lovelace(100_000_000L))
+                            )
 
-                        // Find a UTxO for the client. For this mock scenario, we create one.
-                        val depositUtxo = Utxo(
-                          input = genesisInput,
-                          output = TransactionOutput(address = address, value = initialValue + Value.lovelace(100_000_000L))
-                        )
+                          case "yaci-devkit" | "yaci" =>
+                            // For Yaci DevKit, query the provider for funded UTxOs
+                            import scalus.cardano.address.ShelleyAddress
+                            val addressBech32 = address.asInstanceOf[ShelleyAddress].toBech32.get
+                            println(s"[$name] Querying provider for UTxOs at address: $addressBech32...")
+
+                            // First try to find all UTxOs at the address for debugging
+                            provider.findUtxos(
+                              address = address,
+                              transactionId = None,
+                              datum = None,
+                              minAmount = None,
+                              minRequiredTotalAmount = None
+                            ) match {
+                              case Right(utxos) =>
+                                println(s"[$name] Found ${utxos.size} UTxOs at address")
+                                utxos.foreach { case (input, output) =>
+                                  println(s"[$name]   UTxO: ${input.transactionId.toHex.take(16)}#${input.index} = ${output.value.coin.value} lovelace")
+                                  println(s"[$name]   UTxO address: ${output.address}")
+                                }
+                              case Left(err) =>
+                                println(s"[$name] Could not query UTxOs: ${err.getMessage}")
+                            }
+
+                            // Now find a suitable UTxO
+                            provider.findUtxo(
+                              address = address,
+                              transactionId = None,
+                              datum = None,
+                              minAmount = Some(Coin(initialValue.coin.value + 100_000_000L))
+                            ) match {
+                              case Right(foundUtxo) =>
+                                println(s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}")
+                                foundUtxo
+                              case Left(err) =>
+                                fail(s"[$name] Failed to find funded UTxO: ${err.getMessage}")
+                            }
+
+                          case other =>
+                            fail(s"Unsupported provider: $other")
+                        }
 
                         // Use txbuilder to create a valid openChannelTx
-                        val openChannelTx = txbuilder.openChannel(
+                        // For yaci-devkit, only deposit ADA (no multiassets available in funded UTxOs)
+                        val depositAmount = config.blockchain.provider.toLowerCase match {
+                          case "yaci-devkit" | "yaci" =>
+                            Value.lovelace(initialValue.coin.value)
+                          case _ =>
+                            initialValue
+                        }
+
+                        val unsignedTx = txbuilder.openChannel(
                           clientInput = depositUtxo,
                           clientPubKey = pubKey,
-                          depositAmount = initialValue
+                          depositAmount = depositAmount
                         )
+
+                        // Sign the transaction using Bloxbean's signExtended (yaci-devkit compatible)
+                        println(s"[$name] Signing transaction with Bloxbean signExtended...")
+                        import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                        import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                        import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                        val hdKeyPair = account.hdKeyPair()
+                        val txBytes = TransactionBytes(unsignedTx.toCbor)
+                        val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+
+                        // Sign using Bloxbean's native Ed25519 signing
+                        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                        val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+
+                        // Create VKeyWitness with Bloxbean signature
+                        val witness = VKeyWitness(
+                          signature = ByteString.fromArray(signature),
+                          vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                        )
+
+                        // Add witness to transaction
+                        val witnessSet = unsignedTx.witnessSet.copy(
+                          vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                        )
+                        val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
+                        println(s"[$name] Transaction signed successfully with Bloxbean signExtended")
 
                         // The ClientId should be based on openChannelTx.id and 0
                         val clientId = ClientId(TransactionInput(openChannelTx.id, 0))
@@ -159,16 +257,34 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
 
-                        // Create and sign initial snapshot
-                        val initialSnapshot = mkInitialSnapshot(initialValue)
+                        // Create and sign initial snapshot (must match depositAmount)
+                        val initialSnapshot = mkInitialSnapshot(depositAmount)
                         val clientSignedSnapshot =
                             mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 
-                        // Send OpenChannel request and wait for confirmation
+                        // Send OpenChannel request and wait for ChannelPending
                         println(s"[$name] Opening channel...")
                         client.sendMessage(ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot))
-                        
-                        val openResponse = client.receiveMessage(timeoutSeconds = 10)
+
+                        // First, expect ChannelPending response (immediate)
+                        val pendingResponse = client.receiveMessage(timeoutSeconds = 10)
+                        pendingResponse match {
+                            case Success(responseJson) =>
+                                read[ClientResponse](responseJson) match {
+                                    case ClientResponse.ChannelPending(txId) =>
+                                        println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
+                                    case ClientResponse.Error(msg) =>
+                                        fail(s"[$name] Channel opening failed: $msg")
+                                    case other =>
+                                        fail(s"[$name] Expected ChannelPending, got: $other")
+                                }
+                            case Failure(e) =>
+                                fail(s"[$name] Error waiting for ChannelPending: ${e.getMessage}")
+                        }
+
+                        // Then, wait for ChannelOpened (can take up to 60s on yaci-devkit)
+                        println(s"[$name] Waiting for channel confirmation...")
+                        val openResponse = client.receiveMessage(timeoutSeconds = 70)
                         openResponse match {
                             case Success(responseJson) =>
                                 read[ClientResponse](responseJson) match {

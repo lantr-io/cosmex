@@ -16,6 +16,7 @@ import scala.annotation.unused
 import cosmex.util.JsonCodecs.given
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import cosmex.util.submitAndWait
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
@@ -44,6 +45,7 @@ enum BlockchainEvent derives ReadWriter:
     case Tick(chainTime: Instant, chainSlot: ChainSlot)
 
 enum ClientResponse derives ReadWriter:
+    case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
     case ChannelOpened(snapshot: SignedSnapshot)
     case Error(message: String)
     case OrderCreated(orderId: OrderId)
@@ -77,7 +79,7 @@ case class ClientState(
 
 case class ClientRecord(
     state: ClientState,
-    oxChannel: ox.channels.Channel[Trade]
+    oxChannel: ox.channels.Channel[ClientResponse]
                        )
 
 case class OpenChannelInfo(
@@ -90,7 +92,7 @@ case class OpenChannelInfo(
 class Server(
     env: CardanoInfo,
     exchangeParams: ExchangeParams,
-    @unused provider: Provider,
+    val provider: Provider,  // Made public for WebSocket server
     exchangePrivKey: ByteString
 ) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams)
@@ -100,7 +102,7 @@ class Server(
     val CosmexPubKey = exchangeParams.exchangePubKey
 
     val clientStates = TrieMap.empty[ClientId, ClientState]
-    val clientChannels = TrieMap.empty[ClientId, ox.channels.Channel[Trade]]
+    val clientChannels = TrieMap.empty[ClientId, ox.channels.Channel[ClientResponse]]
     var orderBookRef: AtomicReference[OrderBook] = new AtomicReference(OrderBook.empty)
     var nextOrderId: AtomicLong = new AtomicLong(0L)
     val orderOwners = TrieMap.empty[OrderId, ClientId] // Maps order ID to client
@@ -394,9 +396,10 @@ class Server(
     }
 
     def sendTx(tx: Transaction): Unit = {
-        provider.submit(tx) match {
+        // Use longer timeout for real blockchains (30s)
+        provider.submitAndWait(tx, maxAttempts = 30, delayMs = 1000) match {
             case Left(error) => println(s"[Server] Transaction submission failed: $error")
-            case Right(_)    => println(s"[Server] Transaction submitted: ${tx.id.toHex.take(16)}...")
+            case Right(_)    => println(s"[Server] Transaction confirmed: ${tx.id.toHex.take(16)}...")
         }
     }
     
