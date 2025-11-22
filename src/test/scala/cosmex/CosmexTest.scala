@@ -462,17 +462,30 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val (bobOrderId, bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
 
         // 5. Verify trade execution: 70 ADA @ 0.50 (Alice's ask price)
+        // Now we get TWO trades: one for Bob's order, one for Alice's order
         assert(bobTrades.nonEmpty, "Bob's order should match Alice's order")
-        assert(bobTrades.length == 1, "Should have exactly one trade")
+        assert(bobTrades.length == 2, "Should have two trades (one for each side)")
 
-        val trade = bobTrades.head
+        // Find Bob's trade (orderId = 1, positive amount for BUY)
+        val bobTrade = bobTrades.find(_.orderId == 1).get
         assert(
-          trade.tradeAmount == 70_000_000,
-          s"Trade amount should be 70 ADA, got ${trade.tradeAmount}"
+          bobTrade.tradeAmount == 70_000_000,
+          s"Bob's trade amount should be 70 ADA, got ${bobTrade.tradeAmount}"
         )
         assert(
-          trade.tradePrice == 500_000,
-          s"Trade price should be 0.50, got ${trade.tradePrice}"
+          bobTrade.tradePrice == 500_000,
+          s"Bob's trade price should be 0.50, got ${bobTrade.tradePrice}"
+        )
+        
+        // Verify Alice's trade is also present (orderId = 0, negative amount for SELL)
+        val aliceTrade = bobTrades.find(_.orderId == 0).get
+        assert(
+          aliceTrade.tradeAmount == -70_000_000,
+          s"Alice's trade amount should be -70 ADA, got ${aliceTrade.tradeAmount}"
+        )
+        assert(
+          aliceTrade.tradePrice == 500_000,
+          s"Alice's trade price should be 0.50, got ${aliceTrade.tradePrice}"
         )
 
         // 6. Verify Bob's balance after trade: 120 ADA + 465 USDM

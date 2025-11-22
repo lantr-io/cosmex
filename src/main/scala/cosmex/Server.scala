@@ -280,8 +280,10 @@ class Server(
                 // This ensures OrderCreated is sent before OrderExecuted for the initiating client
 
                 // Apply trades to trading state
+                // Only apply trades for THIS client's orders (filter by orderId)
                 import CosmexValidator.applyTrade
-                val tradingStateAfterTrades = matchResult.trades.foldLeft(tradingStateWithOrder) {
+                val myTrades = matchResult.trades.filter(_.orderId == orderId)
+                val tradingStateAfterTrades = myTrades.foldLeft(tradingStateWithOrder) {
                     (ts, trade) => applyTrade(ts, trade)
                 }
 
