@@ -13,7 +13,6 @@ import upickle.default.*
 
 import java.time.Instant
 import scala.annotation.unused
-import scala.collection.mutable.HashMap
 import cosmex.util.JsonCodecs.given
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
@@ -26,6 +25,9 @@ enum ClientRequest derives ReadWriter:
     case Withdraw(clientId: ClientId, amount: Value)
     case GetBalance(clientId: ClientId)
     case GetOrders(clientId: ClientId)
+
+end ClientRequest
+
 
 type ChainSlot = Long
 
@@ -46,8 +48,10 @@ enum ClientResponse derives ReadWriter:
     case Error(message: String)
     case OrderCreated(orderId: OrderId)
     case OrderCancelled(orderId: OrderId)
+    case OrderExecuted(trade: Trade)
     case Balance(balance: scalus.ledger.api.v3.Value)
     case Orders(orders: scalus.prelude.AssocMap[OrderId, LimitOrder])
+
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)
@@ -71,6 +75,11 @@ case class ClientState(
     status: ChannelStatus
 ) derives ReadWriter
 
+case class ClientRecord(
+    state: ClientState,
+    oxChannel: ox.channels.Channel[Trade]
+                       )
+
 case class OpenChannelInfo(
     channelRef: TransactionInput,
     amount: Value,
@@ -90,10 +99,12 @@ class Server(
     val CosmexSignKey = exchangePrivKey
     val CosmexPubKey = exchangeParams.exchangePubKey
 
-    val clients = TrieMap.empty[ClientId, ClientState]
+    val clientStates = TrieMap.empty[ClientId, ClientState]
+    val clientChannels = TrieMap.empty[ClientId, ox.channels.Channel[Trade]]
     var orderBookRef: AtomicReference[OrderBook] = new AtomicReference(OrderBook.empty)
     var nextOrderId: AtomicLong = new AtomicLong(0L)
     val orderOwners = TrieMap.empty[OrderId, ClientId] // Maps order ID to client
+
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
@@ -121,7 +132,7 @@ class Server(
                           lockedValue = openChannelInfo.amount,
                           status = ChannelStatus.PendingOpen
                         )
-                        clients.put(clientId, clientState)
+                        clientStates.put(clientId, clientState)
 
                         // Send the transaction to the blockchain
                         sendTx(tx)
@@ -226,7 +237,7 @@ class Server(
         clientId: ClientId,
         order: LimitOrder
     ): Either[String, (Long, SignedSnapshot, List[Trade])] = {
-        clients.get(clientId) match
+        clientStates.get(clientId) match
             case None => Left("Client not found")
             case Some(clientState) =>
                 if clientState.status != ChannelStatus.Open then
@@ -259,8 +270,17 @@ class Server(
                           orderId,
                           order.copy(orderAmount = matchResult.remainingAmount)
                         )
-                    if orderBookRef.compareAndSet(orderBook, newOrderBook) then
-                        orderBookUpdated = true
+                    if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
+                       orderBookUpdated = true
+                if (matchResult.trades.nonEmpty) then
+                   matchResult.trades.foreach{ trade =>
+                       orderOwners.get(trade.orderId).foreach{
+                              ownerClientId  =>
+                                clientChannels.get(ownerClientId).foreach{ channel =>
+                                    channel.send(trade)
+                                }
+                       }
+                   }
 
                 orderOwners.put(orderId, clientId)
 
@@ -296,7 +316,7 @@ class Server(
 
                 // Update stored state
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
-                clients.put(clientId, updatedState)
+                clientStates.put(clientId, updatedState)
 
                 Right((longOrderId, bothSignedSnapshot, matchResult.trades))
     }
@@ -305,7 +325,7 @@ class Server(
         clientId: ClientId,
         orderId: OrderId
     ): Either[String, SignedSnapshot] = {
-        clients.get(clientId) match
+        clientStates.get(clientId) match
             case None => Left("Client not found")
             case Some(clientState) =>
                 if clientState.status != ChannelStatus.Open then
@@ -353,22 +373,22 @@ class Server(
 
                 // Update stored state
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
-                clients.put(clientId, updatedState)
+                clientStates.put(clientId, updatedState)
 
                 Right(bothSignedSnapshot)
     }
 
     def getLatestSnapshot(clientId: ClientId): Option[SignedSnapshot] = {
-        clients.get(clientId).map(_.latestSnapshot)
+        clientStates.get(clientId).map(_.latestSnapshot)
     }
 
     def getChannelStatus(clientId: ClientId): Option[ChannelStatus] = {
-        clients.get(clientId).map(_.status)
+        clientStates.get(clientId).map(_.status)
     }
 
     def updateChannelStatus(clientId: ClientId, newStatus: ChannelStatus): Unit = {
-        clients.get(clientId).foreach { state =>
-            clients.put(clientId, state.copy(status = newStatus))
+        clientStates.get(clientId).foreach { state =>
+            clientStates.put(clientId, state.copy(status = newStatus))
         }
     }
 

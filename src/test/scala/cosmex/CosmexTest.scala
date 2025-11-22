@@ -383,7 +383,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open
         )
-        server.clients.put(aliceClientId, aliceClientState)
+        server.clientStates.put(aliceClientId, aliceClientState)
 
         import upickle.default.write
         println(write(aliceClientState))
@@ -426,7 +426,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open
         )
-        server.clients.put(bobClientId, bobClientState)
+        server.clientStates.put(bobClientId, bobClientState)
 
         // 3. Alice submits SELL order: 100 ADA @ 0.50 USDM/ADA
         // Price in smallest units: 0.50 USDM/ADA = 50_000_000 (assuming 100M scale)

@@ -1,12 +1,16 @@
 package cosmex.ws
 
+import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
-
 import cosmex.*
 import ox.*
+import ox.channels.Channel
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, OxStreams}
 import upickle.default.*
+
+
+
 
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
@@ -14,7 +18,7 @@ object CosmexWebSocketServer {
     // WebSocket endpoint - text-based messages
     val wsEndpoint =
         endpoint.get
-            .in("ws")
+            .in("ws" / path[String] / path[Int])
             .out(
               webSocketBody[String, CodecFormat.TextPlain, String, CodecFormat.TextPlain](OxStreams)
             )
@@ -28,10 +32,17 @@ object CosmexWebSocketServer {
         println("=" * 60)
 
         // Define WebSocket logic
-        val wsServerEndpoint = wsEndpoint.handleSuccess { _ =>
+        val wsServerEndpoint = wsEndpoint.handleSuccess { (clientTrId, clientTrIdx) =>
             import ox.flow.Flow
+            val clientTrInput = scalus.cardano.ledger.TransactionInput(
+              scalus.cardano.ledger.TransactionHash.fromHex(clientTrId),
+              clientTrIdx
+            )
+            val clientId = ClientId(clientTrInput)
+            // in future: creater some policy for overflow
+            val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[Trade])
             (in: Flow[String]) =>
-                in.map { msg =>
+                val handleRequestFlow = in.map { msg =>
                     try {
                         // Parse incoming JSON as ClientRequest
                         val request = read[ClientRequest](msg)
@@ -52,6 +63,20 @@ object CosmexWebSocketServer {
                             write(errorResponse)
                     }
                 }
+                val orderExecutionFlow = Flow.fromSource(channel).map { trade =>
+                   val response = ClientResponse.OrderExecuted(trade)
+                   val responseJson = write(response)
+                   println(s"[Server] Sent order execution: Order ID ${trade.orderId}")
+                   responseJson
+                }
+                val retval = handleRequestFlow.merge(orderExecutionFlow)
+                in.onComplete(
+                  // actially we should have something like ref-counting here, because
+                  // multiple connections from same clientId may exist
+                  println(s"[Server] Connection closed for client: ${clientId}"),
+                  server.clientChannels.remove(clientId)
+                )
+                retval
         }
 
         // Start server
@@ -103,7 +128,7 @@ object CosmexWebSocketServer {
                           lockedValue = actualDeposit,
                           status = ChannelStatus.Open
                         )
-                        server.clients.put(clientId, clientState)
+                        server.clientStates.put(clientId, clientState)
 
                         println(s"[Server] Channel opened for client: ${clientId}")
                         ClientResponse.ChannelOpened(signedSnapshot)
@@ -132,7 +157,7 @@ object CosmexWebSocketServer {
                 ClientResponse.Error("Withdraw not implemented yet")
 
             case ClientRequest.GetBalance(clientId) =>
-                server.clients.get(clientId) match {
+                server.clientStates.get(clientId) match {
                     case Some(state) =>
                         val balance =
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
@@ -142,7 +167,7 @@ object CosmexWebSocketServer {
                 }
 
             case ClientRequest.GetOrders(clientId) =>
-                server.clients.get(clientId) match {
+                server.clientStates.get(clientId) match {
                     case Some(state) =>
                         val orders =
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders
