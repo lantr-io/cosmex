@@ -47,6 +47,12 @@ libraryDependencies ++= Seq(
   "com.softwaremill.sttp.client4" %% "ox" % "4.0.13"
 )
 
+// Yaci DevKit for local blockchain testing
+libraryDependencies ++= Seq(
+  "com.bloxbean.cardano" % "yaci-cardano-test" % "0.1.0" % Test,
+  "org.testcontainers" % "testcontainers" % "1.19.3" % Test
+)
+
 addCommandAlias(
   "quick",
   "scalafmtAll;scalafmtSbt;testQuick"

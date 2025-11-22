@@ -1,14 +1,18 @@
 package cosmex.cardano
 
-import scalus.cardano.ledger.{Coin, Transaction, Utxo, ProtocolParams, TransactionHash, DatumOption, TransactionInput, Utxos}
+import com.bloxbean.cardano.client.api.UtxoSupplier
+import com.bloxbean.cardano.client.backend.api.BackendService
+import com.bloxbean.cardano.yaci.test.YaciCardanoContainer
+import scalus.cardano.ledger.{Coin, Transaction, Utxo, ProtocolParams, TransactionHash, DatumOption, TransactionInput, Utxos, TransactionOutput, Value}
 import scalus.cardano.address.Address
-import scalus.ledger.api.v3.TxOutRef
-import scalus.builtin.Builtins.*
+import scalus.builtin.ByteString
 
+import scala.jdk.CollectionConverters.*
+import scala.util.{Try, Success, Failure}
 
 /** Provider implementation using Yaci DevKit testcontainers
   *
-  * This provides a local blockchain environment for testing using Docker containers.
+  * Provides a local Cardano blockchain for testing using Docker containers.
   *
   * Usage:
   * ```scala
@@ -20,52 +24,70 @@ import scalus.builtin.Builtins.*
   *   provider.stop()
   * }
   * ```
-  *
-  * TODO: Implement actual Yaci DevKit integration once dependency is confirmed
-  *
-  * Expected dependencies:
-  *   - com.bloxbean.cardano:yaci-devkit-test:0.6.0 (or similar)
-  *
-  * Key features to implement:
-  *   1. Start/stop Cardano node testcontainer
-  *   2. Transaction submission via Yaci API
-  *   3. UTxO queries
-  *   4. Chain state management
-  *   5. Automatic network setup (genesis, protocol params)
   */
 class YaciTestcontainerProvider private (
-    // TODO: Add yaci-devkit container instance
-    // private val container: YaciDevkitContainer
+    private val container: YaciCardanoContainer,
+    private val backendService: BackendService,
+    private val utxoSupplier: UtxoSupplier
 ) extends scalus.cardano.node.Provider {
 
 
-  /** Submit a transaction to the Yaci testcontainer blockchain
-    *
-    * TODO: Implement using Yaci API
-    */
+  /** Submit a transaction to the Yaci testcontainer blockchain */
   override def submit(tx: Transaction): Either[RuntimeException, Unit] = {
-    // TODO: Convert Transaction to Yaci format
-    // TODO: Submit via Yaci API
-    // TODO: Wait for confirmation
-    // TODO: Update UTxO cache
-
-    println(s"[YaciProvider] Submit transaction: ${tx.id.toHex.take(16)}...")
-
-    // Placeholder implementation
-    Left(
-      new RuntimeException(
-        "YaciTestcontainerProvider.submit() not yet implemented. " +
-            "Requires yaci-devkit-test dependency and integration."
-      )
-    )
+    Try {
+      println(s"[YaciProvider] Submitting transaction: ${tx.id.toHex.take(16)}...")
+      
+      // Convert Scalus Transaction to CBOR bytes
+      val txCborBytes = tx.toCbor
+      
+      // Submit via backend service
+      val result = backendService.getTransactionService.submitTransaction(txCborBytes)
+      
+      if (result.isSuccessful) {
+        println(s"[YaciProvider] Transaction submitted: ${result.getValue}")
+        ()
+      } else {
+        throw new RuntimeException(s"Transaction submission failed: ${result.getResponse}")
+      }
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Transaction submission failed: ${e.getMessage}", e)
+    }
   }
 
   override def findUtxo(input: TransactionInput): Either[RuntimeException, Utxo] = {
-    Left(new RuntimeException("findUtxo(TransactionInput) not implemented"))
+    Try {
+      val txHash = input.transactionId.toHex
+      val outputIndex = input.index
+      
+      // Query all UTxOs for this txHash and filter by index
+      val allUtxos = utxoSupplier.getAll(txHash).asScala.toSeq
+      val maybeUtxo = allUtxos.find(_.getOutputIndex == outputIndex.toInt)
+      
+      maybeUtxo.map { bloxbeanUtxo =>
+        convertBloxbeanUtxo(bloxbeanUtxo, txHash, outputIndex)
+      }.getOrElse {
+        throw new RuntimeException(s"UTxO not found: $txHash#$outputIndex")
+      }
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
+    }
   }
 
   override def findUtxos(inputs: Set[TransactionInput]): Either[RuntimeException, Utxos] = {
-    Left(new RuntimeException("findUtxos(Set[TransactionInput]) not implemented"))
+    Try {
+      val utxos = inputs.map { input =>
+        findUtxo(input) match {
+          case Right(utxo) => utxo
+          case Left(e) => throw e
+        }
+      }
+      Map.from(utxos.map(u => u.input -> u.output))
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+    }
   }
 
   override def findUtxos(
@@ -75,27 +97,76 @@ class YaciTestcontainerProvider private (
       minAmount: Option[Coin],
       minRequiredTotalAmount: Option[Coin]
   ): Either[RuntimeException, Utxos] = {
-    Left(new RuntimeException("findUtxos(address, transactionId, datum, minAmount, minRequiredTotalAmount) not implemented"))
+    import scala.math.BigInt.javaBigInteger2bigInt
+    import scalus.cardano.address.{ShelleyAddress, StakeAddress}
+    
+    Try {
+      // Query all UTxOs for address
+      val addressBech32 = address match {
+        case sa: ShelleyAddress => sa.toBech32.get
+        case sta: StakeAddress => sta.toBech32.get
+        case other => throw new RuntimeException(s"Unsupported address type: ${other.getClass}")
+      }
+      val bloxbeanUtxos = utxoSupplier.getAll(addressBech32).asScala.toSeq
+      
+      // Filter by criteria
+      val filtered = bloxbeanUtxos
+        .filter { utxo =>
+          transactionId.forall(txId => utxo.getTxHash == txId.toHex)
+        }
+        .filter { utxo =>
+          minAmount.forall(min => utxo.getAmount.asScala.headOption.exists(amt => BigInt(amt.getQuantity).toLong >= min.value))
+        }
+      
+      // Convert to Scalus UTxOs
+      val utxos = filtered.map { bloxbeanUtxo =>
+        val txHash = bloxbeanUtxo.getTxHash
+        val index = bloxbeanUtxo.getOutputIndex.toLong
+        convertBloxbeanUtxo(bloxbeanUtxo, txHash, index)
+      }.map(u => u.input -> u.output).toMap
+      utxos
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+    }
   }
 
-  /** Find a UTxO at the given address with minimum amount
-    *
-    * TODO: Implement using Yaci API
-    */
+  /** Find a UTxO at the given address with minimum amount */
   override def findUtxo(address: Address, transactionId: Option[TransactionHash], datum: Option[DatumOption], minAmount: Option[Coin]): Either[RuntimeException, Utxo] = {
-    // TODO: Query UTxOs from Yaci
-    // TODO: Filter by address and amount
-    // TODO: Return first match
-
-    println(s"[YaciProvider] Find UTxO at address: ${address}")
-
-    // Placeholder implementation
-    Left(
-      new RuntimeException(
-        "YaciTestcontainerProvider.findUtxo() not yet implemented. " +
-            "Requires yaci-devkit-test dependency and integration."
-      )
+    findUtxos(address, transactionId, datum, minAmount, None).flatMap { utxos =>
+      utxos.headOption match {
+        case Some((input, output)) => Right(Utxo(input, output))
+        case None => Left(new RuntimeException(s"No UTxO found at address $address"))
+      }
+    }
+  }
+  
+  /** Convert Bloxbean UTxO to Scalus UTxO */
+  private def convertBloxbeanUtxo(
+      bloxbeanUtxo: com.bloxbean.cardano.client.api.model.Utxo,
+      txHashHex: String,
+      outputIndex: Long
+  ): Utxo = {
+    import scala.math.BigInt.javaBigInteger2bigInt
+    
+    val txHash = TransactionHash.fromHex(txHashHex)
+    val input = TransactionInput(txHash, outputIndex.toInt)
+    
+    // Parse address
+    val address = Try(Address.fromBech32(bloxbeanUtxo.getAddress)).getOrElse(
+      throw new RuntimeException(s"Invalid address: ${bloxbeanUtxo.getAddress}")
     )
+    
+    // Parse value (ADA lovelace amount)
+    val lovelace = bloxbeanUtxo.getAmount.asScala.headOption
+      .map(amt => BigInt(amt.getQuantity).toLong)
+      .getOrElse(0L)
+    
+    val value = Value.lovelace(lovelace)
+    
+    val output = TransactionOutput(address, value)
+    
+    Utxo(input, output)
   }
 
   /** Get all UTxOs at the given address
@@ -136,63 +207,47 @@ class YaciTestcontainerProvider private (
   /** Stop the testcontainer and cleanup resources */
   def stop(): Unit = {
     println("[YaciProvider] Stopping testcontainer...")
-    // TODO: Stop container
-    // container.stop()
+    Try {
+      container.stop()
+    }.recover {
+      case e => println(s"[YaciProvider] Error stopping container: ${e.getMessage}")
+    }
   }
 }
 
 object YaciTestcontainerProvider {
 
-  /** Start a new Yaci DevKit testcontainer
-    *
-    * TODO: Implement testcontainer startup
-    *
-    * Expected implementation:
-    * ```scala
-    * def start(
-    *   network: Network = Networks.testnet(),
-    *   enableTxIndex: Boolean = true
-    * ): YaciTestcontainerProvider = {
-    *   val container = new YaciDevkitContainer()
-    *   container.start()
-    *
-    *   // Wait for node to be ready
-    *   container.waitUntilReady()
-    *
-    *   // Get API endpoints
-    *   val apiUrl = container.getApiUrl()
-    *
-    *   new YaciTestcontainerProvider(container)
-    * }
-    * ```
-    */
+  /** Start a new Yaci DevKit testcontainer */
   def start(): YaciTestcontainerProvider = {
     println("[YaciProvider] Starting Yaci DevKit testcontainer...")
-
-    // TODO: Create and start container
-    // val container = new YaciDevkitContainer()
-    // container.start()
-
-    println("[YaciProvider] WARNING: Using placeholder implementation")
-    println("[YaciProvider] TODO: Implement actual Yaci DevKit integration")
-
-    // Return placeholder instance
-    new YaciTestcontainerProvider()
+    
+    // Create and start container
+    val container = new YaciCardanoContainer()
+    container.start()
+    
+    println("[YaciProvider] Container started, waiting for node to be ready...")
+    
+    // Wait for node to initialize
+    Thread.sleep(10000)
+    
+    // Get backend service and UTXO supplier
+    val backendService = container.getBackendService
+    val utxoSupplier = container.getUtxoSupplier
+    
+    println("[YaciProvider] Yaci DevKit testcontainer ready")
+    
+    new YaciTestcontainerProvider(container, backendService, utxoSupplier)
   }
 
-  /** Create provider with custom configuration
-    *
-    * TODO: Implement with config options
-    */
+  /** Create provider with custom configuration */
   def startWithConfig(
       network: String = "preview",
       slotLength: Int = 1000,
       epochLength: Int = 432000
   ): YaciTestcontainerProvider = {
     println(s"[YaciProvider] Starting with config: network=$network, slotLength=$slotLength")
-
-    // TODO: Create container with custom config
-
+    
+    // For now, use default start - custom config can be added later
     start()
   }
 }
