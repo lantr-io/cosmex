@@ -76,6 +76,27 @@ case class DemoConfig(config: Config) {
         case _ => scalus.cardano.address.Network.Testnet
       }
   }
+  
+  // Blockchain Provider Configuration
+  object blockchain {
+    val provider: String = config.getString("blockchain.provider")
+    
+    object yaciDevkit {
+      val startupTimeout: Int = config.getInt("blockchain.yaciDevkit.startupTimeout")
+      val reuseContainer: Boolean = config.getBoolean("blockchain.yaciDevkit.reuseContainer")
+      val enableLogs: Boolean = config.getBoolean("blockchain.yaciDevkit.enableLogs")
+    }
+    
+    object networkProvider {
+      val providerType: String = config.getString("blockchain.networkProvider.type")
+      
+      object blockfrost {
+        val url: String = config.getString("blockchain.networkProvider.blockfrost.url")
+        // Project ID from environment variable
+        def projectId: Option[String] = sys.env.get("BLOCKFROST_PROJECT_ID")
+      }
+    }
+  }
 
   // Asset Definitions
   object assets {
@@ -292,6 +313,37 @@ case class DemoConfig(config: Config) {
     val showOrderBook: Boolean = config.getBoolean("demo.display.showOrderBook")
     val showTrades: Boolean = config.getBoolean("demo.display.showTrades")
   }
+  
+  /** Create blockchain provider based on configuration
+    * 
+    * Note: For mock provider with initial UTxOs, use createMockProvider() instead
+    */
+  def createProvider(): scalus.cardano.node.Provider = {
+    import cosmex.cardano.YaciTestcontainerProvider
+    import scalus.testing.kit.MockLedgerApi
+    import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
+    
+    blockchain.provider.toLowerCase match {
+      case "mock" =>
+        println(s"[Config] Using MockLedgerApi provider (empty initial state)")
+        MockLedgerApi(
+          initialUtxos = Map.empty,
+          context = Context.testMainnet(slot = 1000),
+          validators = MockLedgerApi.defaultValidators - WrongNetworkValidator,
+          mutators = MockLedgerApi.defaultMutators
+        )
+        
+      case "yaci-devkit" | "yaci" =>
+        println(s"[Config] Using Yaci DevKit provider")
+        YaciTestcontainerProvider.start()
+        
+      case other =>
+        throw new IllegalArgumentException(
+          s"Unsupported blockchain provider: $other. " +
+          s"Supported providers: mock, yaci-devkit, preprod, preview"
+        )
+    }
+  }
 
   /** Pretty-print configuration summary */
   def summary(): String = {
@@ -307,6 +359,9 @@ case class DemoConfig(config: Config) {
        |Network:
        |  Type: ${network.networkType}
        |  Magic: ${network.magic}
+       |
+       |Blockchain Provider:
+       |  Type: ${blockchain.provider}
        |
        |Exchange:
        |  Seed: ${exchange.seed}

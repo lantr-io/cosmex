@@ -39,11 +39,6 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
             val exchangeParams = config.exchange.createParams()
             val exchangePrivKey = config.exchange.getPrivateKey()
 
-            // Prepare genesis UTxOs for Alice and Bob
-            val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
-            val aliceInitialValue = config.alice.getInitialValue()
-            val bobInitialValue = config.bob.getInitialValue()
-            
             // Create Alice's address
             val aliceAccount = config.alice.createAccount()
             val alicePubKey = config.alice.getPubKey()
@@ -52,6 +47,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
               config.network.scalusNetwork,
               Credential.KeyHash(AddrKeyHash.fromByteString(alicePubKeyHash))
             )
+            val aliceInitialValue = config.alice.getInitialValue()
             
             // Create Bob's address  
             val bobAccount = config.bob.createAccount()
@@ -61,28 +57,40 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
               config.network.scalusNetwork,
               Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
             )
+            val bobInitialValue = config.bob.getInitialValue()
             
-            // Initialize ledger with genesis UTxOs
-            val initialUtxos = Map(
-              TransactionInput(genesisHash, 0) ->
-                  TransactionOutput(address = aliceAddress, value = aliceInitialValue + Value.lovelace(100_000_000L)),
-              TransactionInput(genesisHash, 1) ->
-                  TransactionOutput(address = bobAddress, value = bobInitialValue + Value.lovelace(100_000_000L))
-            )
+            // Create blockchain provider from configuration
+            val provider = config.blockchain.provider.toLowerCase match {
+              case "mock" =>
+                // For MockLedgerApi, we need to initialize with genesis UTxOs
+                val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+                
+                val initialUtxos = Map(
+                  TransactionInput(genesisHash, 0) ->
+                      TransactionOutput(address = aliceAddress, value = aliceInitialValue + Value.lovelace(100_000_000L)),
+                  TransactionInput(genesisHash, 1) ->
+                      TransactionOutput(address = bobAddress, value = bobInitialValue + Value.lovelace(100_000_000L))
+                )
 
-            // Create mock ledger with initial UTxOs
-            // Disable network validator since we're using testnet addresses with testMainnet context
-            val provider = MockLedgerApi(
-              initialUtxos = initialUtxos,
-              context = Context.testMainnet(slot = 1000),
-              validators = MockLedgerApi.defaultValidators -
-                  MissingKeyHashesValidator -
-                  ProtocolParamsViewHashesMatchValidator -
-                  MissingRequiredDatumsValidator -
-                  WrongNetworkValidator,  // Disable network check
-              mutators = MockLedgerApi.defaultMutators -
-                  PlutusScriptsTransactionMutator
-            )
+                MockLedgerApi(
+                  initialUtxos = initialUtxos,
+                  context = Context.testMainnet(slot = 1000),
+                  validators = MockLedgerApi.defaultValidators -
+                      MissingKeyHashesValidator -
+                      ProtocolParamsViewHashesMatchValidator -
+                      MissingRequiredDatumsValidator -
+                      WrongNetworkValidator,
+                  mutators = MockLedgerApi.defaultMutators -
+                      PlutusScriptsTransactionMutator
+                )
+                
+              case "yaci-devkit" | "yaci" =>
+                // Yaci DevKit will have its own initial funding via container
+                config.createProvider()
+                
+              case other =>
+                throw new IllegalArgumentException(s"Unsupported provider for test: $other")
+            }
 
             // Create server
             val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
