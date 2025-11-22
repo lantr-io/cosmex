@@ -53,6 +53,10 @@ libraryDependencies ++= Seq(
   "org.testcontainers" % "testcontainers" % "1.19.3" % Test
 )
 
+// Test configuration
+Test / parallelExecution := false  // Required for Yaci DevKit testcontainers
+Test / javaOptions ++= Seq("-Xmx2g")  // Increase memory for blockchain tests
+
 addCommandAlias(
   "quick",
   "scalafmtAll;scalafmtSbt;testQuick"
