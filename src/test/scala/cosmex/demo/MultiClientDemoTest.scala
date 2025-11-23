@@ -58,55 +58,61 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
             // Create blockchain provider from configuration
             val provider = config.blockchain.provider.toLowerCase match {
-              case "mock" =>
-                // For MockLedgerApi, we need to initialize with genesis UTxOs
-                val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+                case "mock" =>
+                    // For MockLedgerApi, we need to initialize with genesis UTxOs
+                    val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
-                val initialUtxos = Map(
-                  TransactionInput(genesisHash, 0) ->
-                      TransactionOutput(address = aliceAddress, value = aliceInitialValue + Value.lovelace(100_000_000L)),
-                  TransactionInput(genesisHash, 1) ->
-                      TransactionOutput(address = bobAddress, value = bobInitialValue + Value.lovelace(100_000_000L))
-                )
+                    val initialUtxos = Map(
+                      TransactionInput(genesisHash, 0) ->
+                          TransactionOutput(
+                            address = aliceAddress,
+                            value = aliceInitialValue + Value.lovelace(100_000_000L)
+                          ),
+                      TransactionInput(genesisHash, 1) ->
+                          TransactionOutput(
+                            address = bobAddress,
+                            value = bobInitialValue + Value.lovelace(100_000_000L)
+                          )
+                    )
 
-                MockLedgerApi(
-                  initialUtxos = initialUtxos,
-                  context = Context.testMainnet(slot = 1000),
-                  validators = MockLedgerApi.defaultValidators -
-                      MissingKeyHashesValidator -
-                      ProtocolParamsViewHashesMatchValidator -
-                      MissingRequiredDatumsValidator -
-                      WrongNetworkValidator -
-                      VerifiedSignaturesInWitnessesValidator,  // Disable signature validation for testing
-                  mutators = MockLedgerApi.defaultMutators -
-                      PlutusScriptsTransactionMutator
-                )
+                    MockLedgerApi(
+                      initialUtxos = initialUtxos,
+                      context = Context.testMainnet(slot = 1000),
+                      validators = MockLedgerApi.defaultValidators -
+                          MissingKeyHashesValidator -
+                          ProtocolParamsViewHashesMatchValidator -
+                          MissingRequiredDatumsValidator -
+                          WrongNetworkValidator -
+                          VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
+                      mutators = MockLedgerApi.defaultMutators -
+                          PlutusScriptsTransactionMutator
+                    )
 
-              case "yaci-devkit" | "yaci" =>
-                // Yaci DevKit with initial funding for Alice and Bob
-                import scalus.cardano.address.ShelleyAddress
+                case "yaci-devkit" | "yaci" =>
+                    // Yaci DevKit with initial funding for Alice and Bob
+                    import scalus.cardano.address.ShelleyAddress
 
-                // Get bech32 addresses for funding
-                val aliceBech32 = aliceAddress.asInstanceOf[ShelleyAddress].toBech32.get
-                val bobBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
+                    // Get bech32 addresses for funding
+                    val aliceBech32 = aliceAddress.asInstanceOf[ShelleyAddress].toBech32.get
+                    val bobBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
 
-                // Calculate total funding needed (initial balance + 100 ADA for fees/collateral)
-                // Note: yaci-devkit can only fund ADA, so we only use the coin value
-                val aliceFunding = (aliceInitialValue.coin.value + 100_000_000L)
-                val bobFunding = (bobInitialValue.coin.value + 100_000_000L)
+                    // Calculate total funding needed (initial balance + 100 ADA for fees/collateral)
+                    // Note: yaci-devkit can only fund ADA, so we only use the coin value
+                    val aliceFunding = aliceInitialValue.coin.value + 100_000_000L
+                    val bobFunding = bobInitialValue.coin.value + 100_000_000L
 
-                println(s"[Test] Funding Alice with ${aliceFunding / 1_000_000} ADA")
-                println(s"[Test] Funding Bob with ${bobFunding / 1_000_000} ADA")
+                    println(s"[Test] Funding Alice with ${aliceFunding / 1_000_000} ADA")
+                    println(s"[Test] Funding Bob with ${bobFunding / 1_000_000} ADA")
 
-                val initialFunding = Seq(
-                  (aliceBech32, aliceFunding),
-                  (bobBech32, bobFunding)
-                )
+                    val initialFunding = Seq(
+                      (aliceBech32, aliceFunding),
+                      (bobBech32, bobFunding)
+                    )
 
-                config.createProviderWithFunding(initialFunding)
+                    config.createProviderWithFunding(initialFunding)
 
-              case other =>
-                throw new IllegalArgumentException(s"Unsupported provider for test: $other")
+                case other =>
+                    throw new IllegalArgumentException(s"Unsupported provider for test: $other")
             }
 
             // Create CardanoInfo with protocol parameters from provider
@@ -128,10 +134,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 }
                 serverBinding = serverFork.join()
 
-
                 // Wait for server to start
                 Thread.sleep(3000)
-                
+
                 val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
                 // Manually add UTxOs (MockLedgerApi doesn't allow runtime additions easily)
@@ -163,68 +168,87 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         // Get UTxO for the client
                         val depositUtxo = config.blockchain.provider.toLowerCase match {
-                          case "mock" =>
-                            // For MockLedgerApi, use the pre-created genesis UTxO
-                            val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
-                            Utxo(
-                              input = genesisInput,
-                              output = TransactionOutput(address = address, value = initialValue + Value.lovelace(100_000_000L))
-                            )
+                            case "mock" =>
+                                // For MockLedgerApi, use the pre-created genesis UTxO
+                                val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
+                                Utxo(
+                                  input = genesisInput,
+                                  output = TransactionOutput(
+                                    address = address,
+                                    value = initialValue + Value.lovelace(100_000_000L)
+                                  )
+                                )
 
-                          case "yaci-devkit" | "yaci" =>
-                            // For Yaci DevKit, query the provider for funded UTxOs
-                            import scalus.cardano.address.ShelleyAddress
-                            val addressBech32 = address.asInstanceOf[ShelleyAddress].toBech32.get
+                            case "yaci-devkit" | "yaci" =>
+                                // For Yaci DevKit, query the provider for funded UTxOs
+                                import scalus.cardano.address.ShelleyAddress
+                                val addressBech32 =
+                                    address.asInstanceOf[ShelleyAddress].toBech32.get
 
-                            txIdFilter match {
-                              case Some(txId) =>
-                                println(s"[$name] Querying for specific TX output: ${txId.toHex.take(16)}...")
-                              case None =>
-                                println(s"[$name] Querying provider for UTxOs at address: $addressBech32...")
-                            }
-
-                            // First try to find all UTxOs at the address for debugging
-                            provider.findUtxos(
-                              address = address,
-                              transactionId = txIdFilter,
-                              datum = None,
-                              minAmount = None,
-                              minRequiredTotalAmount = None
-                            ) match {
-                              case Right(utxos) =>
-                                println(s"[$name] Found ${utxos.size} UTxOs at address")
-                                utxos.foreach { case (input, output) =>
-                                  println(s"[$name]   UTxO: ${input.transactionId.toHex.take(16)}#${input.index} = ${output.value.coin.value} lovelace")
-                                  val hasTokens = output.value != Value.lovelace(output.value.coin.value)
-                                  if (hasTokens) {
-                                    println(s"[$name]   Tokens: ${output.value}")
-                                  }
+                                txIdFilter match {
+                                    case Some(txId) =>
+                                        println(
+                                          s"[$name] Querying for specific TX output: ${txId.toHex.take(16)}..."
+                                        )
+                                    case None =>
+                                        println(
+                                          s"[$name] Querying provider for UTxOs at address: $addressBech32..."
+                                        )
                                 }
-                              case Left(err) =>
-                                println(s"[$name] Could not query UTxOs: ${err.getMessage}")
-                            }
 
-                            // Find UTxO - filter by txId if provided
-                            provider.findUtxo(
-                              address = address,
-                              transactionId = txIdFilter,
-                              datum = None,
-                              minAmount = Some(Coin(2_000_000L))  // Just need minimum UTxO size (~2 ADA)
-                            ) match {
-                              case Right(foundUtxo) =>
-                                println(s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}")
-                                foundUtxo
-                              case Left(err) =>
-                                fail(s"[$name] Failed to find funded UTxO: ${err.getMessage}")
-                            }
+                                // First try to find all UTxOs at the address for debugging
+                                provider.findUtxos(
+                                  address = address,
+                                  transactionId = txIdFilter,
+                                  datum = None,
+                                  minAmount = None,
+                                  minRequiredTotalAmount = None
+                                ) match {
+                                    case Right(utxos) =>
+                                        println(s"[$name] Found ${utxos.size} UTxOs at address")
+                                        utxos.foreach { case (input, output) =>
+                                            println(
+                                              s"[$name]   UTxO: ${input.transactionId.toHex.take(16)}#${input.index} = ${output.value.coin.value} lovelace"
+                                            )
+                                            val hasTokens = output.value != Value.lovelace(
+                                              output.value.coin.value
+                                            )
+                                            if hasTokens then {
+                                                println(s"[$name]   Tokens: ${output.value}")
+                                            }
+                                        }
+                                    case Left(err) =>
+                                        println(s"[$name] Could not query UTxOs: ${err.getMessage}")
+                                }
 
-                          case other =>
-                            fail(s"Unsupported provider: $other")
+                                // Find UTxO - filter by txId if provided
+                                provider.findUtxo(
+                                  address = address,
+                                  transactionId = txIdFilter,
+                                  datum = None,
+                                  minAmount =
+                                      Some(Coin(2_000_000L)) // Just need minimum UTxO size (~2 ADA)
+                                ) match {
+                                    case Right(foundUtxo) =>
+                                        println(
+                                          s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}"
+                                        )
+                                        foundUtxo
+                                    case Left(err) =>
+                                        fail(
+                                          s"[$name] Failed to find funded UTxO: ${err.getMessage}"
+                                        )
+                                }
+
+                            case other =>
+                                fail(s"Unsupported provider: $other")
                         }
 
                         // Optional token minting step for Bob
-                        val (finalDepositUtxo, finalDepositAmount) = if (mintToken) {
-                            println(s"[$name] Minting custom token: $tokenName (amount: $tokenAmount)...")
+                        val (finalDepositUtxo, finalDepositAmount) = if mintToken then {
+                            println(
+                              s"[$name] Minting custom token: $tokenName (amount: $tokenAmount)..."
+                            )
 
                             // Import minting helper
                             import cosmex.demo.MintingHelper
@@ -250,32 +274,41 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
 
                             val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                            val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                            val signature = signingProvider.signExtended(
+                              txBodyHash,
+                              hdKeyPair.getPrivateKey.getKeyData
+                            )
 
                             val witness = VKeyWitness(
                               signature = ByteString.fromArray(signature),
-                              vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                              vkey =
+                                  ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
                             )
 
                             val witnessSet = mintTx.witnessSet.copy(
-                              vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                              vkeyWitnesses =
+                                  scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                             )
                             val signedMintTx = mintTx.copy(witnessSet = witnessSet)
 
                             // Submit the minting transaction
                             println(s"[$name] Submitting minting transaction...")
                             provider.submit(signedMintTx) match {
-                              case Right(_) =>
-                                println(s"[$name] ✓ Minting transaction submitted: ${signedMintTx.id.toHex.take(16)}...")
-                              case Left(error) =>
-                                fail(s"[$name] Failed to submit minting transaction: ${error.getMessage}")
+                                case Right(_) =>
+                                    println(
+                                      s"[$name] ✓ Minting transaction submitted: ${signedMintTx.id.toHex.take(16)}..."
+                                    )
+                                case Left(error) =>
+                                    fail(
+                                      s"[$name] Failed to submit minting transaction: ${error.getMessage}"
+                                    )
                             }
 
                             // Wait for confirmation (especially important for yaci-devkit)
                             println(s"[$name] Waiting for minting transaction confirmation...")
                             Thread.sleep(config.blockchain.provider.toLowerCase match {
-                              case "yaci-devkit" | "yaci" => 20000 // 20 seconds for yaci
-                              case _ => 2000 // 2 seconds for mock
+                                case "yaci-devkit" | "yaci" => 20000 // 20 seconds for yaci
+                                case _                      => 2000 // 2 seconds for mock
                             })
 
                             // Find the newly minted tokens
@@ -286,26 +319,28 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                               datum = None,
                               minAmount = None
                             ) match {
-                              case Right(utxo) =>
-                                println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
-                                utxo
-                              case Left(err) =>
-                                fail(s"[$name] Failed to find minted tokens: ${err.getMessage}")
+                                case Right(utxo) =>
+                                    println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
+                                    utxo
+                                case Left(err) =>
+                                    fail(s"[$name] Failed to find minted tokens: ${err.getMessage}")
                             }
 
                             // Calculate deposit amount including minted tokens
                             val mintedTokenValue = mintedUtxo.output.value
-                            println(s"[$name] Using minted tokens for channel deposit: ${mintedTokenValue}")
+                            println(
+                              s"[$name] Using minted tokens for channel deposit: ${mintedTokenValue}"
+                            )
 
                             (mintedUtxo, mintedTokenValue)
                         } else {
                             // No minting - use original UTxO and amount
                             // For yaci-devkit, only deposit ADA (no multiassets available in funded UTxOs)
                             val depositAmount = config.blockchain.provider.toLowerCase match {
-                              case "yaci-devkit" | "yaci" =>
-                                Value.lovelace(initialValue.coin.value)
-                              case _ =>
-                                initialValue
+                                case "yaci-devkit" | "yaci" =>
+                                    Value.lovelace(initialValue.coin.value)
+                                case _ =>
+                                    initialValue
                             }
                             (depositUtxo, depositAmount)
                         }
@@ -328,7 +363,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         // Sign using Bloxbean's native Ed25519 signing
                         val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                        val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                        val signature = signingProvider.signExtended(
+                          txBodyHash,
+                          hdKeyPair.getPrivateKey.getKeyData
+                        )
 
                         // Create VKeyWitness with Bloxbean signature
                         val witness = VKeyWitness(
@@ -341,13 +379,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                         )
                         val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
-                        println(s"[$name] Transaction signed successfully with Bloxbean signExtended")
+                        println(
+                          s"[$name] Transaction signed successfully with Bloxbean signExtended"
+                        )
 
                         // The ClientId should be based on openChannelTx.id and 0
                         val clientId = ClientId(TransactionInput(openChannelTx.id, 0))
 
                         // Now construct the WebSocket URL using clientId components
-                        val wsUrl = s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
+                        val wsUrl =
+                            s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
                         client = SimpleWebSocketClient(wsUrl)
 
                         val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
@@ -359,7 +400,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         // Send OpenChannel request and wait for ChannelPending
                         println(s"[$name] Opening channel...")
-                        client.sendMessage(ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot))
+                        client.sendMessage(
+                          ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot)
+                        )
 
                         // First, expect ChannelPending response (immediate)
                         val pendingResponse = client.receiveMessage(timeoutSeconds = 10)
@@ -367,7 +410,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             case Success(responseJson) =>
                                 read[ClientResponse](responseJson) match {
                                     case ClientResponse.ChannelPending(txId) =>
-                                        println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
+                                        println(
+                                          s"[$name] ✓ Channel pending, txId: ${txId.take(16)}..."
+                                        )
                                     case ClientResponse.Error(msg) =>
                                         fail(s"[$name] Channel opening failed: $msg")
                                     case other =>
@@ -397,10 +442,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         println(
                                           s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset}/${orderConfig.quoteAsset} @ ${orderConfig.price}"
                                         )
-                                        val orderRequest = ClientRequest.CreateOrder(clientId, order)
-                                        client.sendRequest(orderRequest, timeoutSeconds = 10) match {
+                                        val orderRequest =
+                                            ClientRequest.CreateOrder(clientId, order)
+                                        client.sendRequest(
+                                          orderRequest,
+                                          timeoutSeconds = 10
+                                        ) match {
                                             case Success(ClientResponse.OrderCreated(orderId)) =>
-                                                println(s"[$name] ✓ Order created! OrderID: $orderId")
+                                                println(
+                                                  s"[$name] ✓ Order created! OrderID: $orderId"
+                                                )
 
                                             case Success(ClientResponse.Error(msg)) =>
                                                 fail(s"[$name] Order creation failed: $msg")
@@ -419,7 +470,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         fail(s"[$name] Unexpected response: $other")
                                 }
                             case Failure(e) =>
-                                fail(s"[$name] Error waiting for OpenChannel response: ${e.getMessage}")
+                                fail(
+                                  s"[$name] Error waiting for OpenChannel response: ${e.getMessage}"
+                                )
                         }
 
                         // Wait for potential trade execution (OrderExecuted notifications)
@@ -427,30 +480,36 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         var attempts = 0
                         val maxAttempts = 10
                         var tradeReceived = false
-                        
-                        while (attempts < maxAttempts && !tradeReceived) {
+
+                        while attempts < maxAttempts && !tradeReceived do {
                             client.receiveMessage(timeoutSeconds = 1) match {
                                 case Success(msgJson) =>
                                     Try(read[ClientResponse](msgJson)) match {
                                         case Success(ClientResponse.OrderExecuted(trade)) =>
-                                            println(s"[$name] ✓ Order executed! Trade: ${trade.orderId}, amount: ${trade.tradeAmount}, price: ${trade.tradePrice}")
+                                            println(
+                                              s"[$name] ✓ Order executed! Trade: ${trade.orderId}, amount: ${trade.tradeAmount}, price: ${trade.tradePrice}"
+                                            )
                                             tradeReceived = true
                                         case Success(other) =>
-                                            println(s"[$name] Received other message: ${other.getClass.getSimpleName}")
+                                            println(
+                                              s"[$name] Received other message: ${other.getClass.getSimpleName}"
+                                            )
                                         case Failure(e) =>
-                                            println(s"[$name] Failed to parse message: ${e.getMessage}")
+                                            println(
+                                              s"[$name] Failed to parse message: ${e.getMessage}"
+                                            )
                                     }
                                 case Failure(_) =>
                                     attempts += 1
                             }
                         }
-                        
-                        if (!tradeReceived && attempts >= maxAttempts) {
+
+                        if !tradeReceived && attempts >= maxAttempts then {
                             println(s"[$name] No trade executed within timeout")
                         }
 
                     } finally {
-                        if (client != null) {
+                        if client != null then {
                             client.close()
                             println(s"[$name] Disconnected")
                         }
@@ -476,7 +535,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                 // Step 1: Bob mints tokens (if enabled) - before any channel opening
                 var bobMintTxId: Option[TransactionHash] = None
-                val bobMintedPolicyId: Option[ByteString] = if (bobMintingConfig.enabled) {
+                val bobMintedPolicyId: Option[ByteString] = if bobMintingConfig.enabled then {
                     println("\n[Bob - Preliminary] Minting custom token before trading...")
 
                     val depositUtxo = config.blockchain.provider.toLowerCase match {
@@ -490,14 +549,20 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                               datum = None,
                               minAmount = Some(Coin(bobInitialValue.coin.value + 100_000_000L))
                             ) match {
-                              case Right(utxo) => utxo
-                              case Left(err) => fail(s"[Bob - Preliminary] Failed to find UTxO: ${err.getMessage}")
+                                case Right(utxo) => utxo
+                                case Left(err) =>
+                                    fail(
+                                      s"[Bob - Preliminary] Failed to find UTxO: ${err.getMessage}"
+                                    )
                             }
                         case "mock" =>
                             val genesisInput = TransactionInput(genesisHash, 1)
                             Utxo(
                               input = genesisInput,
-                              output = TransactionOutput(address = bobAddress, value = bobInitialValue + Value.lovelace(100_000_000L))
+                              output = TransactionOutput(
+                                address = bobAddress,
+                                value = bobInitialValue + Value.lovelace(100_000_000L)
+                              )
                             )
                         case other => fail(s"Unsupported provider: $other")
                     }
@@ -521,7 +586,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     val txBytes = TransactionBytes(mintTx.toCbor)
                     val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
                     val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                    val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                    val signature =
+                        signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
 
                     val witness = VKeyWitness(
                       signature = ByteString.fromArray(signature),
@@ -535,10 +601,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     import cosmex.util.submitAndWait
 
                     provider.submitAndWait(signedMintTx, maxAttempts = 60, delayMs = 1000) match {
-                      case Right(_) =>
-                        println(s"[Bob - Preliminary] ✓ Minting transaction confirmed: ${signedMintTx.id.toHex.take(16)}...")
-                      case Left(error) =>
-                        fail(s"[Bob - Preliminary] Failed to submit or confirm minting transaction: ${error.getMessage}")
+                        case Right(_) =>
+                            println(
+                              s"[Bob - Preliminary] ✓ Minting transaction confirmed: ${signedMintTx.id.toHex.take(16)}..."
+                            )
+                        case Left(error) =>
+                            fail(
+                              s"[Bob - Preliminary] Failed to submit or confirm minting transaction: ${error.getMessage}"
+                            )
                     }
 
                     // Calculate policy ID
@@ -557,7 +627,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                 // Step 2: Determine Alice's trading pair (use Bob's token if minted)
                 val aliceTradingPair = bobMintedPolicyId.map { policyId =>
-                    val bobTokenAsset = (policyId, ByteString.fromString(bobMintingConfig.tokenName))
+                    val bobTokenAsset =
+                        (policyId, ByteString.fromString(bobMintingConfig.tokenName))
                     val adaAsset = (ByteString.empty, ByteString.empty)
                     println(s"[Alice] Will trade ADA for Bob's token: ${policyId.toHex}")
                     (adaAsset, bobTokenAsset) // ADA/BOBTOKEN pair
@@ -568,47 +639,49 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                 // For Bob's scenario, handle the minted tokens case
                 val bobScenarioTxIdFilter = bobMintTxId match {
-                  case Some(mintTxId) =>
-                    println(s"\n[Test] Bob minted tokens - will query for minting TX: ${mintTxId.toHex.take(16)}...")
-                    Some(mintTxId)
-                  case None =>
-                    println(s"\n[Test] No minting - Bob will use regular funded UTxO")
-                    None
+                    case Some(mintTxId) =>
+                        println(
+                          s"\n[Test] Bob minted tokens - will query for minting TX: ${mintTxId.toHex.take(16)}..."
+                        )
+                        Some(mintTxId)
+                    case None =>
+                        println(s"\n[Test] No minting - Bob will use regular funded UTxO")
+                        None
                 }
 
                 println("\n[Test] Starting Alice and Bob concurrently...")
 
                 // Fork both client scenarios to run in parallel
                 val aliceFork = forkUser {
-                  clientScenario(
-                    "Alice",
-                    aliceAccount,
-                    alicePubKey,
-                    alicePubKeyHash,
-                    aliceAddress,
-                    aliceInitialValue,
-                    aliceOrderConfig,
-                    clientIndex = 0,
-                    customPair = aliceTradingPair
-                  )
+                    clientScenario(
+                      "Alice",
+                      aliceAccount,
+                      alicePubKey,
+                      alicePubKeyHash,
+                      aliceAddress,
+                      aliceInitialValue,
+                      aliceOrderConfig,
+                      clientIndex = 0,
+                      customPair = aliceTradingPair
+                    )
                 }
 
                 val bobFork = forkUser {
-                  clientScenario(
-                    "Bob",
-                    bobAccount,
-                    bobPubKey,
-                    bobPubKeyHash,
-                    bobAddress,
-                    bobInitialValue,
-                    bobOrderConfig,
-                    clientIndex = 1,
-                    mintToken = false,  // Already minted
-                    tokenName = bobMintingConfig.tokenName,
-                    tokenAmount = bobMintingConfig.amount,
-                    customPair = aliceTradingPair,
-                    txIdFilter = bobScenarioTxIdFilter
-                  )
+                    clientScenario(
+                      "Bob",
+                      bobAccount,
+                      bobPubKey,
+                      bobPubKeyHash,
+                      bobAddress,
+                      bobInitialValue,
+                      bobOrderConfig,
+                      clientIndex = 1,
+                      mintToken = false, // Already minted
+                      tokenName = bobMintingConfig.tokenName,
+                      tokenAmount = bobMintingConfig.amount,
+                      customPair = aliceTradingPair,
+                      txIdFilter = bobScenarioTxIdFilter
+                    )
                 }
 
                 // Wait for both to complete
@@ -633,7 +706,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 // Test passes if we get here without exceptions
                 succeed
             } finally { // New finally block for server shutdown
-                if (serverBinding != null) {
+                if serverBinding != null then {
                     serverBinding.stop()
                     println("\n[Server] Test server shut down.")
                 }

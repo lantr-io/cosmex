@@ -4,7 +4,7 @@ import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 import cosmex.*
 import ox.*
-import ox.channels.{Channel, Source, ChannelClosedUnion}
+import ox.channels.{Channel, ChannelClosedUnion, Source}
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
@@ -32,7 +32,8 @@ object CosmexWebSocketServer {
             )
             val clientId = ClientId(clientTrInput)
             // in future: create some policy for overflow
-            val channel = server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[ClientResponse])
+            val channel =
+                server.clientChannels.getOrElseUpdate(clientId, Channel.unlimited[ClientResponse])
             (in: Flow[String]) =>
                 println(s"[Server] WebSocket handler started for client: ${clientId}")
                 val handleRequestFlow = in.mapConcat { msg =>
@@ -60,18 +61,22 @@ object CosmexWebSocketServer {
                     }
                 }
                 val asyncResponseFlow = Flow.fromSource(channel).map { response =>
-                   val responseJson = write(response)
-                   response match {
-                       case ClientResponse.OrderExecuted(trade) =>
-                           println(s"[Server] Sent async order execution: Order ID ${trade.orderId}")
-                       case ClientResponse.ChannelOpened(_) =>
-                           println(s"[Server] Sent async ChannelOpened")
-                       case other =>
-                           println(s"[Server] Sent async response: ${other.getClass.getSimpleName}")
-                   }
-                   responseJson
+                    val responseJson = write(response)
+                    response match {
+                        case ClientResponse.OrderExecuted(trade) =>
+                            println(
+                              s"[Server] Sent async order execution: Order ID ${trade.orderId}"
+                            )
+                        case ClientResponse.ChannelOpened(_) =>
+                            println(s"[Server] Sent async ChannelOpened")
+                        case other =>
+                            println(
+                              s"[Server] Sent async response: ${other.getClass.getSimpleName}"
+                            )
+                    }
+                    responseJson
                 }
-                
+
                 // Register cleanup handler BEFORE merging
                 in.onComplete(
                   println(s"[Server] Connection closing for client: ${clientId}"),
@@ -82,25 +87,29 @@ object CosmexWebSocketServer {
                       fork {
                           try {
                               import ChannelClosedUnion.isValue
-                              while (channel.receiveOrClosed().isValue) {
+                              while channel.receiveOrClosed().isValue do {
                                   // Drain the channel
                               }
                               println(s"[Server] Channel drained for client: ${clientId}")
                           } catch {
-                              case e: Exception => 
-                                  println(s"[Server] Error draining channel for client $clientId: ${e.getMessage}")
+                              case e: Exception =>
+                                  println(
+                                    s"[Server] Error draining channel for client $clientId: ${e.getMessage}"
+                                  )
                                   e.printStackTrace()
                           }
                       }
                   },
                   server.clientChannels.remove(clientId)
                 )
-                
+
                 handleRequestFlow.merge(asyncResponseFlow)
         }
     }
 
-    /** Run the WebSocket server with the given Server instance (for main application - runs forever) */
+    /** Run the WebSocket server with the given Server instance (for main application - runs
+      * forever)
+      */
     def run(server: Server, port: Int = 8080)(using Ox): Unit = {
         val binding = runBinding(server, port)
         println("\n[Server] Ready to accept connections. Press ENTER to stop.")
@@ -125,12 +134,12 @@ object CosmexWebSocketServer {
             .addEndpoint(wsServerEndpoint)
             .start()
     }
-    
+
     /** Handle a client request and return a response */
     /** Handle a single client request and return a sequence of responses
       *
-      * Most requests return a single response, but CreateOrder returns OrderCreated
-      * followed by OrderExecuted for each trade (ensures correct ordering)
+      * Most requests return a single response, but CreateOrder returns OrderCreated followed by
+      * OrderExecuted for each trade (ensures correct ordering)
       */
     def handleRequest(server: Server, request: ClientRequest): List[ClientResponse] = {
         val responses = request match {
@@ -173,22 +182,31 @@ object CosmexWebSocketServer {
                         server.provider.submit(tx) match {
                             case Left(submitError) =>
                                 println(s"[Server] Transaction submission failed: $submitError")
-                                return List(ClientResponse.Error(s"Transaction submission failed: ${submitError.getMessage}"))
+                                return List(
+                                  ClientResponse.Error(
+                                    s"Transaction submission failed: ${submitError.getMessage}"
+                                  )
+                                )
                             case Right(_) =>
-                                println(s"[Server] Transaction submitted: ${tx.id.toHex.take(16)}...")
+                                println(
+                                  s"[Server] Transaction submitted: ${tx.id.toHex.take(16)}..."
+                                )
                         }
 
                         // Get the client's async response channel
                         server.clientChannels.get(clientId) match {
                             case None =>
-                                val errorMsg = s"Internal error: No async channel for client ${clientId}"
+                                val errorMsg =
+                                    s"Internal error: No async channel for client ${clientId}"
                                 println(s"[Server] ERROR: $errorMsg")
                                 List(ClientResponse.Error(errorMsg))
 
                             case Some(channel) =>
                                 // Launch background thread to wait for confirmation using submitAndWait
                                 val pollingThread = new Thread(() => {
-                                    println(s"[Server] Starting background confirmation wait for: ${clientId}")
+                                    println(
+                                      s"[Server] Starting background confirmation wait for: ${clientId}"
+                                    )
 
                                     // Use submitAndWait extension (handles both transaction status and UTxO polling)
                                     // Transaction already submitted, so we just poll for first output
@@ -198,27 +216,40 @@ object CosmexWebSocketServer {
                                     val delayMs = 1000
 
                                     var confirmed = false
-                                    while (attempts < maxAttempts && !confirmed) {
+                                    while attempts < maxAttempts && !confirmed do {
                                         server.provider.findUtxo(channelRef) match {
                                             case Right(_) =>
-                                                println(s"[Server] Channel confirmed after ${attempts + 1} attempt(s): ${clientId}")
-                                                server.updateChannelStatus(clientId, ChannelStatus.Open)
-                                                channel.send(ClientResponse.ChannelOpened(signedSnapshot))
+                                                println(
+                                                  s"[Server] Channel confirmed after ${attempts + 1} attempt(s): ${clientId}"
+                                                )
+                                                server.updateChannelStatus(
+                                                  clientId,
+                                                  ChannelStatus.Open
+                                                )
+                                                channel.send(
+                                                  ClientResponse.ChannelOpened(signedSnapshot)
+                                                )
                                                 confirmed = true
                                             case Left(_) =>
                                                 attempts += 1
-                                                if (attempts < maxAttempts) {
-                                                    if (attempts % 5 == 0) {
-                                                        println(s"[Server] Still waiting for confirmation... (attempt ${attempts}/${maxAttempts})")
+                                                if attempts < maxAttempts then {
+                                                    if attempts % 5 == 0 then {
+                                                        println(
+                                                          s"[Server] Still waiting for confirmation... (attempt ${attempts}/${maxAttempts})"
+                                                        )
                                                     }
                                                     Thread.sleep(delayMs)
                                                 }
                                         }
                                     }
 
-                                    if (!confirmed) {
-                                        println(s"[Server] Channel confirmation timeout for: ${clientId}")
-                                        channel.send(ClientResponse.Error("Transaction confirmation timeout"))
+                                    if !confirmed then {
+                                        println(
+                                          s"[Server] Channel confirmation timeout for: ${clientId}"
+                                        )
+                                        channel.send(
+                                          ClientResponse.Error("Transaction confirmation timeout")
+                                        )
                                     }
                                 })
                                 pollingThread.setDaemon(true)
@@ -236,32 +267,45 @@ object CosmexWebSocketServer {
                     case Right((orderId, snapshot, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
-                        
+
                         // Split trades into:
                         // 1. Trades for THIS client (incoming order) - return immediately
                         // 2. Trades for OTHER clients (matched orders) - send via ox channel
                         val incomingOrderId = BigInt(orderId)
-                        println(s"[Server] Processing ${trades.size} trades for order $incomingOrderId")
-                        trades.foreach(t => println(s"[Server]   Trade: orderId=${t.orderId}, amount=${t.tradeAmount}"))
-                        
+                        println(
+                          s"[Server] Processing ${trades.size} trades for order $incomingOrderId"
+                        )
+                        trades.foreach(t =>
+                            println(
+                              s"[Server]   Trade: orderId=${t.orderId}, amount=${t.tradeAmount}"
+                            )
+                        )
+
                         val (myTrades, otherTrades) = trades.partition(_.orderId == incomingOrderId)
-                        println(s"[Server] Split: ${myTrades.size} for this client, ${otherTrades.size} for others")
-                        
+                        println(
+                          s"[Server] Split: ${myTrades.size} for this client, ${otherTrades.size} for others"
+                        )
+
                         // Send notifications to OTHER clients via ox channel (async)
                         otherTrades.foreach { trade =>
                             server.orderOwners.get(trade.orderId).foreach { ownerClientId =>
                                 server.clientChannels.get(ownerClientId).foreach { channel =>
-                                    println(s"[Server] Queuing trade notification to client: $ownerClientId, trade: ${trade.orderId}")
+                                    println(
+                                      s"[Server] Queuing trade notification to client: $ownerClientId, trade: ${trade.orderId}"
+                                    )
                                     channel.send(ClientResponse.OrderExecuted(trade))
                                 }
                             }
                         }
-                        
+
                         // Return OrderCreated FIRST, then OrderExecuted for THIS client's trades
                         val orderCreated = ClientResponse.OrderCreated(BigInt(orderId))
-                        val myOrderExecuted = myTrades.map(trade => ClientResponse.OrderExecuted(trade))
-                        
-                        println(s"[Server] Returning ${1 + myOrderExecuted.size} responses (OrderCreated + ${myOrderExecuted.size} OrderExecuted)")
+                        val myOrderExecuted =
+                            myTrades.map(trade => ClientResponse.OrderExecuted(trade))
+
+                        println(
+                          s"[Server] Returning ${1 + myOrderExecuted.size} responses (OrderCreated + ${myOrderExecuted.size} OrderExecuted)"
+                        )
                         orderCreated :: myOrderExecuted
                 }
 

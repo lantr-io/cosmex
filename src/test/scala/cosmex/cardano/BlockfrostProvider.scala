@@ -14,8 +14,8 @@ import scala.util.Try
 
 /** Blockfrost-based provider for interacting with Cardano networks (preprod, preview, mainnet)
   *
-  * This provider uses the Blockfrost API to interact with real Cardano networks.
-  * It requires a Blockfrost API key (project ID) to function.
+  * This provider uses the Blockfrost API to interact with real Cardano networks. It requires a
+  * Blockfrost API key (project ID) to function.
   *
   * Usage:
   * ```scala
@@ -24,8 +24,10 @@ import scala.util.Try
   * provider.submit(transaction)
   * ```
   *
-  * @param apiKey Blockfrost project ID (API key)
-  * @param baseUrl Blockfrost API base URL
+  * @param apiKey
+  *   Blockfrost project ID (API key)
+  * @param baseUrl
+  *   Blockfrost API base URL
   */
 class BlockfrostProvider(apiKey: String, baseUrl: String)
     extends Provider
@@ -44,7 +46,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
               data = txCbor,
               headers = Map("project_id" -> apiKey, "Content-Type" -> "application/cbor")
             )
-            if (response.is2xx) {
+            if response.is2xx then {
                 println(s"[BlockfrostProvider] Transaction submitted: ${tx.id.toHex.take(16)}...")
                 Right(())
             } else {
@@ -70,7 +72,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
         val url = s"$baseUrl/addresses/$bech32/utxos"
         val response = requests.get(url, headers = Map("project_id" -> apiKey))
 
-        if (response.is2xx) {
+        if response.is2xx then {
             val utxos = BlockfrostProvider.parseUtxos(mapper, response.text())
             println(s"[BlockfrostProvider] Found ${utxos.size} UTxOs at address")
 
@@ -125,25 +127,34 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
             val url = s"$baseUrl/txs/$txHash"
             val response = requests.get(url, headers = Map("project_id" -> apiKey))
 
-            println(s"[BlockfrostProvider] Transaction status response - status: ${response.statusCode}")
+            println(
+              s"[BlockfrostProvider] Transaction status response - status: ${response.statusCode}"
+            )
 
-            if (response.is2xx) {
+            if response.is2xx then {
                 // Transaction exists and is confirmed
                 val json = ujson.read(response.text(), trace = false)
                 val blockHeight = json.obj.get("block_height")
                 val isConfirmed = blockHeight.exists(_.num > 0)
-                println(s"[BlockfrostProvider] Transaction ${txHash.take(16)}... confirmed: $isConfirmed")
+                println(
+                  s"[BlockfrostProvider] Transaction ${txHash.take(16)}... confirmed: $isConfirmed"
+                )
                 isConfirmed
-            } else if (response.statusCode == 404) {
+            } else if response.statusCode == 404 then {
                 // Transaction not found (not yet submitted or pending)
-                println(s"[BlockfrostProvider] Transaction ${txHash.take(16)}... not found in blockchain")
+                println(
+                  s"[BlockfrostProvider] Transaction ${txHash.take(16)}... not found in blockchain"
+                )
                 false
             } else {
-                throw new RuntimeException(s"Failed to check transaction status: ${response.text()}")
+                throw new RuntimeException(
+                  s"Failed to check transaction status: ${response.text()}"
+                )
             }
         }.toEither.left.map {
             case e: RuntimeException => e
-            case e: Throwable => new RuntimeException(s"Failed to check transaction status: ${e.getMessage}", e)
+            case e: Throwable =>
+                new RuntimeException(s"Failed to check transaction status: ${e.getMessage}", e)
         }
     }
 
@@ -154,7 +165,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
             val url = s"$baseUrl/epochs/latest/parameters"
             val response = requests.get(url, headers = Map("project_id" -> apiKey))
 
-            if (response.is2xx) {
+            if response.is2xx then {
                 println(s"[BlockfrostProvider] Successfully fetched protocol parameters")
                 ProtocolParams.fromBlockfrostJson(response.text())
             } else {
@@ -164,7 +175,8 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
             }
         }.toEither.left.map {
             case e: RuntimeException => e
-            case e: Throwable => new RuntimeException(s"Failed to get protocol parameters: ${e.getMessage}", e)
+            case e: Throwable =>
+                new RuntimeException(s"Failed to get protocol parameters: ${e.getMessage}", e)
         }
     }
 }

@@ -19,11 +19,11 @@ import scala.util.{Failure, Success, Try}
 /** Interactive command-line demo for COSMEX
   *
   * Allows users to:
-  * - Choose which party to represent (Alice or Bob)
-  * - Mint custom tokens (if configured)
-  * - Connect to the exchange
-  * - Buy/sell assets
-  * - Quit
+  *   - Choose which party to represent (Alice or Bob)
+  *   - Mint custom tokens (if configured)
+  *   - Connect to the exchange
+  *   - Buy/sell assets
+  *   - Quit
   *
   * Usage: sbt "Test/runMain cosmex.demo.InteractiveDemo"
   */
@@ -94,8 +94,8 @@ object InteractiveDemo extends App {
             val clientPubKey = clientConfig.getPubKey()
             val clientPubKeyHash = clientConfig.getPubKeyHash()
             val clientAddress = Address(
-                config.network.scalusNetwork,
-                Credential.KeyHash(AddrKeyHash.fromByteString(clientPubKeyHash))
+              config.network.scalusNetwork,
+              Credential.KeyHash(AddrKeyHash.fromByteString(clientPubKeyHash))
             )
             val clientInitialValue = clientConfig.getInitialValue()
 
@@ -107,21 +107,24 @@ object InteractiveDemo extends App {
 
                     val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
                     val initialUtxos = Map(
-                        TransactionInput(genesisHash, 0) ->
-                            TransactionOutput(address = clientAddress, value = clientInitialValue + Value.lovelace(100_000_000L))
+                      TransactionInput(genesisHash, 0) ->
+                          TransactionOutput(
+                            address = clientAddress,
+                            value = clientInitialValue + Value.lovelace(100_000_000L)
+                          )
                     )
 
                     MockLedgerApi(
-                        initialUtxos = initialUtxos,
-                        context = Context.testMainnet(slot = 1000),
-                        validators = MockLedgerApi.defaultValidators -
-                            MissingKeyHashesValidator -
-                            ProtocolParamsViewHashesMatchValidator -
-                            MissingRequiredDatumsValidator -
-                            WrongNetworkValidator -
-                            VerifiedSignaturesInWitnessesValidator,
-                        mutators = MockLedgerApi.defaultMutators -
-                            PlutusScriptsTransactionMutator
+                      initialUtxos = initialUtxos,
+                      context = Context.testMainnet(slot = 1000),
+                      validators = MockLedgerApi.defaultValidators -
+                          MissingKeyHashesValidator -
+                          ProtocolParamsViewHashesMatchValidator -
+                          MissingRequiredDatumsValidator -
+                          WrongNetworkValidator -
+                          VerifiedSignaturesInWitnessesValidator,
+                      mutators = MockLedgerApi.defaultMutators -
+                          PlutusScriptsTransactionMutator
                     )
 
                 case "yaci-devkit" | "yaci" =>
@@ -161,25 +164,31 @@ object InteractiveDemo extends App {
             def findClientUtxo(txIdFilter: Option[TransactionHash] = None): Utxo = {
                 config.blockchain.provider.toLowerCase match {
                     case "mock" =>
-                        val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+                        val genesisHash =
+                            TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
                         val genesisInput = TransactionInput(genesisHash, 0)
                         Utxo(
-                            input = genesisInput,
-                            output = TransactionOutput(address = clientAddress, value = clientInitialValue + Value.lovelace(100_000_000L))
+                          input = genesisInput,
+                          output = TransactionOutput(
+                            address = clientAddress,
+                            value = clientInitialValue + Value.lovelace(100_000_000L)
+                          )
                         )
 
                     case "yaci-devkit" | "yaci" =>
                         provider.findUtxo(
-                            address = clientAddress,
-                            transactionId = txIdFilter,
-                            datum = None,
-                            minAmount = Some(Coin(2_000_000L))
+                          address = clientAddress,
+                          transactionId = txIdFilter,
+                          datum = None,
+                          minAmount = Some(Coin(2_000_000L))
                         ) match {
                             case Right(utxo) => utxo
-                            case Left(err) => throw new Exception(s"Failed to find UTxO: ${err.getMessage}")
+                            case Left(err) =>
+                                throw new Exception(s"Failed to find UTxO: ${err.getMessage}")
                         }
 
-                    case other => throw new IllegalArgumentException(s"Unsupported provider: $other")
+                    case other =>
+                        throw new IllegalArgumentException(s"Unsupported provider: $other")
                 }
             }
 
@@ -191,12 +200,12 @@ object InteractiveDemo extends App {
 
                 import cosmex.demo.MintingHelper
                 val mintTx = MintingHelper.mintTokens(
-                    env = cardanoInfo,
-                    utxoToSpend = depositUtxo,
-                    collateralUtxo = depositUtxo,
-                    recipientAddress = clientAddress,
-                    tokenName = ByteString.fromString(tokenName),
-                    amount = amount
+                  env = cardanoInfo,
+                  utxoToSpend = depositUtxo,
+                  collateralUtxo = depositUtxo,
+                  recipientAddress = clientAddress,
+                  tokenName = ByteString.fromString(tokenName),
+                  amount = amount
                 )
 
                 // Sign the transaction
@@ -208,36 +217,41 @@ object InteractiveDemo extends App {
                 val txBytes = TransactionBytes(mintTx.toCbor)
                 val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
                 val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                val signature =
+                    signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
 
                 val witness = VKeyWitness(
-                    signature = ByteString.fromArray(signature),
-                    vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                  signature = ByteString.fromArray(signature),
+                  vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
                 )
                 val witnessSet = mintTx.witnessSet.copy(
-                    vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                  vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                 )
                 val signedMintTx = mintTx.copy(witnessSet = witnessSet)
 
                 // Submit
                 provider.submit(signedMintTx) match {
                     case Right(_) =>
-                        println(s"[Mint] ✓ Transaction submitted: ${signedMintTx.id.toHex.take(16)}...")
+                        println(
+                          s"[Mint] ✓ Transaction submitted: ${signedMintTx.id.toHex.take(16)}..."
+                        )
                     case Left(error) =>
-                        throw new Exception(s"Failed to submit minting transaction: ${error.getMessage}")
+                        throw new Exception(
+                          s"Failed to submit minting transaction: ${error.getMessage}"
+                        )
                 }
 
                 // Wait for confirmation
                 println(s"[Mint] Waiting for confirmation...")
                 Thread.sleep(config.blockchain.provider.toLowerCase match {
                     case "yaci-devkit" | "yaci" => 20000
-                    case _ => 2000
+                    case _                      => 2000
                 })
 
                 // Calculate policy ID
                 val utxoRef = scalus.ledger.api.v3.TxOutRef(
-                    scalus.ledger.api.v3.TxId(depositUtxo.input.transactionId),
-                    depositUtxo.input.index
+                  scalus.ledger.api.v3.TxId(depositUtxo.input.transactionId),
+                  depositUtxo.input.index
                 )
                 val policyId = MintingHelper.getPolicyId(utxoRef)
 
@@ -256,9 +270,9 @@ object InteractiveDemo extends App {
                 println(s"[Connect] Depositing: ${depositAmount.coin.value / 1_000_000} ADA")
 
                 val unsignedTx = txbuilder.openChannel(
-                    clientInput = depositUtxo,
-                    clientPubKey = clientPubKey,
-                    depositAmount = depositAmount
+                  clientInput = depositUtxo,
+                  clientPubKey = clientPubKey,
+                  depositAmount = depositAmount
                 )
 
                 // Sign the transaction
@@ -270,20 +284,22 @@ object InteractiveDemo extends App {
                 val txBytes = TransactionBytes(unsignedTx.toCbor)
                 val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
                 val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                val signature =
+                    signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
 
                 val witness = VKeyWitness(
-                    signature = ByteString.fromArray(signature),
-                    vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                  signature = ByteString.fromArray(signature),
+                  vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
                 )
                 val witnessSet = unsignedTx.witnessSet.copy(
-                    vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                  vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                 )
                 val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
 
                 // Create client ID and connect
                 val cId = ClientId(TransactionInput(openChannelTx.id, 0))
-                val wsUrl = s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
+                val wsUrl =
+                    s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
 
                 client = SimpleWebSocketClient(wsUrl)
                 clientId = Some(cId)
@@ -291,7 +307,8 @@ object InteractiveDemo extends App {
                 // Create and sign initial snapshot
                 val clientTxOutRef = TxOutRef(scalus.ledger.api.v3.TxId(openChannelTx.id), 0)
                 val initialSnapshot = mkInitialSnapshot(depositAmount)
-                val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+                val clientSignedSnapshot =
+                    mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
 
                 // Send OpenChannel request
                 client.sendMessage(ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot))
@@ -330,8 +347,14 @@ object InteractiveDemo extends App {
             }
 
             // Helper to create buy/sell orders
-            def createOrder(side: String, baseAsset: String, quoteAsset: String, amount: Long, price: Long): Unit = {
-                if (!isConnected) {
+            def createOrder(
+                side: String,
+                baseAsset: String,
+                quoteAsset: String,
+                amount: Long,
+                price: Long
+            ): Unit = {
+                if !isConnected then {
                     println("[Order] ERROR: You must connect to the exchange first!")
                     return
                 }
@@ -354,7 +377,9 @@ object InteractiveDemo extends App {
                                     (ada, asset.assetClass)
                                 } catch {
                                     case _: Exception =>
-                                        println(s"[Order] ERROR: Unknown asset '$other'. Available: ADA, USDM")
+                                        println(
+                                          s"[Order] ERROR: Unknown asset '$other'. Available: ADA, USDM"
+                                        )
                                         return
                                 }
                         }
@@ -371,29 +396,37 @@ object InteractiveDemo extends App {
                         }
                 }
 
-                val signedAmount = if (side.equalsIgnoreCase("BUY")) BigInt(amount) else BigInt(-amount)
+                val signedAmount =
+                    if side.equalsIgnoreCase("BUY") then BigInt(amount) else BigInt(-amount)
                 val order = LimitOrder(
-                    orderPair = (base, quote),
-                    orderAmount = signedAmount,
-                    orderPrice = price
+                  orderPair = (base, quote),
+                  orderAmount = signedAmount,
+                  orderPrice = price
                 )
 
-                client.sendRequest(ClientRequest.CreateOrder(clientId.get, order), timeoutSeconds = 10) match {
+                client.sendRequest(
+                  ClientRequest.CreateOrder(clientId.get, order),
+                  timeoutSeconds = 10
+                ) match {
                     case Success(ClientResponse.OrderCreated(orderId)) =>
                         println(s"[Order] ✓ Order created! OrderID: $orderId")
 
                         // Listen for potential trade execution
                         println(s"[Order] Waiting for potential matches...")
                         var attempts = 0
-                        while (attempts < 5) {
+                        while attempts < 5 do {
                             client.receiveMessage(timeoutSeconds = 1) match {
                                 case Success(msgJson) =>
                                     Try(read[ClientResponse](msgJson)) match {
                                         case Success(ClientResponse.OrderExecuted(trade)) =>
-                                            println(s"[Order] ✓ Order executed! Trade amount: ${trade.tradeAmount}, price: ${trade.tradePrice}")
+                                            println(
+                                              s"[Order] ✓ Order executed! Trade amount: ${trade.tradeAmount}, price: ${trade.tradePrice}"
+                                            )
                                             return
                                         case Success(other) =>
-                                            println(s"[Order] Received: ${other.getClass.getSimpleName}")
+                                            println(
+                                              s"[Order] Received: ${other.getClass.getSimpleName}"
+                                            )
                                         case Failure(_) =>
                                     }
                                 case Failure(_) =>
@@ -429,11 +462,11 @@ object InteractiveDemo extends App {
             var running = true
             var lastMintTxId: Option[TransactionHash] = None
 
-            while (running) {
+            while running do {
                 print(s"$partyName> ")
                 val input = StdIn.readLine()
 
-                if (input == null) {
+                if input == null then {
                     running = false
                 } else {
                     val parts = input.trim.split("\\s+")
@@ -446,15 +479,15 @@ object InteractiveDemo extends App {
                                 val (txId, policyId) = mintTokens(tokenName, amount)
                                 mintedPolicyId = Some(policyId)
                                 lastMintTxId = Some(txId)
-                            }.recover {
-                                case e: Exception => println(s"[Mint] ERROR: ${e.getMessage}")
+                            }.recover { case e: Exception =>
+                                println(s"[Mint] ERROR: ${e.getMessage}")
                             }
 
                         case Some("connect") =>
                             Try {
                                 connectToExchange(lastMintTxId)
-                            }.recover {
-                                case e: Exception => println(s"[Connect] ERROR: ${e.getMessage}")
+                            }.recover { case e: Exception =>
+                                println(s"[Connect] ERROR: ${e.getMessage}")
                             }
 
                         case Some("buy") if parts.length == 5 =>
@@ -464,8 +497,8 @@ object InteractiveDemo extends App {
                                 val amount = parts(3).toLong
                                 val price = parts(4).toLong
                                 createOrder("BUY", base, quote, amount, price)
-                            }.recover {
-                                case e: Exception => println(s"[Buy] ERROR: ${e.getMessage}")
+                            }.recover { case e: Exception =>
+                                println(s"[Buy] ERROR: ${e.getMessage}")
                             }
 
                         case Some("sell") if parts.length == 5 =>
@@ -475,14 +508,16 @@ object InteractiveDemo extends App {
                                 val amount = parts(3).toLong
                                 val price = parts(4).toLong
                                 createOrder("SELL", base, quote, amount, price)
-                            }.recover {
-                                case e: Exception => println(s"[Sell] ERROR: ${e.getMessage}")
+                            }.recover { case e: Exception =>
+                                println(s"[Sell] ERROR: ${e.getMessage}")
                             }
 
                         case Some("help") =>
                             println("\nAvailable commands:")
                             println("  mint <tokenName> <amount>              - Mint custom tokens")
-                            println("  connect                                 - Connect to the exchange")
+                            println(
+                              "  connect                                 - Connect to the exchange"
+                            )
                             println("  buy <base> <quote> <amount> <price>    - Create buy order")
                             println("  sell <base> <quote> <amount> <price>   - Create sell order")
                             println("  help                                    - Show this help")
@@ -497,16 +532,16 @@ object InteractiveDemo extends App {
                             println(s"Unknown command: $cmd. Type 'help' for available commands.")
 
                         case None =>
-                            // Empty input, continue
+                        // Empty input, continue
                     }
                 }
             }
 
         } finally {
-            if (client != null) {
+            if client != null then {
                 client.close()
             }
-            if (serverBinding != null) {
+            if serverBinding != null then {
                 serverBinding.stop()
                 println("\n[Server] Exchange shut down.")
             }

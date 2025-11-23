@@ -17,23 +17,27 @@ import scalus.testing.kit.MockLedgerApi
 object CosmexWebSocketServerDemo {
 
     // CLI options
-    private val configFileOpt = Opts.option[String](
-      "config",
-      short = "c",
-      help = "Path to configuration file (defaults to application.conf)"
-    ).orNone
+    private val configFileOpt = Opts
+        .option[String](
+          "config",
+          short = "c",
+          help = "Path to configuration file (defaults to application.conf)"
+        )
+        .orNone
 
-    private val portOpt = Opts.option[Int](
-      "port",
-      short = "p",
-      help = "WebSocket server port (overrides config)"
-    ).orNone
+    private val portOpt = Opts
+        .option[Int](
+          "port",
+          short = "p",
+          help = "WebSocket server port (overrides config)"
+        )
+        .orNone
 
     private val command = com.monovore.decline.Command(
       name = "cosmex-server",
       header = "COSMEX WebSocket Server Demo"
     ) {
-      (configFileOpt, portOpt).tupled
+        (configFileOpt, portOpt).tupled
     }
 
     def main(args: Array[String]): Unit = {

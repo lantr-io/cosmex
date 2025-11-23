@@ -59,26 +59,37 @@ class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
         val inputValue = clientInput.output.value
         val hasTokens = inputValue != Value.lovelace(inputValue.coin.value)
 
-        if (hasTokens) {
+        if hasTokens then {
             // If input has tokens, we need to explicitly handle them
             // Calculate what remains after deposit (tokens should be preserved)
             val remainingValue = inputValue - depositAmount
 
             // If there's remaining value (tokens + ADA), send it back explicitly
             // Then use changeTo to set the diff handler for fee calculation
-            if (remainingValue.coin.value > 0 || remainingValue != Value.lovelace(remainingValue.coin.value)) {
+            if remainingValue.coin.value > 0 || remainingValue != Value.lovelace(
+                  remainingValue.coin.value
+                )
+            then {
                 TxBuilder(env)
                     .spend(clientInput)
-                    .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+                    .payTo(
+                      address = scriptAddress,
+                      value = depositAmount,
+                      datum = initialState.toData
+                    )
                     .payTo(address = clientInput.output.address, value = remainingValue)
-                    .changeTo(clientInput.output.address)  // Sets diff handler for fee calculation
+                    .changeTo(clientInput.output.address) // Sets diff handler for fee calculation
                     .build()
                     .transaction
             } else {
                 // All value deposited, just need diff handler for fees
                 TxBuilder(env)
                     .spend(clientInput)
-                    .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+                    .payTo(
+                      address = scriptAddress,
+                      value = depositAmount,
+                      datum = initialState.toData
+                    )
                     .changeTo(clientInput.output.address)
                     .build()
                     .transaction

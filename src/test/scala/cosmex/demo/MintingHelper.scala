@@ -11,13 +11,20 @@ object MintingHelper {
 
     /** Create a transaction that mints tokens using a one-time minting policy
       *
-      * @param env The transaction builder environment
-      * @param utxoToSpend The UTxO to spend (also used as minting policy parameter)
-      * @param collateralUtxo The UTxO to use as collateral for script execution
-      * @param recipientAddress The address to send the minted tokens to
-      * @param tokenName The name of the token to mint
-      * @param amount The amount of tokens to mint
-      * @return An unsigned transaction that mints the tokens
+      * @param env
+      *   The transaction builder environment
+      * @param utxoToSpend
+      *   The UTxO to spend (also used as minting policy parameter)
+      * @param collateralUtxo
+      *   The UTxO to use as collateral for script execution
+      * @param recipientAddress
+      *   The address to send the minted tokens to
+      * @param tokenName
+      *   The name of the token to mint
+      * @param amount
+      *   The amount of tokens to mint
+      * @return
+      *   An unsigned transaction that mints the tokens
       */
     def mintTokens(
         env: Environment,
@@ -67,8 +74,10 @@ object MintingHelper {
       *
       * This is useful for calculating what the policy ID will be before minting
       *
-      * @param utxoRef The UTxO reference used in the minting policy
-      * @return The policy ID (script hash) as ByteString
+      * @param utxoRef
+      *   The UTxO reference used in the minting policy
+      * @return
+      *   The policy ID (script hash) as ByteString
       */
     def getPolicyId(utxoRef: TxOutRef): ByteString = {
         val compiledProgram = SimpleMintingPolicyContract.compileAndApply(utxoRef)

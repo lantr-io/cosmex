@@ -85,10 +85,10 @@ object OrderBook {
                       tradeAmount = tradeAmount,
                       tradePrice = tradePrice
                     )
-                    
+
                     val sellTrade = Trade(
                       orderId = sellEntry.orderId,
-                      tradeAmount = -tradeAmount,  // Negative for SELL side
+                      tradeAmount = -tradeAmount, // Negative for SELL side
                       tradePrice = tradePrice
                     )
 
@@ -148,13 +148,13 @@ object OrderBook {
                     // Create trades for BOTH sides of the match
                     val sellTrade = Trade(
                       orderId = sellOrderId,
-                      tradeAmount = -tradeAmount,  // Negative for SELL side
+                      tradeAmount = -tradeAmount, // Negative for SELL side
                       tradePrice = tradePrice
                     )
-                    
+
                     val buyTrade = Trade(
                       orderId = buyEntry.orderId,
-                      tradeAmount = tradeAmount,  // Positive for BUY side
+                      tradeAmount = tradeAmount, // Positive for BUY side
                       tradePrice = tradePrice
                     )
 

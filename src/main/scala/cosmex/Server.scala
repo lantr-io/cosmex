@@ -29,7 +29,6 @@ enum ClientRequest derives ReadWriter:
 
 end ClientRequest
 
-
 type ChainSlot = Long
 
 case class ChainPoint(slotNo: ChainSlot, headerHash: String) derives ReadWriter
@@ -53,7 +52,6 @@ enum ClientResponse derives ReadWriter:
     case OrderExecuted(trade: Trade)
     case Balance(balance: scalus.ledger.api.v3.Value)
     case Orders(orders: scalus.prelude.AssocMap[OrderId, LimitOrder])
-
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)
@@ -80,7 +78,7 @@ case class ClientState(
 case class ClientRecord(
     state: ClientState,
     oxChannel: ox.channels.Channel[ClientResponse]
-                       )
+)
 
 case class OpenChannelInfo(
     channelRef: TransactionInput,
@@ -92,7 +90,7 @@ case class OpenChannelInfo(
 class Server(
     env: CardanoInfo,
     exchangeParams: ExchangeParams,
-    val provider: Provider,  // Made public for WebSocket server
+    val provider: Provider, // Made public for WebSocket server
     exchangePrivKey: ByteString
 ) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams)
@@ -106,7 +104,6 @@ class Server(
     var orderBookRef: AtomicReference[OrderBook] = new AtomicReference(OrderBook.empty)
     var nextOrderId: AtomicLong = new AtomicLong(0L)
     val orderOwners = TrieMap.empty[OrderId, ClientId] // Maps order ID to client
-
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
@@ -275,9 +272,9 @@ class Server(
                           orderId,
                           order.copy(orderAmount = matchResult.remainingAmount)
                         )
-                    if (orderBookRef.compareAndSet(orderBook, newOrderBook)) then
-                       orderBookUpdated = true
-                       
+                    if orderBookRef.compareAndSet(orderBook, newOrderBook) then
+                        orderBookUpdated = true
+
                 // Note: Trade notifications are now sent from CosmexWebSocketServer.handleRequest
                 // This ensures OrderCreated is sent before OrderExecuted for the initiating client
 
@@ -399,10 +396,10 @@ class Server(
         // Use longer timeout for real blockchains (30s)
         provider.submitAndWait(tx, maxAttempts = 30, delayMs = 1000) match {
             case Left(error) => println(s"[Server] Transaction submission failed: $error")
-            case Right(_)    => println(s"[Server] Transaction confirmed: ${tx.id.toHex.take(16)}...")
+            case Right(_) => println(s"[Server] Transaction confirmed: ${tx.id.toHex.take(16)}...")
         }
     }
-    
+
     /** Check if a transaction output exists on-chain (i.e., transaction is confirmed) */
     def isUtxoConfirmed(txOutRef: TransactionInput): Boolean = {
         provider.findUtxo(txOutRef).isRight

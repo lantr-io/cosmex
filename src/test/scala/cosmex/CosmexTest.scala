@@ -476,7 +476,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           bobTrade.tradePrice == 500_000,
           s"Bob's trade price should be 0.50, got ${bobTrade.tradePrice}"
         )
-        
+
         // Verify Alice's trade is also present (orderId = 0, negative amount for SELL)
         val aliceTrade = bobTrades.find(_.orderId == 0).get
         assert(

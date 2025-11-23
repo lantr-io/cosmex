@@ -42,7 +42,7 @@ libraryDependencies ++= Seq(
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
 libraryDependencies += "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % "test"
 libraryDependencies += "com.lihaoyi" %% "pprint" % "0.9.4" % "test"
-libraryDependencies += "com.lihaoyi" %% "requests" % "0.9.0" % "test"  // HTTP client for Blockfrost
+libraryDependencies += "com.lihaoyi" %% "requests" % "0.9.0" % "test" // HTTP client for Blockfrost
 libraryDependencies ++= Seq(
   "com.softwaremill.sttp.client4" %% "core" % "4.0.13",
   "com.softwaremill.sttp.client4" %% "ox" % "4.0.13"
@@ -57,9 +57,9 @@ libraryDependencies ++= Seq(
 )
 
 // Test configuration
-Test / parallelExecution := false  // Required for Yaci DevKit testcontainers
-Test / javaOptions ++= Seq("-Xmx2g")  // Increase memory for blockchain tests
-Test / classLoaderLayeringStrategy := ClassLoaderLayeringStrategy.Flat  // Fix classloading for yaci-devkit
+Test / parallelExecution := false // Required for Yaci DevKit testcontainers
+Test / javaOptions ++= Seq("-Xmx2g") // Increase memory for blockchain tests
+Test / classLoaderLayeringStrategy := ClassLoaderLayeringStrategy.Flat // Fix classloading for yaci-devkit
 
 addCommandAlias(
   "quick",

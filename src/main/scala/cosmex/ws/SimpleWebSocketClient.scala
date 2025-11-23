@@ -3,7 +3,7 @@ package cosmex.ws
 import cosmex.{ClientRequest, ClientResponse}
 import upickle.default.*
 import sttp.client4.*
-import sttp.client4.ws.{SyncWebSocket, sync}
+import sttp.client4.ws.{sync, SyncWebSocket}
 import sttp.ws.WebSocketFrame
 
 import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, TimeUnit}
@@ -11,7 +11,8 @@ import scala.util.{Failure, Try}
 
 /** Simple synchronous WebSocket client for demos using sttp
   *
-  * Uses a blocking queue to handle request/response synchronization with a background receiver thread
+  * Uses a blocking queue to handle request/response synchronization with a background receiver
+  * thread
   */
 class SimpleWebSocketClient(serverUrl: String) {
 
@@ -28,13 +29,13 @@ class SimpleWebSocketClient(serverUrl: String) {
             .get(uri"$serverUrl")
             .response(sync.asWebSocket { ws =>
                 webSocket = ws
-                
+
                 // Signal that connection is ready immediately
                 receiverReady.countDown()
-                
+
                 // Process messages in this thread (blocking call)
                 try {
-                    while (true) {
+                    while true do {
                         val frame = ws.receive()
                         frame match {
                             case WebSocketFrame.Text(payload, _, _) =>
@@ -47,7 +48,7 @@ class SimpleWebSocketClient(serverUrl: String) {
                 } catch {
                     case e: Exception =>
                         val msg = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
-                        if (!msg.contains("closed")) {
+                        if !msg.contains("closed") then {
                             System.err.println(s"[Client] Error receiving: $msg")
                         }
                 }
@@ -62,9 +63,9 @@ class SimpleWebSocketClient(serverUrl: String) {
         }
         receiverThread.setDaemon(true)
         receiverThread.start()
-        
+
         // Wait for connection to be ready
-        if (!receiverReady.await(5, TimeUnit.SECONDS)) {
+        if !receiverReady.await(5, TimeUnit.SECONDS) then {
             throw new Exception("WebSocket connection failed to establish")
         }
         println(s"[Client] Connected to $serverUrl")
@@ -72,7 +73,7 @@ class SimpleWebSocketClient(serverUrl: String) {
 
     /** Send a request without waiting for a response */
     def sendMessage(request: ClientRequest): Try[Unit] = {
-        if (webSocket != null) {
+        if webSocket != null then {
             Try {
                 val requestJson = write(request)
                 println(s"[Client] Sending message: ${requestJson.take(100)}...")
@@ -92,7 +93,7 @@ class SimpleWebSocketClient(serverUrl: String) {
     def receiveMessage(timeoutSeconds: Int = 10): Try[String] = {
         Try {
             val message = responseQueue.poll(timeoutSeconds.toLong, TimeUnit.SECONDS)
-            if (message != null) {
+            if message != null then {
                 message
             } else {
                 throw new Exception("Timeout waiting for response")
@@ -111,14 +112,14 @@ class SimpleWebSocketClient(serverUrl: String) {
 
     /** Close the WebSocket connection */
     def close(): Unit = {
-        if (receiverThread != null) {
+        if receiverThread != null then {
             receiverThread.interrupt()
         }
-        if (webSocket != null) {
+        if webSocket != null then {
             Try(webSocket.close())
             println("[Client] Disconnected")
         }
-        if (backend != null) {
+        if backend != null then {
             backend.close()
         }
     }
