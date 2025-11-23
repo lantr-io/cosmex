@@ -111,6 +111,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                     config.createProviderWithFunding(initialFunding)
 
+                case provider @ ("preprod" | "preview") =>
+                    // Use Blockfrost provider for preprod/preview
+                    // NOTE: Wallets must be funded externally using the faucet
+                    println(s"[Test] Using $provider network provider")
+                    println(s"[Test] WARNING: Ensure wallets are funded from the faucet:")
+                    println(s"[Test]   - Alice: ${aliceAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}")
+                    println(s"[Test]   - Bob: ${bobAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}")
+                    config.createProvider()
+
                 case other =>
                     throw new IllegalArgumentException(s"Unsupported provider for test: $other")
             }
@@ -179,8 +188,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   )
                                 )
 
-                            case "yaci-devkit" | "yaci" =>
-                                // For Yaci DevKit, query the provider for funded UTxOs
+                            case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
+                                // For Yaci DevKit / Blockfrost, query the provider for funded UTxOs
                                 import scalus.cardano.address.ShelleyAddress
                                 val addressBech32 =
                                     address.asInstanceOf[ShelleyAddress].toBech32.get
@@ -539,7 +548,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     println("\n[Bob - Preliminary] Minting custom token before trading...")
 
                     val depositUtxo = config.blockchain.provider.toLowerCase match {
-                        case "yaci-devkit" | "yaci" =>
+                        case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                             import scalus.cardano.address.ShelleyAddress
                             val addressBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
 
