@@ -223,8 +223,29 @@ object InteractiveDemo {
                 }
             }
 
-            // Transaction builder
-            val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
+            // Fetch script hash from server (if using external server)
+            val serverScriptHash: Option[ScriptHash] = if (externalServer) {
+                try {
+                    println(s"[Setup] Fetching script hash from server at http://localhost:$port/script-hash...")
+                    val url = new java.net.URL(s"http://localhost:$port/script-hash")
+                    val connection = url.openConnection()
+                    connection.setConnectTimeout(5000)
+                    connection.setReadTimeout(5000)
+                    val scriptHashHex = scala.io.Source.fromInputStream(connection.getInputStream).mkString.trim
+                    println(s"[Setup] ✓ Received script hash from server: $scriptHashHex")
+                    Some(ScriptHash.fromByteString(ByteString.fromHex(scriptHashHex)))
+                } catch {
+                    case e: Exception =>
+                        println(s"[Setup] ERROR: Failed to fetch script hash from server: ${e.getMessage}")
+                        println(s"[Setup] Make sure the server is running on port $port")
+                        throw DemoException("SCRIPT_HASH_FETCH_FAILED", "Could not fetch script hash from server", alreadyPrinted = true)
+                }
+            } else {
+                None
+            }
+
+            // Transaction builder (with optional script hash override from server)
+            val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo, serverScriptHash)
 
             // Helper to find client's UTxO
             def findClientUtxo(txIdFilter: Option[TransactionHash] = None): Utxo = {
@@ -298,11 +319,40 @@ object InteractiveDemo {
 
                 val depositUtxo = findClientUtxo()
 
+                // Find suitable collateral (ADA-only if possible)
+                val collateralUtxo = if depositUtxo.output.value == Value.lovelace(depositUtxo.output.value.coin.value) then {
+                    // UTxO is ADA-only, can use as both input and collateral
+                    depositUtxo
+                } else {
+                    // UTxO contains tokens, try to find another ADA-only UTxO
+                    println(s"[Mint] Spend UTxO contains tokens, looking for ADA-only collateral...")
+                    provider.findUtxos(
+                      address = clientAddress,
+                      transactionId = None,
+                      datum = None,
+                      minAmount = None,
+                      minRequiredTotalAmount = None
+                    ) match {
+                        case Right(utxos) =>
+                            utxos.find { case (_, output) =>
+                                output.value == Value.lovelace(output.value.coin.value) &&
+                                output.value.coin.value >= 5_000_000L // At least 5 ADA for collateral
+                            }.map { case (input, output) => Utxo(input, output) }
+                            .getOrElse {
+                                println(s"[Mint] WARNING: No ADA-only UTxO found, using spend UTxO as collateral (may fail)")
+                                depositUtxo
+                            }
+                        case Left(_) =>
+                            println(s"[Mint] WARNING: Could not query UTxOs, using spend UTxO as collateral (may fail)")
+                            depositUtxo
+                    }
+                }
+
                 import cosmex.demo.MintingHelper
                 val mintTx = MintingHelper.mintTokens(
                   env = cardanoInfo,
                   utxoToSpend = depositUtxo,
-                  collateralUtxo = depositUtxo,
+                  collateralUtxo = collateralUtxo, // Use separate collateral UTxO if available
                   recipientAddress = clientAddress,
                   tokenName = ByteString.fromString(tokenName),
                   amount = amount
@@ -415,8 +465,24 @@ object InteractiveDemo {
                 )
                 val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
 
+                // Find the actual output index for the Cosmex script output
+                val cosmexScriptAddress = Address(
+                  scalusNetwork,
+                  Credential.ScriptHash(txbuilder.script.scriptHash)
+                )
+                val channelOutputIdx = openChannelTx.body.value.outputs.view
+                    .map(_.value)
+                    .zipWithIndex
+                    .find(_._1.address == cosmexScriptAddress)
+                    .map(_._2)
+                    .getOrElse(
+                      throw new Exception("Could not find Cosmex script output in transaction")
+                    )
+
+                println(s"[Connect] Channel output is at index: $channelOutputIdx")
+
                 // Create client ID and connect
-                val cId = ClientId(TransactionInput(openChannelTx.id, 0))
+                val cId = ClientId(TransactionInput(openChannelTx.id, channelOutputIdx))
                 val wsUrl =
                     s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
 
@@ -424,7 +490,7 @@ object InteractiveDemo {
                 clientId = Some(cId)
 
                 // Create and sign initial snapshot
-                val clientTxOutRef = TxOutRef(scalus.ledger.api.v3.TxId(openChannelTx.id), 0)
+                val clientTxOutRef = TxOutRef(scalus.ledger.api.v3.TxId(openChannelTx.id), channelOutputIdx)
                 val initialSnapshot = mkInitialSnapshot(depositAmount)
                 val clientSignedSnapshot =
                     mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)

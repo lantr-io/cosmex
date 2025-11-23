@@ -55,7 +55,13 @@ object MintingHelper {
         val minAda = 2_000_000L // 2 ADA minimum for holding tokens
         val recipientValue = mintedValue + Value.lovelace(minAda)
 
+        // Reserve ADA for a separate collateral UTxO (5 ADA minimum for collateral)
+        val collateralAda = 5_000_000L
+
         // Build the transaction with collateral for Plutus script execution
+        // Create TWO outputs:
+        // 1. Minted tokens + minAda to recipient
+        // 2. ADA-only UTxO for future collateral use
         TxBuilder(env)
             .spend(utxoToSpend)
             .collaterals(collateralUtxo)
@@ -64,7 +70,8 @@ object MintingHelper {
               assets = Map(assetName -> amount),
               script = mintingScript
             )
-            .payTo(recipientAddress, recipientValue)
+            .payTo(recipientAddress, recipientValue) // Tokens output
+            .payTo(recipientAddress, Value.lovelace(collateralAda)) // ADA-only for future collateral
             .changeTo(utxoToSpend.output.address)
             .build()
             .transaction

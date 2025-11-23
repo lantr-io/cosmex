@@ -15,6 +15,15 @@ import cats.Id // Import Id
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
 
+    // HTTP endpoint to get script hash (no WebSocket needed)
+    def scriptHashEndpoint(server: Server) =
+        endpoint.get
+            .in("script-hash")
+            .out(stringBody)
+            .handleSuccess { _ =>
+                server.script.scriptHash.toHex
+            }
+
     // WebSocket endpoint - text-based messages
     val wsEndpoint =
         endpoint.get
@@ -124,14 +133,17 @@ object CosmexWebSocketServer {
         println("COSMEX WebSocket Server")
         println("=" * 60)
         println(s"Listening on: ws://localhost:$port/ws")
+        println(s"Script hash endpoint: http://localhost:$port/script-hash")
         println("=" * 60)
 
         val wsServerEndpoint = wsLogic(server)
+        val scriptHashEp = scriptHashEndpoint(server)
 
         // Start server
         NettySyncServer()
             .port(port)
             .addEndpoint(wsServerEndpoint)
+            .addEndpoint(scriptHashEp)
             .start()
     }
 
@@ -143,12 +155,15 @@ object CosmexWebSocketServer {
       */
     def handleRequest(server: Server, request: ClientRequest): List[ClientResponse] = {
         val responses = request match {
+            case ClientRequest.AskScriptHash =>
+                List(ClientResponse.TellScriptHash(server.script.scriptHash.toHex))
+
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 // Validate the opening request
                 server.validateOpenChannelRequest(tx, snapshot) match {
                     case Left(error) =>
                         List(ClientResponse.Error(error))
-                    case Right(_) =>
+                    case Right(openChannelInfo) =>
                         // Extract client TxOutRef from first input
                         val firstInput = tx.body.value.inputs.toSeq.head
                         val clientTxOutRef = scalus.ledger.api.v3.TxOutRef(
@@ -159,15 +174,12 @@ object CosmexWebSocketServer {
                         // Sign the snapshot
                         val signedSnapshot = server.signSnapshot(clientTxOutRef, snapshot)
 
-                        // Store client state
-                        val channelRef = scalus.cardano.ledger.TransactionInput(tx.id, 0)
+                        // Store client state - use the actual channel ref from validation
+                        val channelRef = openChannelInfo.channelRef
                         val clientId = ClientId(channelRef)
 
-                        val actualDeposit = tx.body.value.outputs.view
-                            .find(_.value.address == server.CosmexScriptAddress)
-                            .get
-                            .value
-                            .value // TransactionOutput.value.value = Value
+                        // Use the deposit amount from validation result
+                        val actualDeposit = openChannelInfo.amount
 
                         // Create client state with PendingOpen status
                         val clientState = ClientState(

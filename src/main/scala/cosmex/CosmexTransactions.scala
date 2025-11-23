@@ -7,11 +7,18 @@ import scalus.cardano.txbuilder.*
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
-class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
+class CosmexTransactions(
+    val exchangeParams: ExchangeParams,
+    env: Environment,
+    scriptHashOverride: Option[ScriptHash] = None
+) {
     private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
     val script = Script.PlutusV3(cosmexValidator.cborByteString)  // Public for debugging
+
+    // Use override if provided, otherwise use the computed script hash
+    private val effectiveScriptHash = scriptHashOverride.getOrElse(script.scriptHash)
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
       *
@@ -44,7 +51,7 @@ class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
         depositAmount: Value
     ): Transaction = {
         // The script address where funds will be locked
-        val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+        val scriptAddress = Address(network, Credential.ScriptHash(effectiveScriptHash))
 
         // Create the initial OnChainState with OpenState
         // The clientTxOutRef is the input being spent, which uniquely identifies this channel
