@@ -19,6 +19,7 @@ class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
       *   - Spends the client's input UTxO
       *   - Creates an output to the Cosmex script with OpenState
       *   - Uses the client's input as the unique channel identifier (clientTxOutRef)
+      *   - If input contains tokens, explicitly sends them back as change
       *
       * Protocol flow (from whitepaper):
       *   1. Client creates unsigned Tx with initial deposit and ClientSignedSnapshot v0 2. Exchange
@@ -54,12 +55,43 @@ class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
           channelState = OnChainChannelState.OpenState
         )
 
-        TxBuilder(env)
-            .spend(clientInput)
-            .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
-            .changeTo(clientInput.output.address)
-            .build()
-            .transaction
+        // Check if input contains tokens (multi-assets) by comparing to ADA-only value
+        val inputValue = clientInput.output.value
+        val hasTokens = inputValue != Value.lovelace(inputValue.coin.value)
+
+        if (hasTokens) {
+            // If input has tokens, we need to explicitly handle them
+            // Calculate what remains after deposit (tokens should be preserved)
+            val remainingValue = inputValue - depositAmount
+
+            // If there's remaining value (tokens + ADA), send it back explicitly
+            // Then use changeTo to set the diff handler for fee calculation
+            if (remainingValue.coin.value > 0 || remainingValue != Value.lovelace(remainingValue.coin.value)) {
+                TxBuilder(env)
+                    .spend(clientInput)
+                    .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+                    .payTo(address = clientInput.output.address, value = remainingValue)
+                    .changeTo(clientInput.output.address)  // Sets diff handler for fee calculation
+                    .build()
+                    .transaction
+            } else {
+                // All value deposited, just need diff handler for fees
+                TxBuilder(env)
+                    .spend(clientInput)
+                    .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+                    .changeTo(clientInput.output.address)
+                    .build()
+                    .transaction
+            }
+        } else {
+            // No tokens - use standard changeTo
+            TxBuilder(env)
+                .spend(clientInput)
+                .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+                .changeTo(clientInput.output.address)
+                .build()
+                .transaction
+        }
     }
 
     def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {

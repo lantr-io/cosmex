@@ -4,7 +4,7 @@ import com.bloxbean.cardano.client.api.UtxoSupplier
 import com.bloxbean.cardano.client.backend.api.BackendService
 import com.bloxbean.cardano.yaci.test.{YaciCardanoContainer, Funding}
 import cosmex.util.TransactionStatusProvider
-import scalus.cardano.ledger.{Coin, Transaction, Utxo, ProtocolParams, TransactionHash, DatumOption, TransactionInput, Utxos, TransactionOutput, Value}
+import scalus.cardano.ledger.{Coin, Transaction, Utxo, ProtocolParams, TransactionHash, DatumOption, TransactionInput, Utxos, TransactionOutput, Value, ScriptHash, AssetName}
 import scalus.cardano.address.Address
 import scalus.builtin.ByteString
 
@@ -148,7 +148,7 @@ class YaciTestcontainerProvider private (
   ): Either[RuntimeException, Utxos] = {
     import scala.math.BigInt.javaBigInteger2bigInt
     import scalus.cardano.address.{ShelleyAddress, StakeAddress}
-    
+
     Try {
       // Query all UTxOs for address
       val addressBech32 = address match {
@@ -156,8 +156,16 @@ class YaciTestcontainerProvider private (
         case sta: StakeAddress => sta.toBech32.get
         case other => throw new RuntimeException(s"Unsupported address type: ${other.getClass}")
       }
+
+      println(s"[YaciProvider] Querying UTxOs for address: $addressBech32")
       val bloxbeanUtxos = utxoSupplier.getAll(addressBech32).asScala.toSeq
-      
+      println(s"[YaciProvider] Found ${bloxbeanUtxos.size} UTxOs at address")
+
+      bloxbeanUtxos.foreach { utxo =>
+        val lovelace = utxo.getAmount.asScala.headOption.map(amt => BigInt(amt.getQuantity).toLong).getOrElse(0L)
+        println(s"[YaciProvider]   ${utxo.getTxHash.take(16)}#${utxo.getOutputIndex} = $lovelace lovelace")
+      }
+
       // Filter by criteria
       val filtered = bloxbeanUtxos
         .filter { utxo =>
@@ -166,7 +174,9 @@ class YaciTestcontainerProvider private (
         .filter { utxo =>
           minAmount.forall(min => utxo.getAmount.asScala.headOption.exists(amt => BigInt(amt.getQuantity).toLong >= min.value))
         }
-      
+
+      println(s"[YaciProvider] After filtering: ${filtered.size} UTxOs match criteria")
+
       // Convert to Scalus UTxOs
       val utxos = filtered.map { bloxbeanUtxo =>
         val txHash = bloxbeanUtxo.getTxHash
@@ -197,24 +207,41 @@ class YaciTestcontainerProvider private (
       outputIndex: Long
   ): Utxo = {
     import scala.math.BigInt.javaBigInteger2bigInt
-    
+    import scalus.builtin.ByteString
+
     val txHash = TransactionHash.fromHex(txHashHex)
     val input = TransactionInput(txHash, outputIndex.toInt)
-    
+
     // Parse address
     val address = Try(Address.fromBech32(bloxbeanUtxo.getAddress)).getOrElse(
       throw new RuntimeException(s"Invalid address: ${bloxbeanUtxo.getAddress}")
     )
-    
-    // Parse value (ADA lovelace amount)
-    val lovelace = bloxbeanUtxo.getAmount.asScala.headOption
+
+    // Parse value (ADA + all multi-assets)
+    val amounts = bloxbeanUtxo.getAmount.asScala.toSeq
+
+    // First amount is always ADA
+    val lovelace = amounts.headOption
       .map(amt => BigInt(amt.getQuantity).toLong)
       .getOrElse(0L)
-    
-    val value = Value.lovelace(lovelace)
-    
+
+    // Start with ADA value
+    var value = Value.lovelace(lovelace)
+
+    // Add any multi-assets (tokens)
+    amounts.tail.foreach { amt =>
+      val policyIdHex = amt.getUnit.take(56)  // First 56 chars = policy ID
+      val assetNameHex = amt.getUnit.drop(56)  // Rest = asset name
+      val quantity = BigInt(amt.getQuantity).toLong
+
+      val policyId = ScriptHash.fromHex(policyIdHex)
+      val assetName = AssetName(if (assetNameHex.isEmpty) ByteString.empty else ByteString.fromHex(assetNameHex))
+
+      value = value + Value.asset(policyId, assetName, quantity)
+    }
+
     val output = TransactionOutput(address, value)
-    
+
     Utxo(input, output)
   }
 
@@ -242,15 +269,42 @@ class YaciTestcontainerProvider private (
     Left(new RuntimeException("getCurrentSlot() not yet implemented"))
   }
 
-  /** Get protocol parameters
+  /** Get protocol parameters from yaci-devkit
     *
-    * TODO: Implement using Yaci API
+    * Uses BackendService to fetch current protocol parameters, then converts to JSON
+    * for Scalus's fromBlockfrostJson parser
     */
   def getProtocolParams(): Either[RuntimeException, ProtocolParams] = {
-    // TODO: Query protocol params from Yaci
-    // TODO: Convert to Scalus ProtocolParams format
+    import com.fasterxml.jackson.databind.ObjectMapper
 
-    Left(new RuntimeException("getProtocolParams() not yet implemented"))
+    Try {
+      println(s"[YaciProvider] Fetching protocol parameters using BackendService...")
+
+      // Use BackendService (similar to how submit() uses it)
+      val epochService = backendService.getEpochService
+      val result = epochService.getProtocolParameters()
+
+      println(s"[YaciProvider] Protocol params result - isSuccessful: ${result.isSuccessful}")
+
+      if (result.isSuccessful) {
+        val params = result.getValue
+        println(s"[YaciProvider] Successfully fetched protocol parameters")
+
+        // Convert Bloxbean ProtocolParams object to JSON
+        val objectMapper = new ObjectMapper()
+        val jsonString = objectMapper.writeValueAsString(params)
+
+        println(s"[YaciProvider] Converted to JSON, parsing with Scalus...")
+
+        // Use Scalus's fromBlockfrostJson to parse
+        ProtocolParams.fromBlockfrostJson(jsonString)
+      } else {
+        throw new RuntimeException(s"Failed to fetch protocol parameters: ${result.getResponse}")
+      }
+    }.toEither.left.map {
+      case e: RuntimeException => e
+      case e: Throwable => new RuntimeException(s"Failed to get protocol parameters: ${e.getMessage}", e)
+    }
   }
 
   /** Stop the testcontainer and cleanup resources */

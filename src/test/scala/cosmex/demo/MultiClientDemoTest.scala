@@ -32,9 +32,6 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
             // Load configuration
             val config = DemoConfig.load()
 
-            // Setup
-            val cardanoInfo = CardanoInfoTestNet.testnet
-
             // Create exchange
             val exchangeParams = config.exchange.createParams()
             val exchangePrivKey = config.exchange.getPrivateKey()
@@ -48,8 +45,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
               Credential.KeyHash(AddrKeyHash.fromByteString(alicePubKeyHash))
             )
             val aliceInitialValue = config.alice.getInitialValue()
-            
-            // Create Bob's address  
+
+            // Create Bob's address
             val bobAccount = config.bob.createAccount()
             val bobPubKey = config.bob.getPubKey()
             val bobPubKeyHash = config.bob.getPubKeyHash()
@@ -58,7 +55,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
               Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
             )
             val bobInitialValue = config.bob.getInitialValue()
-            
+
             // Create blockchain provider from configuration
             val provider = config.blockchain.provider.toLowerCase match {
               case "mock" =>
@@ -112,6 +109,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 throw new IllegalArgumentException(s"Unsupported provider for test: $other")
             }
 
+            // Create CardanoInfo with protocol parameters from provider
+            // This is essential for Plutus script transactions (minting policies)
+            val cardanoInfo = CardanoInfoTestNet.currentNetwork(provider)
+
             // Create server
             val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
@@ -151,7 +152,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     mintToken: Boolean = false,
                     tokenName: String = "BOBTOKEN",
                     tokenAmount: Long = 1000000L,
-                    customPair: Option[Pair] = None
+                    customPair: Option[Pair] = None,
+                    txIdFilter: Option[TransactionHash] = None
                 ): (Unit, Option[ByteString]) = {
                     var client: SimpleWebSocketClient = null // Declare client outside try block
                     var mintedPolicyId: Option[ByteString] = None
@@ -173,12 +175,18 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             // For Yaci DevKit, query the provider for funded UTxOs
                             import scalus.cardano.address.ShelleyAddress
                             val addressBech32 = address.asInstanceOf[ShelleyAddress].toBech32.get
-                            println(s"[$name] Querying provider for UTxOs at address: $addressBech32...")
+
+                            txIdFilter match {
+                              case Some(txId) =>
+                                println(s"[$name] Querying for specific TX output: ${txId.toHex.take(16)}...")
+                              case None =>
+                                println(s"[$name] Querying provider for UTxOs at address: $addressBech32...")
+                            }
 
                             // First try to find all UTxOs at the address for debugging
                             provider.findUtxos(
                               address = address,
-                              transactionId = None,
+                              transactionId = txIdFilter,
                               datum = None,
                               minAmount = None,
                               minRequiredTotalAmount = None
@@ -187,18 +195,21 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                 println(s"[$name] Found ${utxos.size} UTxOs at address")
                                 utxos.foreach { case (input, output) =>
                                   println(s"[$name]   UTxO: ${input.transactionId.toHex.take(16)}#${input.index} = ${output.value.coin.value} lovelace")
-                                  println(s"[$name]   UTxO address: ${output.address}")
+                                  val hasTokens = output.value != Value.lovelace(output.value.coin.value)
+                                  if (hasTokens) {
+                                    println(s"[$name]   Tokens: ${output.value}")
+                                  }
                                 }
                               case Left(err) =>
                                 println(s"[$name] Could not query UTxOs: ${err.getMessage}")
                             }
 
-                            // Now find a suitable UTxO
+                            // Find UTxO - filter by txId if provided
                             provider.findUtxo(
                               address = address,
-                              transactionId = None,
+                              transactionId = txIdFilter,
                               datum = None,
-                              minAmount = Some(Coin(initialValue.coin.value + 100_000_000L))
+                              minAmount = Some(Coin(2_000_000L))  // Just need minimum UTxO size (~2 ADA)
                             ) match {
                               case Right(foundUtxo) =>
                                 println(s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}")
@@ -464,6 +475,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 )
 
                 // Step 1: Bob mints tokens (if enabled) - before any channel opening
+                var bobMintTxId: Option[TransactionHash] = None
                 val bobMintedPolicyId: Option[ByteString] = if (bobMintingConfig.enabled) {
                     println("\n[Bob - Preliminary] Minting custom token before trading...")
 
@@ -536,6 +548,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     )
                     val policyId = MintingHelper.getPolicyId(utxoRef)
                     println(s"[Bob - Preliminary] ✓ Minted token policy ID: ${policyId.toHex}")
+                    println(s"[Bob - Preliminary] Minting tx ID: ${signedMintTx.id.toHex}")
+                    bobMintTxId = Some(signedMintTx.id)
                     Some(policyId)
                 } else {
                     None
@@ -565,7 +579,18 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 // Small delay to ensure order is in book
                 Thread.sleep(500)
 
-                // Step 4: Bob creates BUY order (no minting, already done)
+                // Step 4: Bob creates BUY order
+                // For Bob's scenario, we need to handle the minted tokens case
+                // by querying for the specific minting transaction output
+                val bobScenarioTxIdFilter = bobMintTxId match {
+                  case Some(mintTxId) =>
+                    println(s"\n[Test] Bob minted tokens - will query for minting TX: ${mintTxId.toHex.take(16)}...")
+                    Some(mintTxId)
+                  case None =>
+                    println(s"\n[Test] No minting - Bob will use regular funded UTxO")
+                    None
+                }
+
                 clientScenario(
                   "Bob",
                   bobAccount,
@@ -578,7 +603,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                   mintToken = false,  // Already minted
                   tokenName = bobMintingConfig.tokenName,
                   tokenAmount = bobMintingConfig.amount,
-                  customPair = aliceTradingPair
+                  customPair = aliceTradingPair,
+                  txIdFilter = bobScenarioTxIdFilter
                 )
 
                 // Verify trade execution
