@@ -52,13 +52,8 @@ object SimpleMintingPolicyContract {
       * @return The compiled Plutus script program with the UTxO applied
       */
     def compileAndApply(utxoRef: TxOutRef): scalus.uplc.Program = {
-        import scalus.show
         import scalus.uplc.{Program, Term}
         import scalus.uplc.Constant
-
-        println(s"[SimpleMintingPolicy] Compiling validator...")
-        println(s"[SimpleMintingPolicy] SIR:")
-        println(SimpleMintingPolicy.compiledValidator.show)
 
         // Get the UPLC Term (NOT the optimized Program)
         // This matches the pattern from MintingPolicyExampleTest.scala
@@ -66,24 +61,16 @@ object SimpleMintingPolicyContract {
           generateErrorTraces = true,
           optimizeUplc = false
         )
-        println(s"[SimpleMintingPolicy] UPLC validator term (before apply):")
-        println(validator.pretty.render(100))
 
         val utxoData = utxoRef.toData
-        println(s"[SimpleMintingPolicy] UTxO ref data: ${utxoData}")
 
         // Apply the parameter to the UPLC Term
         // We need to wrap Data in Term.Const manually
         val appliedValidator = Term.Apply(validator, Term.Const(Constant.Data(utxoData)))
-        println(s"[SimpleMintingPolicy] UPLC after apply:")
-        println(appliedValidator.pretty.render(100))
 
         // Create the final Program (PlutusV3 = version 1.1.0)
         // DeBruijn conversion will happen automatically during CBOR encoding
-        val finalProgram = Program((1, 1, 0), appliedValidator)
-        println(s"[SimpleMintingPolicy] Final Program created")
-
-        finalProgram
+        Program((1, 1, 0), appliedValidator)
     }
 
     /** INCORRECT: Compile and apply using the wrong pattern that triggers IndexOutOfBoundsException

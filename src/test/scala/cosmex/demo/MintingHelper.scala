@@ -13,6 +13,7 @@ object MintingHelper {
       *
       * @param env The transaction builder environment
       * @param utxoToSpend The UTxO to spend (also used as minting policy parameter)
+      * @param collateralUtxo The UTxO to use as collateral for script execution
       * @param recipientAddress The address to send the minted tokens to
       * @param tokenName The name of the token to mint
       * @param amount The amount of tokens to mint
@@ -21,6 +22,7 @@ object MintingHelper {
     def mintTokens(
         env: Environment,
         utxoToSpend: Utxo,
+        collateralUtxo: Utxo,
         recipientAddress: Address,
         tokenName: ByteString,
         amount: Long
@@ -46,9 +48,10 @@ object MintingHelper {
         val minAda = 2_000_000L // 2 ADA minimum for holding tokens
         val recipientValue = mintedValue + Value.lovelace(minAda)
 
-        // Build the transaction
+        // Build the transaction with collateral for Plutus script execution
         TxBuilder(env)
             .spend(utxoToSpend)
+            .collaterals(collateralUtxo)
             .mint(
               redeemer = scalus.builtin.Data.B(ByteString.empty), // Dummy redeemer
               assets = Map(assetName -> amount),

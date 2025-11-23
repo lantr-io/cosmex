@@ -222,6 +222,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             val mintTx = MintingHelper.mintTokens(
                               env = cardanoInfo,
                               utxoToSpend = depositUtxo,
+                              collateralUtxo = depositUtxo, // Use same UTxO as collateral
                               recipientAddress = address,
                               tokenName = ByteString.fromString(tokenName),
                               amount = tokenAmount
@@ -493,6 +494,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     val mintTx = MintingHelper.mintTokens(
                       env = cardanoInfo,
                       utxoToSpend = depositUtxo,
+                      collateralUtxo = depositUtxo, // Use same UTxO as collateral
                       recipientAddress = bobAddress,
                       tokenName = ByteString.fromString(bobMintingConfig.tokenName),
                       amount = bobMintingConfig.amount
