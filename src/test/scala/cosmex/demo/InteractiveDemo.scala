@@ -32,7 +32,7 @@ import scala.util.{Failure, Success, Try}
 object InteractiveDemo extends App {
 
     // Check if we should connect to an external server
-    val useExternalServer = args.contains("--external-server")
+    val useExternalServer = Option(args).exists(_.contains("--external-server"))
 
     println("""
         |================================================================
