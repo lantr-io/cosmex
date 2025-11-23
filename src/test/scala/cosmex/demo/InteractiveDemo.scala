@@ -514,34 +514,59 @@ object InteractiveDemo extends App {
                                 println(s"[Mint] ERROR: ${e.getMessage}")
                             }
 
+                        case Some("mint") =>
+                            println("[Mint] ERROR: Invalid syntax. Usage: mint <tokenName> <amount>")
+                            println("[Mint] Example: mint MYTOKEN 1000000")
+
                         case Some("connect") =>
-                            Try {
-                                connectToExchange(lastMintTxId)
-                            }.recover { case e: Exception =>
-                                println(s"[Connect] ERROR: ${e.getMessage}")
+                            if (isConnected) {
+                                println("[Connect] Already connected to the exchange!")
+                            } else {
+                                println("[Connect] Attempting to connect to the exchange...")
+                                Try {
+                                    connectToExchange(lastMintTxId)
+                                }.recover { case e: Exception =>
+                                    println(s"[Connect] ERROR: ${e.getMessage}")
+                                }
                             }
 
                         case Some("buy") if parts.length == 5 =>
-                            Try {
-                                val base = parts(1)
-                                val quote = parts(2)
-                                val amount = parts(3).toLong
-                                val price = parts(4).toLong
-                                createOrder("BUY", base, quote, amount, price)
-                            }.recover { case e: Exception =>
-                                println(s"[Buy] ERROR: ${e.getMessage}")
+                            if (!isConnected) {
+                                println("[Buy] ERROR: Not connected to exchange. Please use 'connect' first.")
+                            } else {
+                                Try {
+                                    val base = parts(1)
+                                    val quote = parts(2)
+                                    val amount = parts(3).toLong
+                                    val price = parts(4).toLong
+                                    createOrder("BUY", base, quote, amount, price)
+                                }.recover { case e: Exception =>
+                                    println(s"[Buy] ERROR: ${e.getMessage}")
+                                }
                             }
 
+                        case Some("buy") =>
+                            println("[Buy] ERROR: Invalid syntax. Usage: buy <base> <quote> <amount> <price>")
+                            println("[Buy] Example: buy ada usdm 100000000 500000")
+
                         case Some("sell") if parts.length == 5 =>
-                            Try {
-                                val base = parts(1)
-                                val quote = parts(2)
-                                val amount = parts(3).toLong
-                                val price = parts(4).toLong
-                                createOrder("SELL", base, quote, amount, price)
-                            }.recover { case e: Exception =>
-                                println(s"[Sell] ERROR: ${e.getMessage}")
+                            if (!isConnected) {
+                                println("[Sell] ERROR: Not connected to exchange. Please use 'connect' first.")
+                            } else {
+                                Try {
+                                    val base = parts(1)
+                                    val quote = parts(2)
+                                    val amount = parts(3).toLong
+                                    val price = parts(4).toLong
+                                    createOrder("SELL", base, quote, amount, price)
+                                }.recover { case e: Exception =>
+                                    println(s"[Sell] ERROR: ${e.getMessage}")
+                                }
                             }
+
+                        case Some("sell") =>
+                            println("[Sell] ERROR: Invalid syntax. Usage: sell <base> <quote> <amount> <price>")
+                            println("[Sell] Example: sell ada usdm 100000000 500000")
 
                         case Some("help") =>
                             println("\nAvailable commands:")
@@ -560,7 +585,7 @@ object InteractiveDemo extends App {
                             running = false
 
                         case Some(cmd) =>
-                            println(s"Unknown command: $cmd. Type 'help' for available commands.")
+                            println(s"Unknown command: '$cmd'. Type 'help' for available commands.")
 
                         case None =>
                         // Empty input, continue
