@@ -4,7 +4,7 @@ import com.bloxbean.cardano.client.account.Account
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Server}
+import cosmex.{ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Pair, Server}
 import cosmex.CardanoInfoTestNet
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -147,9 +147,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     address: Address,
                     initialValue: Value,
                     orderConfig: DemoConfig#OrderConfig,
-                    clientIndex: Int
-                ): Unit = {
+                    clientIndex: Int,
+                    mintToken: Boolean = false,
+                    tokenName: String = "BOBTOKEN",
+                    tokenAmount: Long = 1000000L,
+                    customPair: Option[Pair] = None
+                ): (Unit, Option[ByteString]) = {
                     var client: SimpleWebSocketClient = null // Declare client outside try block
+                    var mintedPolicyId: Option[ByteString] = None
 
                     try {
                         println(s"\n[$name] Starting scenario...")
@@ -206,19 +211,97 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             fail(s"Unsupported provider: $other")
                         }
 
-                        // Use txbuilder to create a valid openChannelTx
-                        // For yaci-devkit, only deposit ADA (no multiassets available in funded UTxOs)
-                        val depositAmount = config.blockchain.provider.toLowerCase match {
-                          case "yaci-devkit" | "yaci" =>
-                            Value.lovelace(initialValue.coin.value)
-                          case _ =>
-                            initialValue
+                        // Optional token minting step for Bob
+                        val (finalDepositUtxo, finalDepositAmount) = if (mintToken) {
+                            println(s"[$name] Minting custom token: $tokenName (amount: $tokenAmount)...")
+
+                            // Import minting helper
+                            import cosmex.demo.MintingHelper
+
+                            // Create minting transaction
+                            val mintTx = MintingHelper.mintTokens(
+                              env = cardanoInfo,
+                              utxoToSpend = depositUtxo,
+                              recipientAddress = address,
+                              tokenName = ByteString.fromString(tokenName),
+                              amount = tokenAmount
+                            )
+
+                            // Sign the minting transaction
+                            println(s"[$name] Signing minting transaction...")
+                            import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                            import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                            import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                            val hdKeyPair = account.hdKeyPair()
+                            val txBytes = TransactionBytes(mintTx.toCbor)
+                            val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+
+                            val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                            val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+
+                            val witness = VKeyWitness(
+                              signature = ByteString.fromArray(signature),
+                              vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                            )
+
+                            val witnessSet = mintTx.witnessSet.copy(
+                              vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                            )
+                            val signedMintTx = mintTx.copy(witnessSet = witnessSet)
+
+                            // Submit the minting transaction
+                            println(s"[$name] Submitting minting transaction...")
+                            provider.submit(signedMintTx) match {
+                              case Right(_) =>
+                                println(s"[$name] ✓ Minting transaction submitted: ${signedMintTx.id.toHex.take(16)}...")
+                              case Left(error) =>
+                                fail(s"[$name] Failed to submit minting transaction: ${error.getMessage}")
+                            }
+
+                            // Wait for confirmation (especially important for yaci-devkit)
+                            println(s"[$name] Waiting for minting transaction confirmation...")
+                            Thread.sleep(config.blockchain.provider.toLowerCase match {
+                              case "yaci-devkit" | "yaci" => 20000 // 20 seconds for yaci
+                              case _ => 2000 // 2 seconds for mock
+                            })
+
+                            // Find the newly minted tokens
+                            println(s"[$name] Looking for minted tokens...")
+                            val mintedUtxo = provider.findUtxo(
+                              address = address,
+                              transactionId = Some(signedMintTx.id),
+                              datum = None,
+                              minAmount = None
+                            ) match {
+                              case Right(utxo) =>
+                                println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
+                                utxo
+                              case Left(err) =>
+                                fail(s"[$name] Failed to find minted tokens: ${err.getMessage}")
+                            }
+
+                            // Calculate deposit amount including minted tokens
+                            val mintedTokenValue = mintedUtxo.output.value
+                            println(s"[$name] Using minted tokens for channel deposit: ${mintedTokenValue}")
+
+                            (mintedUtxo, mintedTokenValue)
+                        } else {
+                            // No minting - use original UTxO and amount
+                            // For yaci-devkit, only deposit ADA (no multiassets available in funded UTxOs)
+                            val depositAmount = config.blockchain.provider.toLowerCase match {
+                              case "yaci-devkit" | "yaci" =>
+                                Value.lovelace(initialValue.coin.value)
+                              case _ =>
+                                initialValue
+                            }
+                            (depositUtxo, depositAmount)
                         }
 
                         val unsignedTx = txbuilder.openChannel(
-                          clientInput = depositUtxo,
+                          clientInput = finalDepositUtxo,
                           clientPubKey = pubKey,
-                          depositAmount = depositAmount
+                          depositAmount = finalDepositAmount
                         )
 
                         // Sign the transaction using Bloxbean's signExtended (yaci-devkit compatible)
@@ -257,8 +340,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
 
-                        // Create and sign initial snapshot (must match depositAmount)
-                        val initialSnapshot = mkInitialSnapshot(depositAmount)
+                        // Create and sign initial snapshot (must match finalDepositAmount)
+                        val initialSnapshot = mkInitialSnapshot(finalDepositAmount)
                         val clientSignedSnapshot =
                             mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 
@@ -291,9 +374,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                     case ClientResponse.ChannelOpened(signedSnapshot) =>
                                         println(s"[$name] ✓ Channel opened!")
 
-                                        // Create order
+                                        // Create order (use customPair if provided)
+                                        val orderPair = customPair.getOrElse(orderConfig.getPair())
                                         val order = LimitOrder(
-                                          orderPair = orderConfig.getPair(),
+                                          orderPair = orderPair,
                                           orderAmount = orderConfig.getSignedAmount(),
                                           orderPrice = orderConfig.price
                                         )
@@ -359,6 +443,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             println(s"[$name] Disconnected")
                         }
                     }
+
+                    ((), mintedPolicyId)
                 }
 
                 // Run Alice and Bob scenarios sequentially (for deterministic testing)
@@ -371,7 +457,97 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 val aliceOrderConfig = config.alice.defaultOrder.get
                 val bobOrderConfig = config.bob.defaultOrder.get
 
-                // Alice creates SELL order first
+                // Check if token minting is enabled for Bob
+                val bobMintingConfig = config.bob.minting.getOrElse(
+                  config.MintingConfig(enabled = false, tokenName = "BOBTOKEN", amount = 1000000L)
+                )
+
+                // Step 1: Bob mints tokens (if enabled) - before any channel opening
+                val bobMintedPolicyId: Option[ByteString] = if (bobMintingConfig.enabled) {
+                    println("\n[Bob - Preliminary] Minting custom token before trading...")
+
+                    val depositUtxo = config.blockchain.provider.toLowerCase match {
+                        case "yaci-devkit" | "yaci" =>
+                            import scalus.cardano.address.ShelleyAddress
+                            val addressBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
+
+                            provider.findUtxo(
+                              address = bobAddress,
+                              transactionId = None,
+                              datum = None,
+                              minAmount = Some(Coin(bobInitialValue.coin.value + 100_000_000L))
+                            ) match {
+                              case Right(utxo) => utxo
+                              case Left(err) => fail(s"[Bob - Preliminary] Failed to find UTxO: ${err.getMessage}")
+                            }
+                        case "mock" =>
+                            val genesisInput = TransactionInput(genesisHash, 1)
+                            Utxo(
+                              input = genesisInput,
+                              output = TransactionOutput(address = bobAddress, value = bobInitialValue + Value.lovelace(100_000_000L))
+                            )
+                        case other => fail(s"Unsupported provider: $other")
+                    }
+
+                    import cosmex.demo.MintingHelper
+                    val mintTx = MintingHelper.mintTokens(
+                      env = cardanoInfo,
+                      utxoToSpend = depositUtxo,
+                      recipientAddress = bobAddress,
+                      tokenName = ByteString.fromString(bobMintingConfig.tokenName),
+                      amount = bobMintingConfig.amount
+                    )
+
+                    // Sign and submit minting transaction
+                    import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                    import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                    import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                    val hdKeyPair = bobAccount.hdKeyPair()
+                    val txBytes = TransactionBytes(mintTx.toCbor)
+                    val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+                    val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                    val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+
+                    val witness = VKeyWitness(
+                      signature = ByteString.fromArray(signature),
+                      vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                    )
+                    val witnessSet = mintTx.witnessSet.copy(
+                      vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                    )
+                    val signedMintTx = mintTx.copy(witnessSet = witnessSet)
+
+                    import cosmex.util.submitAndWait
+
+                    provider.submitAndWait(signedMintTx, maxAttempts = 60, delayMs = 1000) match {
+                      case Right(_) =>
+                        println(s"[Bob - Preliminary] ✓ Minting transaction confirmed: ${signedMintTx.id.toHex.take(16)}...")
+                      case Left(error) =>
+                        fail(s"[Bob - Preliminary] Failed to submit or confirm minting transaction: ${error.getMessage}")
+                    }
+
+                    // Calculate policy ID
+                    val utxoRef = scalus.ledger.api.v3.TxOutRef(
+                      scalus.ledger.api.v3.TxId(depositUtxo.input.transactionId),
+                      depositUtxo.input.index
+                    )
+                    val policyId = MintingHelper.getPolicyId(utxoRef)
+                    println(s"[Bob - Preliminary] ✓ Minted token policy ID: ${policyId.toHex}")
+                    Some(policyId)
+                } else {
+                    None
+                }
+
+                // Step 2: Determine Alice's trading pair (use Bob's token if minted)
+                val aliceTradingPair = bobMintedPolicyId.map { policyId =>
+                    val bobTokenAsset = (policyId, ByteString.fromString(bobMintingConfig.tokenName))
+                    val adaAsset = (ByteString.empty, ByteString.empty)
+                    println(s"[Alice] Will trade ADA for Bob's token: ${policyId.toHex}")
+                    (adaAsset, bobTokenAsset) // ADA/BOBTOKEN pair
+                }
+
+                // Step 3: Alice creates SELL order first
                 clientScenario(
                   "Alice",
                   aliceAccount,
@@ -380,13 +556,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                   aliceAddress,
                   aliceInitialValue,
                   aliceOrderConfig,
-                  clientIndex = 0
+                  clientIndex = 0,
+                  customPair = aliceTradingPair
                 )
 
                 // Small delay to ensure order is in book
                 Thread.sleep(500)
 
-                // Bob creates BUY order - should match Alice's SELL
+                // Step 4: Bob creates BUY order (no minting, already done)
                 clientScenario(
                   "Bob",
                   bobAccount,
@@ -395,7 +572,11 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                   bobAddress,
                   bobInitialValue,
                   bobOrderConfig,
-                  clientIndex = 1
+                  clientIndex = 1,
+                  mintToken = false,  // Already minted
+                  tokenName = bobMintingConfig.tokenName,
+                  tokenAmount = bobMintingConfig.amount,
+                  customPair = aliceTradingPair
                 )
 
                 // Verify trade execution

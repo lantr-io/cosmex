@@ -291,6 +291,12 @@ case class DemoConfig(config: Config) {
     }
   }
 
+  case class MintingConfig(
+      enabled: Boolean,
+      tokenName: String,
+      amount: Long
+  )
+
   object bob extends ClientConfig {
     val name = "Bob"
     val seed: Int = config.getInt("bob.seed")
@@ -319,6 +325,18 @@ case class DemoConfig(config: Config) {
             quoteAsset = config.getString("bob.trading.defaultOrder.quoteAsset"),
             amount = config.getLong("bob.trading.defaultOrder.amount"),
             price = config.getLong("bob.trading.defaultOrder.price")
+          )
+        )
+      } else None
+    }
+
+    val minting: Option[MintingConfig] = {
+      if (config.hasPath("bob.minting")) {
+        Some(
+          MintingConfig(
+            enabled = config.getBoolean("bob.minting.enabled"),
+            tokenName = config.getString("bob.minting.tokenName"),
+            amount = config.getLong("bob.minting.amount")
           )
         )
       } else None
