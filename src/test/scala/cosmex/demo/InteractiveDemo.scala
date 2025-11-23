@@ -247,25 +247,44 @@ object InteractiveDemo {
 
                         println(s"[$partyName] Looking for UTxO at address: $addressBech32")
 
-                        provider.findUtxo(
-                          address = clientAddress,
-                          transactionId = txIdFilter,
-                          datum = None,
-                          minAmount = Some(Coin(2_000_000L))
-                        ) match {
-                            case Right(utxo) =>
-                                println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
-                                utxo
-                            case Left(err) =>
+                        try {
+                            provider.findUtxo(
+                              address = clientAddress,
+                              transactionId = txIdFilter,
+                              datum = None,
+                              minAmount = Some(Coin(2_000_000L))
+                            ) match {
+                                case Right(utxo) =>
+                                    println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
+                                    utxo
+                                case Left(err) =>
+                                    println(s"\n[$partyName] ✗ ERROR: Could not find funded UTxO")
+                                    println(s"[$partyName] Wallet address: $addressBech32")
+                                    println(s"[$partyName] Error: ${err.getMessage}")
+                                    println(s"\n[$partyName] Please fund this wallet from the faucet:")
+                                    println(s"[$partyName]   1. Visit: https://docs.cardano.org/cardano-testnet/tools/faucet/")
+                                    println(s"[$partyName]   2. Request at least 100 ADA for: $addressBech32")
+                                    println(s"[$partyName]   3. Wait for confirmation (1-2 minutes)")
+                                    println(s"[$partyName]   4. Verify at: https://preprod.cardanoscan.io/address/$addressBech32")
+                                    throw DemoException("WALLET_NOT_FUNDED", "Wallet not funded", alreadyPrinted = true)
+                            }
+                        } catch {
+                            case e: DemoException =>
+                                // Re-throw our own exceptions
+                                throw e
+                            case e: Exception if e.getMessage.contains("404") || e.getMessage.contains("Not Found") =>
+                                // 404 from Blockfrost means wallet has no UTxOs (not funded)
                                 println(s"\n[$partyName] ✗ ERROR: Could not find funded UTxO")
                                 println(s"[$partyName] Wallet address: $addressBech32")
-                                println(s"[$partyName] Error: ${err.getMessage}")
                                 println(s"\n[$partyName] Please fund this wallet from the faucet:")
                                 println(s"[$partyName]   1. Visit: https://docs.cardano.org/cardano-testnet/tools/faucet/")
                                 println(s"[$partyName]   2. Request at least 100 ADA for: $addressBech32")
                                 println(s"[$partyName]   3. Wait for confirmation (1-2 minutes)")
                                 println(s"[$partyName]   4. Verify at: https://preprod.cardanoscan.io/address/$addressBech32")
                                 throw DemoException("WALLET_NOT_FUNDED", "Wallet not funded", alreadyPrinted = true)
+                            case e: Exception =>
+                                // Other errors - re-throw to show stack trace
+                                throw e
                         }
 
                     case other =>
