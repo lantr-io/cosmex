@@ -371,9 +371,15 @@ object InteractiveDemo {
                 val depositUtxo = findClientUtxo(utxoFilter)
                 println(s"[DEBUG] findClientUtxo returned successfully")
                 System.out.flush()
-                val depositAmount = depositUtxo.output.value
 
-                println(s"[Connect] Depositing: ${depositAmount.coin.value / 1_000_000} ADA")
+                // Reserve some ADA for transaction fees (~0.2 ADA should be plenty)
+                val feeReserve = 200_000L // 0.2 ADA in lovelace
+                val totalAvailable = depositUtxo.output.value.coin.value
+                val depositAmountLovelace = totalAvailable - feeReserve
+                // Keep all tokens but reduce ADA for fees
+                val depositAmount = depositUtxo.output.value.copy(coin = Coin(depositAmountLovelace))
+
+                println(s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA (reserving ${feeReserve / 1_000_000.0} ADA for fees)")
 
                 val unsignedTx = txbuilder.openChannel(
                   clientInput = depositUtxo,
