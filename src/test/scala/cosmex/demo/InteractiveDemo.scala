@@ -192,15 +192,30 @@ object InteractiveDemo extends App {
                         )
 
                     case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
+                        import scalus.cardano.address.ShelleyAddress
+                        val addressBech32 = clientAddress.asInstanceOf[ShelleyAddress].toBech32.get
+
+                        println(s"[$partyName] Looking for UTxO at address: $addressBech32")
+
                         provider.findUtxo(
                           address = clientAddress,
                           transactionId = txIdFilter,
                           datum = None,
                           minAmount = Some(Coin(2_000_000L))
                         ) match {
-                            case Right(utxo) => utxo
+                            case Right(utxo) =>
+                                println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
+                                utxo
                             case Left(err) =>
-                                throw new Exception(s"Failed to find UTxO: ${err.getMessage}")
+                                println(s"\n[$partyName] ✗ ERROR: Could not find funded UTxO")
+                                println(s"[$partyName] Wallet address: $addressBech32")
+                                println(s"[$partyName] Error: ${err.getMessage}")
+                                println(s"\n[$partyName] Please fund this wallet from the faucet:")
+                                println(s"[$partyName]   1. Visit: https://docs.cardano.org/cardano-testnet/tools/faucet/")
+                                println(s"[$partyName]   2. Request at least 100 ADA for: $addressBech32")
+                                println(s"[$partyName]   3. Wait for confirmation (1-2 minutes)")
+                                println(s"[$partyName]   4. Verify at: https://preprod.cardanoscan.io/address/$addressBech32")
+                                throw new Exception(s"Wallet not funded. Please fund $addressBech32 from the faucet.")
                         }
 
                     case other =>
