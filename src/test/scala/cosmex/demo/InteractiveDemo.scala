@@ -81,8 +81,13 @@ object InteractiveDemo extends App {
     println(s"\n✓ You are now playing as $partyName")
     println(s"  Initial balance: ${clientConfig.initialBalance.mkString(", ")}")
 
+    println("\n[DEBUG] About to enter supervised block...")
+    System.out.flush()
+
     // Set up the environment
     supervised {
+        println("[DEBUG] Inside supervised block, starting initialization...")
+        System.out.flush()
         var serverBinding: NettySyncServerBinding = null
         var client: SimpleWebSocketClient = null
         var clientId: Option[ClientId] = None
@@ -513,9 +518,15 @@ object InteractiveDemo extends App {
             var running = true
             var lastMintTxId: Option[TransactionHash] = None
 
+            println("[DEBUG] Entering command loop")
+            System.out.flush()
+
             while running do {
                 print(s"$partyName> ")
+                System.out.flush()
                 val input = StdIn.readLine()
+                println(s"[DEBUG] Raw input received: '$input'")
+                System.out.flush()
 
                 if input == null then {
                     running = false
