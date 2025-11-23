@@ -1,16 +1,16 @@
 # COSMEX Preprod Demo Guide
 
-This guide explains how to run the COSMEX demo (Alice and Bob trading) on the Cardano Preprod testnet using three separate terminal windows.
+This guide explains how to run the COSMEX demo on the Cardano Preprod testnet using the Blockfrost API.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [Blockfrost Setup](#blockfrost-setup)
 - [Wallet Setup](#wallet-setup)
 - [Funding Wallets](#funding-wallets)
 - [Configuration](#configuration)
 - [Running the Demo](#running-the-demo)
 - [Troubleshooting](#troubleshooting)
-- [Cleanup](#cleanup)
 
 ---
 
@@ -26,164 +26,91 @@ This guide explains how to run the COSMEX demo (Alice and Bob trading) on the Ca
 
 2. **SBT** (Scala Build Tool)
    ```bash
-   sbtn --version
+   sbt --version
    ```
 
-3. **cardano-cli** (for wallet creation and transaction signing)
-   ```bash
-   cardano-cli --version
-   # Version 8.0.0 or higher recommended
-   ```
-
-4. **Access to Cardano Preprod Network**
-   - Public Preprod RPC endpoints available
-   - Or run your own Preprod node
+3. **Blockfrost Account**
+   - Sign up at https://blockfrost.io
+   - Create a Preprod project to get your API key
 
 ### Network Information
 
 - **Network**: Preprod Testnet
 - **Network Magic**: 1
 - **Faucet**: https://docs.cardano.org/cardano-testnet/tools/faucet/
+- **Blockfrost API**: https://cardano-preprod.blockfrost.io/api/v0
+
+---
+
+## Blockfrost Setup
+
+### 1. Create Blockfrost Account
+
+1. Visit https://blockfrost.io and sign up
+2. Create a new project and select **Preprod** network
+3. Copy your Project ID (API key)
+
+### 2. Set Environment Variable
+
+```bash
+export BLOCKFROST_PROJECT_ID=your_preprod_project_id_here
+```
+
+Add this to your `~/.bashrc` or `~/.zshrc` to make it permanent:
+
+```bash
+echo 'export BLOCKFROST_PROJECT_ID=your_preprod_project_id_here' >> ~/.bashrc
+source ~/.bashrc
+```
 
 ---
 
 ## Wallet Setup
 
-### 1. Create Wallet Directories
+The demo uses seed-based or mnemonic-based wallet generation, so no manual wallet creation is needed. Wallets are automatically generated from configuration.
 
-```bash
-mkdir -p wallets/{alice,bob,exchange}
-cd wallets
-```
+### Wallet Configuration
 
-### 2. Generate Exchange Wallet
+Wallets are configured in `src/test/resources/application.conf`:
 
-```bash
-# Generate payment key pair
-cardano-cli address key-gen \
-    --verification-key-file exchange/payment.vkey \
-    --signing-key-file exchange/payment.skey
+- **Alice**: Uses seed or mnemonic phrase (configurable)
+- **Bob**: Uses seed or mnemonic phrase (configurable)
+- **Exchange**: Uses seed-based generation
 
-# Generate stake key pair (optional for demo)
-cardano-cli stake-address key-gen \
-    --verification-key-file exchange/stake.vkey \
-    --signing-key-file exchange/stake.skey
-
-# Generate payment address
-cardano-cli address build \
-    --payment-verification-key-file exchange/payment.vkey \
-    --stake-verification-key-file exchange/stake.vkey \
-    --out-file exchange/payment.addr \
-    --testnet-magic 1
-
-# Display address
-cat exchange/payment.addr
-```
-
-### 3. Generate Alice's Wallet
-
-```bash
-cardano-cli address key-gen \
-    --verification-key-file alice/payment.vkey \
-    --signing-key-file alice/payment.skey
-
-cardano-cli stake-address key-gen \
-    --verification-key-file alice/stake.vkey \
-    --signing-key-file alice/stake.skey
-
-cardano-cli address build \
-    --payment-verification-key-file alice/payment.vkey \
-    --stake-verification-key-file alice/stake.vkey \
-    --out-file alice/payment.addr \
-    --testnet-magic 1
-
-cat alice/payment.addr
-```
-
-### 4. Generate Bob's Wallet
-
-```bash
-cardano-cli address key-gen \
-    --verification-key-file bob/payment.vkey \
-    --signing-key-file bob/payment.skey
-
-cardano-cli stake-address key-gen \
-    --verification-key-file bob/stake.vkey \
-    --signing-key-file bob/stake.skey
-
-cardano-cli address build \
-    --payment-verification-key-file bob/payment.vkey \
-    --stake-verification-key-file bob/stake.vkey \
-    --out-file bob/payment.addr \
-    --testnet-magic 1
-
-cat bob/payment.addr
-```
-
-### 5. Extract Public Key Hashes
-
-For configuration, you'll need the public key hashes:
-
-```bash
-# Exchange
-cardano-cli address key-hash \
-    --payment-verification-key-file exchange/payment.vkey
-
-# Alice
-cardano-cli address key-hash \
-    --payment-verification-key-file alice/payment.vkey
-
-# Bob
-cardano-cli address key-hash \
-    --payment-verification-key-file bob/payment.vkey
-```
-
-Save these hashes for later use in the configuration file.
+If you want to use existing wallets with mnemonic phrases, you can set them in the configuration file (see Configuration section below).
 
 ---
 
 ## Funding Wallets
 
+### Get Wallet Addresses
+
+First, generate the wallet addresses from your configuration:
+
+```bash
+# Run the demo once to see wallet addresses (it will fail due to lack of funds)
+sbt "testOnly cosmex.demo.MultiClientDemoTest"
+
+# Or generate addresses using a simple script (see below)
+```
+
+The wallets will be generated from seeds/mnemonics configured in `application.conf`:
+- Alice (seed: 2 or mnemonic if configured)
+- Bob (seed: 3 or mnemonic if configured)
+- Exchange (seed: 1)
+
 ### Using the Preprod Faucet
 
 1. Visit the Cardano Preprod Faucet: https://docs.cardano.org/cardano-testnet/tools/faucet/
 
-2. Fund each wallet with test ADA:
-   - **Exchange**: Request 1000 test ADA
-   - **Alice**: Request 1100 test ADA (1000 for trading + 100 for fees)
-   - **Bob**: Request 600 test ADA (500 for trading + 100 for fees)
+2. Fund each wallet with test ADA (you'll need the bech32 addresses generated above):
+   - **Alice**: Request at least 100 ADA (for channel deposit + trading)
+   - **Bob**: Request at least 100 ADA (for channel deposit + trading)
+   - **Exchange**: Needs funds for transaction fees
 
-3. Verify balances:
-
-```bash
-# Set environment variable for convenience
-export CARDANO_NODE_SOCKET_PATH=/path/to/your/node.socket
-
-# Check Exchange balance
-cardano-cli query utxo \
-    --address $(cat wallets/exchange/payment.addr) \
-    --testnet-magic 1
-
-# Check Alice balance
-cardano-cli query utxo \
-    --address $(cat wallets/alice/payment.addr) \
-    --testnet-magic 1
-
-# Check Bob balance
-cardano-cli query utxo \
-    --address $(cat wallets/bob/payment.addr) \
-    --testnet-magic 1
-```
-
-### Minting Test USDM Token (Optional)
-
-For Bob to have USDM tokens to trade:
-
-1. Create a simple native token minting policy
-2. Mint 1000 USDM tokens to Bob's address
-3. Update configuration with actual USDM policy ID
-
-**Note**: For the initial demo, you can skip USDM and just trade ADA/ADA by modifying the configuration.
+3. Verify balances using Blockfrost or CardanoScan:
+   - Visit https://preprod.cardanoscan.io
+   - Enter wallet address to check balance
 
 ---
 
@@ -191,81 +118,72 @@ For Bob to have USDM tokens to trade:
 
 ### Update application.conf for Preprod
 
-Create a preprod-specific configuration file:
-
-```bash
-cp src/main/resources/application.conf src/main/resources/preprod.conf
-```
-
-Edit `src/main/resources/preprod.conf`:
+Edit `src/test/resources/application.conf` to use Blockfrost provider:
 
 ```hocon
 # COSMEX Preprod Demo Configuration
 
-server {
-  host = "0.0.0.0"  # Listen on all interfaces
-  port = 8080
-}
-
+# Network Configuration
 network {
-  type = "preprod"
-  magic = 1
-
-  # Preprod-specific settings
-  slotLength = 1000
-
-  # Cardano node connection (if using local node)
-  nodeSocketPath = "/path/to/preprod/node.socket"
-
-  # Or use public API endpoint
-  apiEndpoint = "https://preprod.koios.rest/api/v1"
+  type = "testnet"      # For preprod testnet
+  magic = 1             # Preprod magic number
+  slotLength = 1000     # 1 second per slot
 }
 
-exchange {
-  # IMPORTANT: Replace with actual values from wallet setup
-  publicKeyHash = "YOUR_EXCHANGE_PKH_HERE"
-  address = "YOUR_EXCHANGE_ADDRESS_HERE"
+# Blockchain Provider Configuration
+blockchain {
+  provider = "preprod"  # Use Blockfrost for preprod network
 
-  # Path to signing key file
-  signingKeyFile = "wallets/exchange/payment.skey"
-
-  params {
-    minDeposit = 2000000  # 2 ADA
-    snapshotContestPeriod = 100
-    tradesContestPeriod = 100
+  # Blockfrost settings (reads BLOCKFROST_PROJECT_ID from environment)
+  networkProvider {
+    type = "blockfrost"
+    blockfrost {
+      url = "https://cardano-preprod.blockfrost.io/api/v0"
+      # Project ID is read from BLOCKFROST_PROJECT_ID environment variable
+    }
   }
 }
 
+# Exchange Configuration
+exchange {
+  seed = 1              # Seed for exchange wallet generation
+  params {
+    minDeposit = 10000000           # 10 ADA minimum deposit
+    snapshotContestPeriod = 100     # Slots
+    tradesContestPeriod = 100       # Slots
+  }
+}
+
+# Alice Configuration
 alice {
-  # IMPORTANT: Replace with actual values
-  publicKeyHash = "YOUR_ALICE_PKH_HERE"
-  address = "YOUR_ALICE_ADDRESS_HERE"
-  signingKeyFile = "wallets/alice/payment.skey"
+  seed = 2              # Seed for Alice's wallet
+  # Optional: Use mnemonic instead of seed for preprod
+  mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce"
 
   initialBalance {
-    ada = 1000000000  # 1000 ADA
+    ada = 1000000000    # 1000 ADA to deposit
   }
 
   trading {
     defaultOrder {
       side = "SELL"
       baseAsset = "ada"
-      quoteAsset = "usdm"  # or "ada" for ADA/ADA trading
-      amount = 100000000   # 100 ADA
-      price = 500000       # 0.50 USDM per ADA
+      quoteAsset = "usdm"    # Trading ADA for USDM (or minted token)
+      amount = 100000000      # 100 ADA
+      price = 500000          # 0.50 USDM per ADA
     }
   }
 }
 
+# Bob Configuration
 bob {
-  # IMPORTANT: Replace with actual values
-  publicKeyHash = "YOUR_BOB_PKH_HERE"
-  address = "YOUR_BOB_ADDRESS_HERE"
-  signingKeyFile = "wallets/bob/payment.skey"
+  seed = 3              # Seed for Bob's wallet
+  # Optional: Use mnemonic instead of seed for preprod
+  mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce"
 
   initialBalance {
-    ada = 500000000   # 500 ADA
-    usdm = 1000000000 # 1000 USDM (if you minted tokens)
+    ada = 500000000     # 500 ADA to deposit
+    usdm = 1000000000   # 1000 USDM (or minted token)
   }
 
   trading {
@@ -273,39 +191,25 @@ bob {
       side = "BUY"
       baseAsset = "ada"
       quoteAsset = "usdm"
-      amount = 100000000  # 100 ADA
-      price = 550000      # 0.55 USDM per ADA
+      amount = 100000000      # 100 ADA
+      price = 550000          # 0.55 USDM per ADA
     }
   }
-}
 
-# If trading ADA/ADA (no USDM tokens)
-# Update both alice and bob orders:
-# quoteAsset = "ada"
-# And ensure both have sufficient ADA
-
-assets {
-  ada {
-    policyId = ""
-    assetName = ""
-    decimals = 6
-    symbol = "ADA"
-  }
-
-  usdm {
-    # Replace with actual policy ID if you minted USDM
-    policyId = "YOUR_USDM_POLICY_ID_HERE"
-    assetName = "5553444d"  # "USDM" in hex
-    decimals = 6
-    symbol = "USDM"
+  # Bob will mint his own token for the demo
+  minting {
+    enabled = true
+    tokenName = "BOBTOKEN"
+    amount = 1000000000
   }
 }
 
+# Logging Configuration
 logging {
   level = "INFO"
   verbose {
-    server = true
-    clients = true
+    server = false
+    clients = false
     orderMatching = true
     blockchain = true
   }
@@ -316,11 +220,10 @@ logging {
 
 Before running, ensure you have:
 
-- [ ] Replaced all `YOUR_*_HERE` placeholders with actual values
-- [ ] Wallet key files exist at specified paths
-- [ ] Wallets are funded with sufficient test ADA
+- [ ] Set `BLOCKFROST_PROJECT_ID` environment variable
+- [ ] Set `blockchain.provider = "preprod"` in application.conf
+- [ ] Funded Alice and Bob wallets with test ADA from faucet
 - [ ] Network settings match Preprod (magic = 1)
-- [ ] Server port (8080) is available
 
 ---
 

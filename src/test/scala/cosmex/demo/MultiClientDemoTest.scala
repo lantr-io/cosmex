@@ -27,7 +27,7 @@ import upickle.default.*
 
 class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
-    test("Alice and Bob trade ADA/USDM with automatic order matching") {
+    test("Alice and Bob trade ADA/Token with automatic order matching (Bob mints token)") {
         supervised {
             // Load configuration
             val config = DemoConfig.load()
@@ -395,7 +395,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         )
 
                                         println(
-                                          s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset} @ ${orderConfig.price}"
+                                          s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset}/${orderConfig.quoteAsset} @ ${orderConfig.price}"
                                         )
                                         val orderRequest = ClientRequest.CreateOrder(clientId, order)
                                         client.sendRequest(orderRequest, timeoutSeconds = 10) match {
@@ -459,8 +459,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     ((), mintedPolicyId)
                 }
 
-                // Run Alice and Bob scenarios sequentially (for deterministic testing)
-                // In production, these would be concurrent
+                // Run Alice and Bob scenarios concurrently (like a real exchange)
+                // Both clients will be connected to the exchange simultaneously
 
                 println("\n" + "=" * 60)
                 println("Multi-Client Demo Test: Alice and Bob Trading")
@@ -563,25 +563,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     (adaAsset, bobTokenAsset) // ADA/BOBTOKEN pair
                 }
 
-                // Step 3: Alice creates SELL order first
-                clientScenario(
-                  "Alice",
-                  aliceAccount,
-                  alicePubKey,
-                  alicePubKeyHash,
-                  aliceAddress,
-                  aliceInitialValue,
-                  aliceOrderConfig,
-                  clientIndex = 0,
-                  customPair = aliceTradingPair
-                )
+                // Step 3: Run Alice and Bob scenarios concurrently
+                // Both clients will connect to the exchange simultaneously for realistic order matching
 
-                // Small delay to ensure order is in book
-                Thread.sleep(500)
-
-                // Step 4: Bob creates BUY order
-                // For Bob's scenario, we need to handle the minted tokens case
-                // by querying for the specific minting transaction output
+                // For Bob's scenario, handle the minted tokens case
                 val bobScenarioTxIdFilter = bobMintTxId match {
                   case Some(mintTxId) =>
                     println(s"\n[Test] Bob minted tokens - will query for minting TX: ${mintTxId.toHex.take(16)}...")
@@ -591,21 +576,46 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     None
                 }
 
-                clientScenario(
-                  "Bob",
-                  bobAccount,
-                  bobPubKey,
-                  bobPubKeyHash,
-                  bobAddress,
-                  bobInitialValue,
-                  bobOrderConfig,
-                  clientIndex = 1,
-                  mintToken = false,  // Already minted
-                  tokenName = bobMintingConfig.tokenName,
-                  tokenAmount = bobMintingConfig.amount,
-                  customPair = aliceTradingPair,
-                  txIdFilter = bobScenarioTxIdFilter
-                )
+                println("\n[Test] Starting Alice and Bob concurrently...")
+
+                // Fork both client scenarios to run in parallel
+                val aliceFork = forkUser {
+                  clientScenario(
+                    "Alice",
+                    aliceAccount,
+                    alicePubKey,
+                    alicePubKeyHash,
+                    aliceAddress,
+                    aliceInitialValue,
+                    aliceOrderConfig,
+                    clientIndex = 0,
+                    customPair = aliceTradingPair
+                  )
+                }
+
+                val bobFork = forkUser {
+                  clientScenario(
+                    "Bob",
+                    bobAccount,
+                    bobPubKey,
+                    bobPubKeyHash,
+                    bobAddress,
+                    bobInitialValue,
+                    bobOrderConfig,
+                    clientIndex = 1,
+                    mintToken = false,  // Already minted
+                    tokenName = bobMintingConfig.tokenName,
+                    tokenAmount = bobMintingConfig.amount,
+                    customPair = aliceTradingPair,
+                    txIdFilter = bobScenarioTxIdFilter
+                  )
+                }
+
+                // Wait for both to complete
+                aliceFork.join()
+                bobFork.join()
+
+                println("\n[Test] Both Alice and Bob scenarios completed")
 
                 // Verify trade execution
                 // Note: In a real test, we'd query balances and verify
