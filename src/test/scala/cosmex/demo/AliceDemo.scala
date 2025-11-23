@@ -8,11 +8,9 @@ import cosmex.ws.SimpleWebSocketClient
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.ledger.rules.*
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
-import scalus.testing.kit.MockLedgerApi
 
 import scala.util.{Failure, Success, Try}
 import upickle.default.*
@@ -60,9 +58,6 @@ object AliceDemo {
           Credential.KeyHash(AddrKeyHash.fromByteString(alicePubKeyHash))
         )
 
-        // Setup mock ledger with Alice's initial UTxO
-        val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
-
         // Get Alice's initial balance from config
         val aliceInitialValue = config.alice.getInitialValue()
         println(s"\n    Alice's Initial Balance:")
@@ -72,24 +67,10 @@ object AliceDemo {
             println(s"      - $displayAmount ${assetInfo.symbol}")
         }
 
-        val initialUtxos = Map(
-          TransactionInput(genesisHash, 0) ->
-              TransactionOutput(
-                address = aliceAddress,
-                value = aliceInitialValue
-              )
-        )
-
-        val provider = MockLedgerApi(
-          initialUtxos = initialUtxos,
-          context = Context.testMainnet(slot = 1000),
-          validators = MockLedgerApi.defaultValidators -
-              MissingKeyHashesValidator -
-              ProtocolParamsViewHashesMatchValidator -
-              MissingRequiredDatumsValidator,
-          mutators = MockLedgerApi.defaultMutators -
-              PlutusScriptsTransactionMutator
-        )
+        // Create provider from config
+        // Note: For mock provider, you need to set up initial UTxOs manually
+        // For Yaci DevKit or Blockfrost, initial funding comes from configuration
+        val provider = config.createProvider()
 
         // Create transaction builder
         val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)

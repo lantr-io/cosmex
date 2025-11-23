@@ -8,11 +8,9 @@ import cosmex.ws.SimpleWebSocketClient
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.ledger.rules.*
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
-import scalus.testing.kit.MockLedgerApi
 
 import scala.util.{Failure, Success, Try}
 import upickle.default.*
@@ -60,9 +58,6 @@ object BobDemo {
           Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
         )
 
-        // Setup mock ledger with Bob's initial UTxO
-        val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
-
         // Get Bob's initial balance from config
         val bobInitialValue = config.bob.getInitialValue()
         println(s"\n    Bob's Initial Balance:")
@@ -72,24 +67,10 @@ object BobDemo {
             println(s"      - $displayAmount ${assetInfo.symbol}")
         }
 
-        val initialUtxos = Map(
-          TransactionInput(genesisHash, 0) ->
-              TransactionOutput(
-                address = bobAddress,
-                value = bobInitialValue
-              )
-        )
-
-        val provider = MockLedgerApi(
-          initialUtxos = initialUtxos,
-          context = Context.testMainnet(slot = 1000),
-          validators = MockLedgerApi.defaultValidators -
-              MissingKeyHashesValidator -
-              ProtocolParamsViewHashesMatchValidator -
-              MissingRequiredDatumsValidator,
-          mutators = MockLedgerApi.defaultMutators -
-              PlutusScriptsTransactionMutator
-        )
+        // Create provider from config
+        // Note: For mock provider, you need to set up initial UTxOs manually
+        // For Yaci DevKit or Blockfrost, initial funding comes from configuration
+        val provider = config.createProvider()
 
         // Create transaction builder
         val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
