@@ -302,22 +302,31 @@ This option runs interactive demos for Alice and Bob separately. Each demo provi
 # Navigate to project root
 cd /path/to/cosmex
 
-# Start the WebSocket server with preprod config
-sbtn "Test/runMain cosmex.ws.CosmexWebSocketServerDemo --config src/main/resources/preprod.conf"
+# Start the WebSocket server (reads from application.conf)
+sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig"
+
+# Or with custom port:
+# sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig --port 9090"
 
 # Expected output:
-# Loading configuration from: src/main/resources/preprod.conf
+# Loading configuration from: application.conf (classpath)
 #
 # COSMEX Demo Configuration
 # ========================
 # Server:
-#   URL: ws://0.0.0.0:8080/ws
+#   URL: ws://localhost:8080/ws
 #   ...
 # ============================================================
 # COSMEX WebSocket Server Starting...
 # ============================================================
 # Exchange PubKeyHash: a1b2c3d4...
 # Network: preprod
+# Provider: preprod
+# [Server] Using preprod network via Blockfrost
+# [Server] WARNING: Ensure wallets are funded from the faucet:
+# [Server]   - Alice: addr_test1vpep5knc7qqxa6w8s3m9rgg2zsqch40ff3tuq2f3e4xn5jg77d85e
+# [Server]   - Bob: addr_test1vrmlwfnkk0l9pcp2ng7280acpkw5vgxt4lrmq78ltda4mngu8refr
+# ============================================================
 # Starting WebSocket server on port 8080...
 # WebSocket endpoint: ws://localhost:8080/ws/{txId}/{txIdx}
 # ============================================================
@@ -332,7 +341,7 @@ sbtn "Test/runMain cosmex.ws.CosmexWebSocketServerDemo --config src/main/resourc
 cd /path/to/cosmex
 
 # Run Alice demo
-sbtn "Test/runMain cosmex.demo.AliceDemo"
+sbt "Test/runMain cosmex.demo.AliceDemo"
 
 # Expected output:
 # ============================================================
@@ -379,7 +388,7 @@ Alice's order is now in the order book, waiting for a match.
 cd /path/to/cosmex
 
 # Run Bob demo
-sbtn "Test/runMain cosmex.demo.BobDemo"
+sbt "Test/runMain cosmex.demo.BobDemo"
 
 # Expected output:
 # ============================================================
@@ -491,21 +500,21 @@ This option is best for:
 **Solution**:
 ```bash
 # Use a different port
-sbtn "Test/runMain cosmex.ws.CosmexWebSocketServerDemo --port 9090"
+sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig --port 9090"
 
 # Or find and kill the process using port 8080
 lsof -ti:8080 | xargs kill
 ```
 
-**Problem**: Configuration file not found
+**Problem**: Configuration not working as expected
 
 **Solution**:
 ```bash
-# Verify file exists
-ls -la src/main/resources/preprod.conf
+# The server reads from application.conf by default
+# Make sure src/test/resources/application.conf has the correct settings
 
-# Use absolute path
-sbtn "Test/runMain cosmex.ws.CosmexWebSocketServerDemo --config /full/path/to/preprod.conf"
+# Or use a custom config file
+sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig --config /path/to/custom.conf"
 ```
 
 ### Alice Can't Connect
