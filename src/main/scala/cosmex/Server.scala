@@ -154,13 +154,18 @@ class Server(
             return Left("Transaction has no inputs")
 
         // Find the unique output to Cosmex script address
+        println(s"[Server] Expected Cosmex script address: $CosmexScriptAddress")
+        println(s"[Server] Transaction outputs:")
+        tx.body.value.outputs.view.map(_.value).zipWithIndex.foreach { case (out, idx) =>
+            println(s"[Server]   Output $idx: ${out.address}")
+        }
         val cosmexOutput = tx.body.value.outputs.view
             .map(_.value)
             .zipWithIndex
             .filter(_._1.address == CosmexScriptAddress)
             .toVector match
             case Vector((output, idx)) => (output, idx)
-            case Vector()              => return Left("No output to Cosmex script address")
+            case Vector()              => return Left(s"No output to Cosmex script address. Expected: $CosmexScriptAddress")
             case _ => return Left("More than one output to Cosmex script address")
 
         val (output, outputIdx) = cosmexOutput

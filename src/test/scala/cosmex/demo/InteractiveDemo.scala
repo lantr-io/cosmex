@@ -381,11 +381,17 @@ object InteractiveDemo {
 
                 println(s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA (reserving ${feeReserve / 1_000_000.0} ADA for fees)")
 
+                println(s"[DEBUG] Building openChannel transaction...")
+                println(s"[DEBUG] Deposit amount: ${depositAmount.coin.value / 1_000_000} ADA")
                 val unsignedTx = txbuilder.openChannel(
                   clientInput = depositUtxo,
                   clientPubKey = clientPubKey,
                   depositAmount = depositAmount
                 )
+                println(s"[DEBUG] Transaction built, outputs:")
+                unsignedTx.body.value.outputs.toSeq.zipWithIndex.foreach { case (out, idx) =>
+                    println(s"[DEBUG]   Output $idx: ${out.value.address} = ${out.value.value.coin.value / 1_000_000} ADA")
+                }
 
                 // Sign the transaction
                 import com.bloxbean.cardano.client.crypto.Blake2bUtil
