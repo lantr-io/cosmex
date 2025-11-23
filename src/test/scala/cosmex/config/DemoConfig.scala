@@ -10,7 +10,6 @@ import scalus.ledger.api.v1.PubKeyHash
 
 
 import scala.jdk.CollectionConverters.*
-import scala.util.{Failure, Success, Try}
 
 /** Configuration for COSMEX demo applications
   *
@@ -369,7 +368,7 @@ case class DemoConfig(config: Config) {
     * Note: For mock provider with initial UTxOs, use createMockProvider() instead
     */
   def createProvider(): scalus.cardano.node.Provider = {
-    import cosmex.cardano.YaciTestcontainerProvider
+    import cosmex.cardano.{YaciTestcontainerProvider, BlockfrostProvider}
     import scalus.testing.kit.MockLedgerApi
     import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
 
@@ -388,6 +387,30 @@ case class DemoConfig(config: Config) {
         println(s"[Config] Use createProviderWithFunding() to provide initial funding")
         YaciTestcontainerProvider.start()
 
+      case "preprod" =>
+        blockchain.networkProvider.blockfrost.projectId match {
+          case Some(apiKey) =>
+            println(s"[Config] Using Blockfrost provider for Preprod testnet")
+            BlockfrostProvider.preprod(apiKey)
+          case None =>
+            throw new IllegalArgumentException(
+              "BLOCKFROST_PROJECT_ID environment variable not set. " +
+              "Set it to your Blockfrost API key for preprod network."
+            )
+        }
+
+      case "preview" =>
+        blockchain.networkProvider.blockfrost.projectId match {
+          case Some(apiKey) =>
+            println(s"[Config] Using Blockfrost provider for Preview testnet")
+            BlockfrostProvider.preview(apiKey)
+          case None =>
+            throw new IllegalArgumentException(
+              "BLOCKFROST_PROJECT_ID environment variable not set. " +
+              "Set it to your Blockfrost API key for preview network."
+            )
+        }
+
       case other =>
         throw new IllegalArgumentException(
           s"Unsupported blockchain provider: $other. " +
@@ -404,8 +427,6 @@ case class DemoConfig(config: Config) {
       initialFunding: Seq[(String, Long)]
   ): scalus.cardano.node.Provider = {
     import cosmex.cardano.YaciTestcontainerProvider
-    import scalus.testing.kit.MockLedgerApi
-    import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
 
     blockchain.provider.toLowerCase match {
       case "mock" =>
