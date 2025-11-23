@@ -372,8 +372,8 @@ object InteractiveDemo {
                 println(s"[DEBUG] findClientUtxo returned successfully")
                 System.out.flush()
 
-                // Reserve some ADA for transaction fees (~0.2 ADA should be plenty)
-                val feeReserve = 200_000L // 0.2 ADA in lovelace
+                // Reserve some ADA for transaction fees + minUTxO for change output (~2 ADA should be safe)
+                val feeReserve = 2_000_000L // 2 ADA in lovelace (covers fees + minUTxO requirement)
                 val totalAvailable = depositUtxo.output.value.coin.value
                 val depositAmountLovelace = totalAvailable - feeReserve
                 // Keep all tokens but reduce ADA for fees
