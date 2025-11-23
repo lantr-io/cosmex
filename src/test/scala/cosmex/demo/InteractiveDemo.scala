@@ -30,6 +30,13 @@ import scala.util.{Failure, Success, Try}
   *   sbt "Test/runMain cosmex.demo.InteractiveDemo --external-server"  # Connects to external server
   */
 object InteractiveDemo {
+    // Custom exception with error code and display control
+    case class DemoException(
+        code: String,
+        message: String,
+        alreadyPrinted: Boolean = false
+    ) extends Exception(message)
+
     // Override main to accept args properly (instead of using App trait)
     def main(args: Array[String]): Unit = {
         runDemo(args)
@@ -258,7 +265,7 @@ object InteractiveDemo {
                                 println(s"[$partyName]   2. Request at least 100 ADA for: $addressBech32")
                                 println(s"[$partyName]   3. Wait for confirmation (1-2 minutes)")
                                 println(s"[$partyName]   4. Verify at: https://preprod.cardanoscan.io/address/$addressBech32")
-                                throw new Exception(s"Wallet not funded. Please fund $addressBech32 from the faucet.")
+                                throw DemoException("WALLET_NOT_FUNDED", "Wallet not funded", alreadyPrinted = true)
                         }
 
                     case other =>
@@ -567,8 +574,12 @@ object InteractiveDemo {
                                 val (txId, policyId) = mintTokens(tokenName, amount)
                                 mintedPolicyId = Some(policyId)
                                 lastMintTxId = Some(txId)
-                            }.recover { case e: Exception =>
-                                println(s"[Mint] ERROR: ${e.getMessage}")
+                            }.recover {
+                                case e: DemoException if e.alreadyPrinted => ()
+                                case e: DemoException => println(s"[Mint] ERROR [${e.code}]: ${e.message}")
+                                case e: Exception =>
+                                    println(s"[Mint] UNEXPECTED ERROR: ${e.getMessage}")
+                                    e.printStackTrace()
                             }
 
                         case Some("mint") =>
@@ -587,12 +598,18 @@ object InteractiveDemo {
                                 System.out.flush()
                                 Try {
                                     connectToExchange(lastMintTxId)
-                                }.recover { case e: Exception =>
-                                    println(s"[Connect] ERROR: ${e.getMessage}")
-                                    e.printStackTrace() // Show full stack trace for debugging
+                                }.recover {
+                                    case e: DemoException if e.alreadyPrinted =>
+                                        // Error message already displayed, don't repeat it
+                                        ()
+                                    case e: DemoException =>
+                                        // Display error message for non-printed exceptions
+                                        println(s"[Connect] ERROR [${e.code}]: ${e.message}")
+                                    case e: Exception =>
+                                        // Unexpected error - show full details
+                                        println(s"[Connect] UNEXPECTED ERROR: ${e.getMessage}")
+                                        e.printStackTrace()
                                 }
-                                println("[DEBUG] connectToExchange call completed")
-                                System.out.flush()
                             }
 
                         case Some("buy") if parts.length == 5 =>
@@ -605,8 +622,12 @@ object InteractiveDemo {
                                     val amount = parts(3).toLong
                                     val price = parts(4).toLong
                                     createOrder("BUY", base, quote, amount, price)
-                                }.recover { case e: Exception =>
-                                    println(s"[Buy] ERROR: ${e.getMessage}")
+                                }.recover {
+                                    case e: DemoException if e.alreadyPrinted => ()
+                                    case e: DemoException => println(s"[Buy] ERROR [${e.code}]: ${e.message}")
+                                    case e: Exception =>
+                                        println(s"[Buy] UNEXPECTED ERROR: ${e.getMessage}")
+                                        e.printStackTrace()
                                 }
                             }
 
@@ -624,8 +645,12 @@ object InteractiveDemo {
                                     val amount = parts(3).toLong
                                     val price = parts(4).toLong
                                     createOrder("SELL", base, quote, amount, price)
-                                }.recover { case e: Exception =>
-                                    println(s"[Sell] ERROR: ${e.getMessage}")
+                                }.recover {
+                                    case e: DemoException if e.alreadyPrinted => ()
+                                    case e: DemoException => println(s"[Sell] ERROR [${e.code}]: ${e.message}")
+                                    case e: Exception =>
+                                        println(s"[Sell] UNEXPECTED ERROR: ${e.getMessage}")
+                                        e.printStackTrace()
                                 }
                             }
 
