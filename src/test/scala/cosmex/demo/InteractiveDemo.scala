@@ -167,10 +167,24 @@ object InteractiveDemo extends App {
             } else {
                 // Use external server - use config provider
                 println(s"\n[Setup] Connecting to external server at ws://localhost:${config.server.port}")
-                val prov = config.createProvider()
-                val cInfo = CardanoInfoTestNet.currentNetwork(prov)
-                val srv = Server(cInfo, exchangeParams, prov, exchangePrivKey)
-                (prov, cInfo, srv, config.server.port)
+                println(s"[Setup] Provider type: ${config.blockchain.provider}")
+                System.out.flush()
+
+                try {
+                    val prov = config.createProvider()
+                    println(s"[Setup] ✓ Provider created successfully")
+                    val cInfo = CardanoInfoTestNet.currentNetwork(prov)
+                    println(s"[Setup] ✓ CardanoInfo initialized")
+                    val srv = Server(cInfo, exchangeParams, prov, exchangePrivKey)
+                    println(s"[Setup] ✓ Server instance created")
+                    System.out.flush()
+                    (prov, cInfo, srv, config.server.port)
+                } catch {
+                    case e: Exception =>
+                        println(s"[Setup] ERROR during initialization: ${e.getMessage}")
+                        e.printStackTrace()
+                        throw e
+                }
             }
 
             // Transaction builder
@@ -523,10 +537,12 @@ object InteractiveDemo extends App {
                                 println("[Connect] Already connected to the exchange!")
                             } else {
                                 println("[Connect] Attempting to connect to the exchange...")
+                                System.out.flush() // Ensure message is displayed immediately
                                 Try {
                                     connectToExchange(lastMintTxId)
                                 }.recover { case e: Exception =>
                                     println(s"[Connect] ERROR: ${e.getMessage}")
+                                    e.printStackTrace() // Show full stack trace for debugging
                                 }
                             }
 
