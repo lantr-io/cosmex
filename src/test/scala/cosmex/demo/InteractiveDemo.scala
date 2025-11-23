@@ -308,8 +308,14 @@ object InteractiveDemo extends App {
             // Helper to connect to exchange
             def connectToExchange(utxoFilter: Option[TransactionHash]): Unit = {
                 println(s"\n[Connect] Opening channel with exchange...")
+                println(s"[DEBUG] connectToExchange started, utxoFilter=$utxoFilter")
+                System.out.flush()
 
+                println(s"[DEBUG] About to call findClientUtxo...")
+                System.out.flush()
                 val depositUtxo = findClientUtxo(utxoFilter)
+                println(s"[DEBUG] findClientUtxo returned successfully")
+                System.out.flush()
                 val depositAmount = depositUtxo.output.value
 
                 println(s"[Connect] Depositing: ${depositAmount.coin.value / 1_000_000} ADA")
@@ -515,6 +521,8 @@ object InteractiveDemo extends App {
                     running = false
                 } else {
                     val parts = input.trim.split("\\s+")
+                    println(s"[DEBUG] Received command: '${parts.mkString(" ")}'")
+                    System.out.flush()
 
                     parts.headOption.map(_.toLowerCase) match {
                         case Some("mint") if parts.length == 3 =>
@@ -533,17 +541,23 @@ object InteractiveDemo extends App {
                             println("[Mint] Example: mint MYTOKEN 1000000")
 
                         case Some("connect") =>
+                            println(s"[DEBUG] Connect command matched, isConnected=$isConnected")
+                            System.out.flush()
                             if (isConnected) {
                                 println("[Connect] Already connected to the exchange!")
                             } else {
                                 println("[Connect] Attempting to connect to the exchange...")
                                 System.out.flush() // Ensure message is displayed immediately
+                                println("[DEBUG] About to call connectToExchange...")
+                                System.out.flush()
                                 Try {
                                     connectToExchange(lastMintTxId)
                                 }.recover { case e: Exception =>
                                     println(s"[Connect] ERROR: ${e.getMessage}")
                                     e.printStackTrace() // Show full stack trace for debugging
                                 }
+                                println("[DEBUG] connectToExchange call completed")
+                                System.out.flush()
                             }
 
                         case Some("buy") if parts.length == 5 =>
