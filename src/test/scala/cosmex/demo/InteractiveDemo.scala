@@ -383,6 +383,7 @@ object InteractiveDemo {
 
                 println(s"[DEBUG] Building openChannel transaction...")
                 println(s"[DEBUG] Deposit amount: ${depositAmount.coin.value / 1_000_000} ADA")
+                println(s"[DEBUG] Client-side script hash: ${txbuilder.script.scriptHash.toHex}")
                 val unsignedTx = txbuilder.openChannel(
                   clientInput = depositUtxo,
                   clientPubKey = clientPubKey,

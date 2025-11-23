@@ -11,7 +11,7 @@ class CosmexTransactions(val exchangeParams: ExchangeParams, env: Environment) {
     private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
-    private val script = Script.PlutusV3(cosmexValidator.cborByteString)
+    val script = Script.PlutusV3(cosmexValidator.cborByteString)  // Public for debugging
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
       *
