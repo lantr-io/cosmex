@@ -29,12 +29,17 @@ import scala.util.{Failure, Success, Try}
   *   sbt "Test/runMain cosmex.demo.InteractiveDemo"                    # Starts own server
   *   sbt "Test/runMain cosmex.demo.InteractiveDemo --external-server"  # Connects to external server
   */
-object InteractiveDemo extends App {
+object InteractiveDemo {
+    // Override main to accept args properly (instead of using App trait)
+    def main(args: Array[String]): Unit = {
+        runDemo(args)
+    }
 
-    // Check if we should connect to an external server
-    val useExternalServer = Option(args).exists(_.contains("--external-server"))
+    def runDemo(args: Array[String]): Unit = {
+        // Check if we should connect to an external server
+        val useExternalServer = Option(args).exists(_.contains("--external-server"))
 
-    println("""
+        println("""
         |================================================================
         |       COSMEX Interactive Demo - Decentralized Exchange
         |================================================================
@@ -48,8 +53,8 @@ object InteractiveDemo extends App {
         |================================================================
         |""".stripMargin)
 
-    // Load configuration
-    val config = DemoConfig.load()
+    // Load configuration (lazy to avoid initialization deadlock with supervised block)
+    lazy val config = DemoConfig.load()
     println(config.summary())
 
     // Check if party was pre-selected (via AliceDemo/BobDemo)
@@ -81,13 +86,37 @@ object InteractiveDemo extends App {
     println(s"\n✓ You are now playing as $partyName")
     println(s"  Initial balance: ${clientConfig.initialBalance.mkString(", ")}")
 
+    // Eagerly initialize config objects and accounts BEFORE entering supervised block to avoid deadlock
+    println("\n[DEBUG] Pre-initializing config objects...")
+    val _ = config.exchange.seed // Force exchange object initialization
+    val scalusNetwork = config.network.scalusNetwork // Pre-get network for Address creation
+    val _ = config.blockchain.provider // Force blockchain object initialization
+
+    // Pre-create all accounts and values outside supervised block
+    println("[DEBUG] Pre-creating client account...")
+    val clientAccount = clientConfig.createAccount()
+    println(s"[DEBUG] Client account created: ${clientAccount.baseAddress()}")
+    val clientPubKey = clientConfig.getPubKey()
+    val clientPubKeyHash = clientConfig.getPubKeyHash()
+    val clientInitialValue = clientConfig.getInitialValue()
+
+    // Pre-create client address outside supervised block
+    val clientAddress = Address(
+      scalusNetwork,
+      Credential.KeyHash(AddrKeyHash.fromByteString(clientPubKeyHash))
+    )
+    println(s"[DEBUG] Client address created: ${clientAddress}")
+    println("[DEBUG] Config objects and accounts initialized")
+
+    // Capture all object-level vals as local variables to avoid deadlock in supervised block
+    val externalServer = useExternalServer
+    println(s"[DEBUG] External server mode: $externalServer")
+
     println("\n[DEBUG] About to enter supervised block...")
-    System.out.flush()
 
     // Set up the environment
     supervised {
         println("[DEBUG] Inside supervised block, starting initialization...")
-        System.out.flush()
         var serverBinding: NettySyncServerBinding = null
         var client: SimpleWebSocketClient = null
         var clientId: Option[ClientId] = None
@@ -95,22 +124,17 @@ object InteractiveDemo extends App {
         var mintedPolicyId: Option[ByteString] = None
 
         try {
+            println("[DEBUG] Creating exchange params...")
+            val exchangeConfig = config.exchange
             // Create exchange
-            val exchangeParams = config.exchange.createParams()
+            val exchangeParams = exchangeConfig.createParams()
             val exchangePrivKey = config.exchange.getPrivateKey()
-
-            // Create client's address
-            val clientAccount = clientConfig.createAccount()
-            val clientPubKey = clientConfig.getPubKey()
-            val clientPubKeyHash = clientConfig.getPubKeyHash()
-            val clientAddress = Address(
-              config.network.scalusNetwork,
-              Credential.KeyHash(AddrKeyHash.fromByteString(clientPubKeyHash))
-            )
-            val clientInitialValue = clientConfig.getInitialValue()
+            println("[DEBUG] Exchange params created")
+            println("[DEBUG] Using pre-initialized client address and values")
 
             // Create blockchain provider and server (only if not using external server)
-            val (provider, cardanoInfo, _, port) = if (!useExternalServer) {
+            println(s"[DEBUG] externalServer=$externalServer, about to create provider...")
+            val (provider, cardanoInfo, _, port) = if (!externalServer) {
                 val prov = config.blockchain.provider.toLowerCase match {
                     case "mock" =>
                         import scalus.testing.kit.MockLedgerApi
@@ -645,7 +669,8 @@ object InteractiveDemo extends App {
         }
     }
 
-    println("\n" + "=" * 60)
-    println("Thank you for using COSMEX!")
-    println("=" * 60)
+        println("\n" + "=" * 60)
+        println("Thank you for using COSMEX!")
+        println("=" * 60)
+    } // end runDemo
 }

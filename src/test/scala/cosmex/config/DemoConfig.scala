@@ -143,9 +143,17 @@ case class DemoConfig(config: Config) {
 
         /** Create ExchangeParams from config */
         def createParams(): ExchangeParams = {
+            println(s"[DEBUG] createParams: about to create account with seed=$seed")
+            System.out.flush()
             val account = createAccount()
+            println(s"[DEBUG] createParams: account created, getting hdKeyPair...")
+            System.out.flush()
             val pubKeyHash = ByteString.fromArray(account.hdKeyPair().getPublicKey.getKeyHash)
+            println(s"[DEBUG] createParams: got hdKeyPair, getting publicKeyBytes...")
+            System.out.flush()
             val pubKey = ByteString.fromArray(account.publicKeyBytes())
+            println(s"[DEBUG] createParams: creating ExchangeParams...")
+            System.out.flush()
 
             ExchangeParams(
               exchangePkh = PubKeyHash(pubKeyHash),
