@@ -229,7 +229,74 @@ Before running, ensure you have:
 
 ## Running the Demo
 
-### Terminal 1: Start the Server
+COSMEX provides three ways to run the demo:
+
+1. **Option A: Interactive Demo** (Recommended for beginners) - Interactive command-line interface where you control trading manually
+2. **Option B: Automated Alice/Bob Demos** - Programmatic demos that automatically execute trades
+3. **Option C: Automated Test** - Concurrent multi-client test
+
+Choose the option that best fits your needs:
+
+---
+
+### Option A: Interactive Demo (Recommended)
+
+The interactive demo provides a hands-on command-line interface where you can manually control trading operations.
+
+**Step 1: Run the Interactive Demo**
+
+```bash
+# Navigate to project root
+cd /path/to/cosmex
+
+# Start the interactive demo
+sbt "Test/runMain cosmex.demo.InteractiveDemo"
+```
+
+**Step 2: Choose Your Party**
+
+When prompted, select who you want to be:
+- **1) Alice**: Starts with ADA configured balance
+- **2) Bob**: Starts with ADA, can mint custom tokens
+
+**Step 3: Use Interactive Commands**
+
+Available commands:
+- `mint <tokenName> <amount>` - Mint custom tokens (Bob)
+- `connect` - Connect to the exchange and open channel
+- `buy <base> <quote> <amount> <price>` - Create buy order
+- `sell <base> <quote> <amount> <price>` - Create sell order
+- `help` - Show available commands
+- `quit` - Exit the demo
+
+**Example Session (as Bob):**
+
+```
+Bob> mint BOBTOKEN 1000000
+[Mint] Minting 1000000 units of token 'BOBTOKEN'...
+[Mint] ✓ Minted token policy ID: a3b4c5d6...
+
+Bob> connect
+[Connect] Opening channel with exchange...
+[Connect] ✓ Channel opened successfully!
+
+Bob> sell BOBTOKEN ADA 100000 1000000
+[Order] Creating SELL order: 100000 BOBTOKEN/ADA @ 1000000
+[Order] ✓ Order created! OrderID: order_1
+[Order] Waiting for potential matches...
+
+Bob> quit
+```
+
+For more details on the interactive demo, see [INTERACTIVE_DEMO.md](INTERACTIVE_DEMO.md).
+
+---
+
+### Option B: Alice/Bob Interactive Demos
+
+This option runs interactive demos for Alice and Bob separately. Each demo provides an interactive terminal for manual trading.
+
+#### Terminal 1: Start the Server
 
 ```bash
 # Navigate to project root
@@ -258,7 +325,7 @@ sbtn "Test/runMain cosmex.ws.CosmexWebSocketServerDemo --config src/main/resourc
 
 **Wait for the server to fully start** before proceeding to the next terminals.
 
-### Terminal 2: Run Alice
+#### Terminal 2: Run Alice
 
 ```bash
 # In a new terminal
@@ -305,7 +372,7 @@ sbtn "Test/runMain cosmex.demo.AliceDemo"
 
 Alice's order is now in the order book, waiting for a match.
 
-### Terminal 3: Run Bob
+#### Terminal 3: Run Bob
 
 ```bash
 # In a new terminal
@@ -355,7 +422,7 @@ sbtn "Test/runMain cosmex.demo.BobDemo"
 # ============================================================
 ```
 
-### What Happened?
+#### What Happened?
 
 1. **Server** started and initialized the exchange
 2. **Alice** opened a channel with 1000 ADA and created a SELL order (100 ADA @ 0.50)
@@ -365,6 +432,53 @@ sbtn "Test/runMain cosmex.demo.BobDemo"
 6. **Final balances**:
    - Alice: 900 ADA + 50 USDM
    - Bob: 600 ADA + 950 USDM
+
+---
+
+### Option C: Automated Multi-Client Test
+
+This option runs an automated test that simulates concurrent trading between Alice and Bob.
+
+```bash
+# Navigate to project root
+cd /path/to/cosmex
+
+# Run the multi-client test
+sbt "testOnly cosmex.demo.MultiClientDemoTest"
+```
+
+**What This Test Does:**
+
+1. **Starts the exchange server** automatically
+2. **Funds Alice and Bob** from configuration
+3. **Bob mints custom tokens** (if enabled in config)
+4. **Both clients connect concurrently** and open channels
+5. **Both create orders simultaneously** (Alice sells, Bob buys)
+6. **Automatic order matching** occurs
+7. **Verifies trade execution** and balances
+
+**Expected Output:**
+
+```
+[Test] Starting Alice and Bob concurrently...
+[Alice] Opening channel...
+[Bob] Opening channel...
+[Alice] ✓ Channel opened!
+[Bob] ✓ Channel opened!
+[Alice] Creating SELL order: 100 ADA @ 1000000
+[Bob] Creating BUY order: 100 BOBTOKEN @ 1000000
+[Alice] ✓ Order created! OrderID: order_1
+[Bob] ✓ Order created! OrderID: order_2
+[Bob] ✓ Order executed! Trade: order_2, amount: 100, price: 1000000
+[Alice] ✓ Order executed! Trade: order_1, amount: 100, price: 1000000
+
+✓ Multi-client test completed successfully!
+```
+
+This option is best for:
+- **Automated testing** of the full COSMEX protocol
+- **CI/CD integration** for continuous testing
+- **Verifying concurrent client behavior**
 
 ---
 
@@ -555,6 +669,7 @@ To run more than Alice and Bob:
 - **Cardano Explorer (Preprod)**: https://preprod.cardanoscan.io/
 - **Cardano Documentation**: https://docs.cardano.org/
 - **COSMEX Whitepaper**: See `docs/Whitepaper.md`
+- **Interactive Demo Guide**: See `docs/INTERACTIVE_DEMO.md`
 - **API Documentation**: See `docs/WEBSOCKET_DEMO.md`
 
 ---
