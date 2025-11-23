@@ -1024,7 +1024,8 @@ object CosmexContract {
     private val compiledValidator = Compiler.compile(CosmexValidator.validate)
 
     def mkCosmexProgram(params: ExchangeParams): Program = {
-        val program = compiledValidator.toUplcOptimized().plutusV3
+        // val program = compiledValidator.toUplcOptimized().plutusV3  // Disabled: non-deterministic
+        val program = compiledValidator.toUplc().plutusV3  // Unoptimized for deterministic script hash
         val uplcProgram = program $ params.toData
         uplcProgram
     }
