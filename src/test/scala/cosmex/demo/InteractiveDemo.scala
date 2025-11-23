@@ -624,6 +624,15 @@ object InteractiveDemo {
                                     case e: DemoException =>
                                         // Display error message for non-printed exceptions
                                         println(s"[Connect] ERROR [${e.code}]: ${e.message}")
+                                    case e: Exception if e.getMessage.contains("insufficient funds") =>
+                                        // Insufficient funds - likely need more ADA for fees
+                                        val diffMatch = "diff=(-?\\d+)".r.findFirstMatchIn(e.getMessage)
+                                        val diff = diffMatch.map(_.group(1).toLong).getOrElse(0L)
+                                        val neededAda = Math.abs(diff) / 1_000_000.0
+                                        println(s"\n[Connect] ✗ ERROR: Insufficient funds for transaction")
+                                        println(f"[Connect] You need approximately ${neededAda}%.2f more ADA to cover transaction fees")
+                                        println(s"[Connect] Please request more test ADA from the faucet")
+                                        println(s"[Connect] Faucet: https://docs.cardano.org/cardano-testnet/tools/faucet/")
                                     case e: Exception =>
                                         // Unexpected error - show full details
                                         println(s"[Connect] UNEXPECTED ERROR: ${e.getMessage}")
