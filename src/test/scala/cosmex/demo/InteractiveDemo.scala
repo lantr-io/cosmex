@@ -130,6 +130,9 @@ object InteractiveDemo {
         var isConnected = false
         var mintedPolicyId: Option[ByteString] = None
 
+        // Track spent UTxOs to filter them out from Blockfrost queries (indexing delay)
+        val spentUtxos = scala.collection.mutable.Set[TransactionInput]()
+
         try {
             println("[DEBUG] Creating exchange params...")
             val exchangeConfig = config.exchange
@@ -269,15 +272,34 @@ object InteractiveDemo {
                         println(s"[$partyName] Looking for UTxO at address: $addressBech32")
 
                         try {
-                            provider.findUtxo(
+                            // Query all UTxOs and filter out ones we've already spent
+                            provider.findUtxos(
                               address = clientAddress,
                               transactionId = txIdFilter,
                               datum = None,
-                              minAmount = Some(Coin(2_000_000L))
+                              minAmount = Some(Coin(2_000_000L)),
+                              minRequiredTotalAmount = None
                             ) match {
-                                case Right(utxo) =>
-                                    println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
-                                    utxo
+                                case Right(utxos) =>
+                                    // Filter out spent UTxOs (that Blockfrost hasn't indexed yet)
+                                    val available = utxos.filterNot { case (input, _) =>
+                                        spentUtxos.contains(input)
+                                    }
+
+                                    if available.isEmpty then {
+                                        Left(new RuntimeException("No available UTxOs (all are spent or below minimum)"))
+                                    } else {
+                                        val (input, output) = available.head
+                                        val utxo = Utxo(input, output)
+                                        println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
+                                        if spentUtxos.nonEmpty then {
+                                            println(s"[$partyName]   (filtered out ${spentUtxos.size} spent UTxOs)")
+                                        }
+                                        Right(utxo)
+                                    }
+                                case Left(err) => Left(err)
+                            } match {
+                                case Right(utxo) => utxo
                                 case Left(err) =>
                                     println(s"\n[$partyName] ✗ ERROR: Could not find funded UTxO")
                                     println(s"[$partyName] Wallet address: $addressBech32")
@@ -385,6 +407,11 @@ object InteractiveDemo {
                         println(
                           s"[Mint] ✓ Transaction submitted: ${signedMintTx.id.toHex.take(16)}..."
                         )
+                        // Track spent UTxOs
+                        signedMintTx.body.value.inputs.toSeq.foreach { input =>
+                            spentUtxos.add(input)
+                        }
+                        println(s"[Mint]   Tracked ${signedMintTx.body.value.inputs.toSeq.size} spent UTxOs")
                     case Left(error) =>
                         throw new Exception(
                           s"Failed to submit minting transaction: ${error.getMessage}"
@@ -514,6 +541,12 @@ object InteractiveDemo {
 
                 // Send OpenChannel request
                 client.sendMessage(ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot))
+
+                // Track spent UTxOs
+                openChannelTx.body.value.inputs.toSeq.foreach { input =>
+                    spentUtxos.add(input)
+                }
+                println(s"[Connect] Tracked ${openChannelTx.body.value.inputs.toSeq.size} spent UTxOs")
 
                 // Wait for ChannelPending
                 client.receiveMessage(timeoutSeconds = 10) match {
