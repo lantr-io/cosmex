@@ -31,5 +31,6 @@ object BobDemo extends App {
 
     // Run the interactive demo with Bob pre-selected
     System.setProperty("cosmex.demo.party", "bob")
-    InteractiveDemo.main(args)
+    // Pass --external-server flag to connect to running server
+    InteractiveDemo.main(Array("--external-server"))
 }

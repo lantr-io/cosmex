@@ -25,9 +25,14 @@ import scala.util.{Failure, Success, Try}
   *   - Buy/sell assets
   *   - Quit
   *
-  * Usage: sbt "Test/runMain cosmex.demo.InteractiveDemo"
+  * Usage:
+  *   sbt "Test/runMain cosmex.demo.InteractiveDemo"                    # Starts own server
+  *   sbt "Test/runMain cosmex.demo.InteractiveDemo --external-server"  # Connects to external server
   */
 object InteractiveDemo extends App {
+
+    // Check if we should connect to an external server
+    val useExternalServer = args.contains("--external-server")
 
     println("""
         |================================================================
@@ -99,63 +104,74 @@ object InteractiveDemo extends App {
             )
             val clientInitialValue = clientConfig.getInitialValue()
 
-            // Create blockchain provider
-            val provider = config.blockchain.provider.toLowerCase match {
-                case "mock" =>
-                    import scalus.testing.kit.MockLedgerApi
-                    import scalus.cardano.ledger.rules.*
+            // Create blockchain provider and server (only if not using external server)
+            val (provider, cardanoInfo, _, port) = if (!useExternalServer) {
+                val prov = config.blockchain.provider.toLowerCase match {
+                    case "mock" =>
+                        import scalus.testing.kit.MockLedgerApi
+                        import scalus.cardano.ledger.rules.*
 
-                    val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
-                    val initialUtxos = Map(
-                      TransactionInput(genesisHash, 0) ->
-                          TransactionOutput(
-                            address = clientAddress,
-                            value = clientInitialValue + Value.lovelace(100_000_000L)
-                          )
-                    )
+                        val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
+                        val initialUtxos = Map(
+                          TransactionInput(genesisHash, 0) ->
+                              TransactionOutput(
+                                address = clientAddress,
+                                value = clientInitialValue + Value.lovelace(100_000_000L)
+                              )
+                        )
 
-                    MockLedgerApi(
-                      initialUtxos = initialUtxos,
-                      context = Context.testMainnet(slot = 1000),
-                      validators = MockLedgerApi.defaultValidators -
-                          MissingKeyHashesValidator -
-                          ProtocolParamsViewHashesMatchValidator -
-                          MissingRequiredDatumsValidator -
-                          WrongNetworkValidator -
-                          VerifiedSignaturesInWitnessesValidator,
-                      mutators = MockLedgerApi.defaultMutators -
-                          PlutusScriptsTransactionMutator
-                    )
+                        MockLedgerApi(
+                          initialUtxos = initialUtxos,
+                          context = Context.testMainnet(slot = 1000),
+                          validators = MockLedgerApi.defaultValidators -
+                              MissingKeyHashesValidator -
+                              ProtocolParamsViewHashesMatchValidator -
+                              MissingRequiredDatumsValidator -
+                              WrongNetworkValidator -
+                              VerifiedSignaturesInWitnessesValidator,
+                          mutators = MockLedgerApi.defaultMutators -
+                              PlutusScriptsTransactionMutator
+                        )
 
-                case "yaci-devkit" | "yaci" =>
-                    import scalus.cardano.address.ShelleyAddress
-                    val clientBech32 = clientAddress.asInstanceOf[ShelleyAddress].toBech32.get
-                    val clientFunding = clientInitialValue.coin.value + 100_000_000L
+                    case "yaci-devkit" | "yaci" =>
+                        import scalus.cardano.address.ShelleyAddress
+                        val clientBech32 = clientAddress.asInstanceOf[ShelleyAddress].toBech32.get
+                        val clientFunding = clientInitialValue.coin.value + 100_000_000L
 
-                    println(s"\n[Setup] Funding $partyName with ${clientFunding / 1_000_000} ADA")
+                        println(s"\n[Setup] Funding $partyName with ${clientFunding / 1_000_000} ADA")
 
-                    config.createProviderWithFunding(Seq((clientBech32, clientFunding)))
+                        config.createProviderWithFunding(Seq((clientBech32, clientFunding)))
 
-                case other =>
-                    throw new IllegalArgumentException(s"Unsupported provider for demo: $other")
+                    case other =>
+                        throw new IllegalArgumentException(s"Unsupported provider for demo: $other")
+                }
+
+                // Create CardanoInfo
+                val cInfo = CardanoInfoTestNet.currentNetwork(prov)
+
+                // Create server
+                val srv = Server(cInfo, exchangeParams, prov, exchangePrivKey)
+
+                // Start WebSocket server
+                val serverPort = 18080
+                println(s"\n[Server] Starting COSMEX exchange on port $serverPort...")
+
+                val serverFork = forkUser {
+                    CosmexWebSocketServer.runBinding(srv, port = serverPort)
+                }
+                serverBinding = serverFork.join()
+                Thread.sleep(2000)
+                println(s"[Server] ✓ Exchange is running at ws://localhost:$serverPort")
+
+                (prov, cInfo, srv, serverPort)
+            } else {
+                // Use external server - use config provider
+                println(s"\n[Setup] Connecting to external server at ws://localhost:${config.server.port}")
+                val prov = config.createProvider()
+                val cInfo = CardanoInfoTestNet.currentNetwork(prov)
+                val srv = Server(cInfo, exchangeParams, prov, exchangePrivKey)
+                (prov, cInfo, srv, config.server.port)
             }
-
-            // Create CardanoInfo
-            val cardanoInfo = CardanoInfoTestNet.currentNetwork(provider)
-
-            // Create server
-            val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
-
-            // Start WebSocket server
-            val port = 18080
-            println(s"\n[Server] Starting COSMEX exchange on port $port...")
-
-            val serverFork = forkUser {
-                CosmexWebSocketServer.runBinding(server, port = port)
-            }
-            serverBinding = serverFork.join()
-            Thread.sleep(2000)
-            println(s"[Server] ✓ Exchange is running at ws://localhost:$port")
 
             // Transaction builder
             val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
@@ -175,7 +191,7 @@ object InteractiveDemo extends App {
                           )
                         )
 
-                    case "yaci-devkit" | "yaci" =>
+                    case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                         provider.findUtxo(
                           address = clientAddress,
                           transactionId = txIdFilter,

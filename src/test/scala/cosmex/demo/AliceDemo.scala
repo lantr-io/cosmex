@@ -29,5 +29,6 @@ object AliceDemo extends App {
 
     // Run the interactive demo with Alice pre-selected
     System.setProperty("cosmex.demo.party", "alice")
-    InteractiveDemo.main(args)
+    // Pass --external-server flag to connect to running server
+    InteractiveDemo.main(Array("--external-server"))
 }
