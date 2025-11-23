@@ -10,6 +10,7 @@ import scalus.cardano.ledger.BloxbeanToLedgerTranslation.*
 import scalus.cardano.node.Provider
 import scalus.utils.Hex.hexToBytes
 
+import scala.collection.immutable.SortedMap
 import scala.util.Try
 
 /** Blockfrost-based provider for interacting with Cardano networks (preprod, preview, mainnet)
@@ -97,8 +98,87 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
     /** Find a single UTxO by transaction input */
     override def findUtxo(
         input: TransactionInput
-    ): Either[RuntimeException, Utxo] =
-        Left(new RuntimeException("Unimplemented, use `findUtxos(address)`"))
+    ): Either[RuntimeException, Utxo] = {
+        // Query Blockfrost for the specific transaction output
+        val txHash = input.transactionId.toHex
+        val outputIndex = input.index
+
+        Try {
+            val url = s"$baseUrl/txs/$txHash/utxos"
+            val response = requests.get(url, headers = Map("project_id" -> apiKey))
+
+            if response.is2xx then {
+                val json = ujson.read(response.text())
+                val outputs = json("outputs").arr
+
+                if outputIndex >= outputs.size then {
+                    throw new RuntimeException(s"Output index $outputIndex out of bounds (tx has ${outputs.size} outputs)")
+                }
+
+                val outputJson = outputs(outputIndex)
+                val address = Address.fromBech32(outputJson("address").str)
+
+                // Parse value
+                val amountArray = outputJson("amount").arr
+                var lovelace = 0L
+                val multiAssetBuilder = scala.collection.mutable.Map[ScriptHash, scala.collection.mutable.Map[AssetName, Long]]()
+
+                amountArray.foreach { item =>
+                    val unit = item("unit").str
+                    val quantity = item("quantity").str.toLong
+
+                    if unit == "lovelace" then {
+                        lovelace = quantity
+                    } else {
+                        // Parse multi-asset: first 56 chars = policy ID (28 bytes hex), rest = asset name
+                        val policyId = ScriptHash.fromHex(unit.take(56))
+                        val assetNameHex = unit.drop(56)
+                        val assetName = AssetName(ByteString.fromHex(assetNameHex))
+
+                        multiAssetBuilder.getOrElseUpdate(policyId, scala.collection.mutable.Map())
+                            .update(assetName, quantity)
+                    }
+                }
+
+                val value = if multiAssetBuilder.isEmpty then {
+                    Value.lovelace(lovelace)
+                } else {
+                    // Convert mutable maps to immutable SortedMaps
+                    val immutableAssets: SortedMap[ScriptHash, SortedMap[AssetName, Long]] =
+                        SortedMap.from(
+                            multiAssetBuilder.view.mapValues(m => SortedMap.from(m))
+                        )
+                    Value(Coin(lovelace), MultiAsset(immutableAssets))
+                }
+
+                // Parse datum if present
+                val datumOption: Option[DatumOption] =
+                    (outputJson.obj.get("data_hash"), outputJson.obj.get("inline_datum")) match {
+                        case (_, Some(inlineDatum)) =>
+                            Some(DatumOption.Inline(Data.fromCbor(hexToBytes(inlineDatum.str))))
+                        case (Some(dataHash), None) =>
+                            Some(DatumOption.Hash(Hash(ByteString.fromHex(dataHash.str))))
+                        case (None, None) => None
+                    }
+
+                val output = TransactionOutput(
+                    address = address,
+                    value = value,
+                    datumOption = datumOption,
+                    scriptRef = None
+                )
+
+                Right(Utxo(input, output))
+            } else if response.statusCode == 404 then {
+                Left(new RuntimeException(s"Transaction ${txHash.take(16)}... not found"))
+            } else {
+                Left(new RuntimeException(s"Failed to fetch UTxO: ${response.text()}"))
+            }
+        }.toEither.left.map {
+            case e: RuntimeException => e
+            case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
+        }.flatten
+    }
 
     /** Find multiple UTxOs by transaction inputs */
     override def findUtxos(inputs: Set[TransactionInput]): Either[RuntimeException, Utxos] = Left(

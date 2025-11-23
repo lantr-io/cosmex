@@ -175,6 +175,7 @@ case class DemoConfig(config: Config) {
         def seed: Int
         def mnemonic: Option[String]
         def initialBalance: Map[String, Long]
+        def channelDepositAmount: Long  // How much ADA to deposit when opening channel (lovelace)
         def defaultOrder: Option[OrderConfig]
 
         /** Create account from config (using mnemonic if available, otherwise seed) */
@@ -236,8 +237,8 @@ case class DemoConfig(config: Config) {
             value
         }
 
-        /** Get deposit amount (for channel opening) */
-        def getDepositAmount(): Value = getInitialValue()
+        /** Get deposit amount (for channel opening) - returns fixed ADA amount configured */
+        def getDepositAmount(): Long = channelDepositAmount
     }
 
     case class OrderConfig(
@@ -274,6 +275,8 @@ case class DemoConfig(config: Config) {
                 None
             }
         }
+
+        val channelDepositAmount: Long = config.getLong("alice.channel.depositAmount")
 
         val initialBalance: Map[String, Long] = {
             val balanceConfig = config.getConfig("alice.initialBalance")
@@ -318,6 +321,8 @@ case class DemoConfig(config: Config) {
                 None
             }
         }
+
+        val channelDepositAmount: Long = config.getLong("bob.channel.depositAmount")
 
         val initialBalance: Map[String, Long] = {
             val balanceConfig = config.getConfig("bob.initialBalance")

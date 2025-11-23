@@ -422,14 +422,20 @@ object InteractiveDemo {
                 println(s"[DEBUG] findClientUtxo returned successfully")
                 System.out.flush()
 
-                // Reserve some ADA for transaction fees + minUTxO for change output (~2 ADA should be safe)
-                val feeReserve = 2_000_000L // 2 ADA in lovelace (covers fees + minUTxO requirement)
+                // Deposit configured amount into the channel
+                val depositAmountLovelace = clientConfig.getDepositAmount()
                 val totalAvailable = depositUtxo.output.value.coin.value
-                val depositAmountLovelace = totalAvailable - feeReserve
-                // Keep all tokens but reduce ADA for fees
+                val feeReserve = 5_000_000L // 5 ADA for fees/change
+
+                // Verify we have enough ADA
+                if totalAvailable < depositAmountLovelace + feeReserve then {
+                    throw new Exception(s"Insufficient funds: have ${totalAvailable / 1_000_000} ADA, need ${(depositAmountLovelace + feeReserve) / 1_000_000} ADA (${depositAmountLovelace / 1_000_000} ADA deposit + ${feeReserve / 1_000_000} ADA for fees/change)")
+                }
+
+                // Keep all tokens but only deposit configured ADA amount
                 val depositAmount = depositUtxo.output.value.copy(coin = Coin(depositAmountLovelace))
 
-                println(s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA (reserving ${feeReserve / 1_000_000.0} ADA for fees)")
+                println(s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA (keeping ${(totalAvailable - depositAmountLovelace) / 1_000_000} ADA in wallet for fees/change)")
 
                 println(s"[DEBUG] Building openChannel transaction...")
                 println(s"[DEBUG] Deposit amount: ${depositAmount.coin.value / 1_000_000} ADA")
@@ -466,20 +472,31 @@ object InteractiveDemo {
                 val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
 
                 // Find the actual output index for the Cosmex script output
+                // Use the server's script hash if we fetched it, otherwise use local compilation
+                val effectiveScriptHash = serverScriptHash.getOrElse(txbuilder.script.scriptHash)
                 val cosmexScriptAddress = Address(
                   scalusNetwork,
-                  Credential.ScriptHash(txbuilder.script.scriptHash)
+                  Credential.ScriptHash(effectiveScriptHash)
                 )
+
+                println(s"[Connect] Looking for output to script address: $cosmexScriptAddress")
+
                 val channelOutputIdx = openChannelTx.body.value.outputs.view
                     .map(_.value)
                     .zipWithIndex
                     .find(_._1.address == cosmexScriptAddress)
                     .map(_._2)
-                    .getOrElse(
-                      throw new Exception("Could not find Cosmex script output in transaction")
-                    )
+                    .getOrElse {
+                        println(s"[Connect] ERROR: Could not find output to expected script address")
+                        println(s"[Connect] Expected: $cosmexScriptAddress")
+                        println(s"[Connect] Transaction outputs:")
+                        openChannelTx.body.value.outputs.toSeq.zipWithIndex.foreach { case (out, idx) =>
+                            println(s"[Connect]   Output $idx: ${out.value.address}")
+                        }
+                        throw new Exception("Could not find Cosmex script output in transaction")
+                    }
 
-                println(s"[Connect] Channel output is at index: $channelOutputIdx")
+                println(s"[Connect] Found script output at index: $channelOutputIdx")
 
                 // Create client ID and connect
                 val cId = ClientId(TransactionInput(openChannelTx.id, channelOutputIdx))

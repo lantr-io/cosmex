@@ -224,7 +224,7 @@ object CosmexWebSocketServer {
                                     // Transaction already submitted, so we just poll for first output
                                     import cosmex.util.submitAndWait
                                     var attempts = 0
-                                    val maxAttempts = 60
+                                    val maxAttempts = 180  // 3 minutes - preprod blocks are ~20s, plus Blockfrost indexing delay
                                     val delayMs = 1000
 
                                     var confirmed = false
