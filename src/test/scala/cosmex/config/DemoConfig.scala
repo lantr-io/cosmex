@@ -77,11 +77,11 @@ case class DemoConfig(config: Config) {
 
     // Blockchain Provider Configuration
     object blockchain {
-        // In CI environment, always use mock provider for fast, reliable tests
+        // In CI environment, use yaci-devkit for reliable tests
         val provider: String = sys.env.get("CI") match {
             case Some("true") =>
-                println("[Config] CI environment detected - using mock provider")
-                "mock"
+                println("[Config] CI environment detected - using yaci-devkit provider")
+                "yaci-devkit"
             case _ =>
                 config.getString("blockchain.provider")
         }
@@ -476,12 +476,31 @@ case class DemoConfig(config: Config) {
 
         blockchain.provider.toLowerCase match {
             case "mock" =>
-                // Mock provider doesn't support this method - should use test-specific setup
-                println(
-                  s"[Config] Warning: Mock provider doesn't support createProviderWithFunding"
+                // Create MockLedgerApi with initial funding UTxOs
+                println(s"[Config] Using MockLedgerApi provider with initial funding")
+                import scalus.testing.kit.MockLedgerApi
+                import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
+                import scalus.cardano.address.Address
+                import scalus.cardano.ledger.{TransactionInput, TransactionHash, TransactionOutput, Value}
+
+                // Convert funding addresses to initial UTxOs
+                val initialUtxos = initialFunding.zipWithIndex.map { case ((bech32, amount), idx) =>
+                    val address = Address.fromBech32(bech32)
+                    // Create unique transaction hash for each funding UTxO
+                    val txHashHex = "00" * 31 + f"$idx%02x"
+                    val txHash = TransactionHash.fromHex(txHashHex)
+                    val txIn = TransactionInput(txHash, 0)
+                    val txOut = TransactionOutput(address, Value.lovelace(amount), None)
+                    txIn -> txOut
+                }.toMap
+
+                println(s"[Config] Created ${initialUtxos.size} initial UTxOs for MockLedgerApi")
+                MockLedgerApi(
+                  initialUtxos = initialUtxos,
+                  context = Context.testMainnet(slot = 1000),
+                  validators = MockLedgerApi.defaultValidators - WrongNetworkValidator,
+                  mutators = MockLedgerApi.defaultMutators
                 )
-                println(s"[Config] Use test-specific UTxO setup for MockLedgerApi")
-                createProvider()
 
             case "yaci-devkit" | "yaci" =>
                 println(s"[Config] Using Yaci DevKit provider with initial funding")

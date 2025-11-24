@@ -526,6 +526,23 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   s"[$name] ✓ Order created! OrderID: $orderId"
                                 )
 
+                            case Success(ClientResponse.ChannelPending(_)) =>
+                                // Ignore stale ChannelPending (can arrive out of order with MockLedgerApi)
+                                println(s"[$name] Ignoring stale ChannelPending, retrying...")
+                                client.receiveMessage(timeoutSeconds = 10) match {
+                                    case Success(msgJson) =>
+                                        read[ClientResponse](msgJson) match {
+                                            case ClientResponse.OrderCreated(orderId) =>
+                                                println(s"[$name] ✓ Order created! OrderID: $orderId")
+                                            case ClientResponse.Error(msg) =>
+                                                fail(s"[$name] Order creation failed: $msg")
+                                            case other =>
+                                                fail(s"[$name] Unexpected response after retry: $other")
+                                        }
+                                    case Failure(e) =>
+                                        fail(s"[$name] Error receiving OrderCreated: ${e.getMessage}")
+                                }
+
                             case Success(ClientResponse.Error(msg)) =>
                                 fail(s"[$name] Order creation failed: $msg")
 
@@ -551,6 +568,11 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                               s"[$name] ✓ Order executed! Trade: ${trade.orderId}, amount: ${trade.tradeAmount}, price: ${trade.tradePrice}"
                                             )
                                             tradeReceived = true
+                                        case Success(ClientResponse.ChannelPending(_)) =>
+                                            // Ignore stale ChannelPending messages
+                                            println(
+                                              s"[$name] Ignoring stale ChannelPending message"
+                                            )
                                         case Success(other) =>
                                             println(
                                               s"[$name] Received other message: ${other.getClass.getSimpleName}"
@@ -560,8 +582,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                               s"[$name] Failed to parse message: ${e.getMessage}"
                                             )
                                     }
-                                case Failure(_) =>
-                                    attempts += 1
+                                case Failure(e) =>
+                                    e match {
+                                        case _: java.util.concurrent.TimeoutException =>
+                                            // Timeout is expected when waiting for trades
+                                            attempts += 1
+                                        case other =>
+                                            println(s"[$name] Unexpected error receiving message: ${other.getMessage}")
+                                            other.printStackTrace()
+                                            attempts += 1
+                                    }
                             }
                         }
 

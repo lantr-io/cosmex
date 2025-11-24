@@ -8,9 +8,7 @@ import ox.channels.{Channel, ChannelClosedUnion, Source}
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
-import cats.Id // Import Id
-
-import cats.Id // Import Id
+import cats.Id
 
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
