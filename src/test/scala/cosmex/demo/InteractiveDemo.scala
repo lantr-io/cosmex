@@ -844,22 +844,18 @@ object InteractiveDemo {
                 var running = true
                 var lastMintTxId: Option[TransactionHash] = None
 
-                println("[DEBUG] Entering command loop")
-                System.out.flush()
-
                 while running do {
                     print(s"$partyName> ")
                     System.out.flush()
                     val input = StdIn.readLine()
-                    println(s"[DEBUG] Raw input received: '$input'")
-                    System.out.flush()
 
                     if input == null then {
                         running = false
+                    } else if input.trim.isEmpty then {
+                        // User pressed Enter with no input - just loop to show prompt again
+                        ()
                     } else {
                         val parts = input.trim.split("\\s+")
-                        println(s"[DEBUG] Received command: '${parts.mkString(" ")}'")
-                        System.out.flush()
 
                         parts.headOption.map(_.toLowerCase) match {
                             case Some("mint") if parts.length == 3 =>
