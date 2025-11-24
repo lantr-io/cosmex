@@ -147,6 +147,35 @@ object CosmexWebSocketServer {
             .start()
     }
 
+    /** Print current order book state for debugging */
+    private def printOrderBook()(using server: Server): Unit = {
+        val book = server.orderBookRef.get()
+        println("\n" + "=" * 80)
+        println("[Server] Order Book State")
+        println("=" * 80)
+
+        if book.buyOrders.isEmpty && book.sellOrders.isEmpty then
+            println("  (empty)")
+        else
+            if book.sellOrders.nonEmpty then
+                println("  SELL Orders (asks):")
+                book.sellOrders.reverse.foreach { entry =>
+                    val amount = -entry.order.orderAmount  // Negative for sell orders
+                    println(f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})")
+                }
+
+            println("  " + "-" * 76)
+
+            if book.buyOrders.nonEmpty then
+                println("  BUY Orders (bids):")
+                book.buyOrders.foreach { entry =>
+                    val amount = entry.order.orderAmount  // Positive for buy orders
+                    println(f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})")
+                }
+
+        println("=" * 80 + "\n")
+    }
+
     /** Handle a client request and return a response */
     /** Handle a single client request and return a sequence of responses
       *
@@ -154,6 +183,7 @@ object CosmexWebSocketServer {
       * OrderExecuted for each trade (ensures correct ordering)
       */
     def handleRequest(server: Server, request: ClientRequest): List[ClientResponse] = {
+        given Server = server
         val responses = request match {
             case ClientRequest.AskScriptHash =>
                 List(ClientResponse.TellScriptHash(server.script.scriptHash.toHex))
@@ -280,6 +310,9 @@ object CosmexWebSocketServer {
                     case Right((orderId, snapshot, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
+
+                        // Print current order book state
+                        printOrderBook()
 
                         // Split trades into:
                         // 1. Trades for THIS client (incoming order) - return immediately
