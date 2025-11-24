@@ -48,31 +48,29 @@ object MintingHelper {
         // Create the asset name
         val assetName = AssetName(tokenName)
 
-        // Create the minted value
+        // Create the minted value (tokens only, no ADA)
         val mintedValue = Value.asset(policyId, assetName, amount)
 
-        // Calculate the total value to send to recipient (minted tokens + min ADA)
-        val minAda = 2_000_000L // 2 ADA minimum for holding tokens
-        val recipientValue = mintedValue + Value.lovelace(minAda)
+        // Minimum ADA required for a multi-asset UTxO
+        val minAdaForTokens = 2_000_000L
 
-        // Reserve ADA for a separate collateral UTxO (5 ADA minimum for collateral)
+        // Reserve ADA for a separate collateral UTxO (for future script execution)
         val collateralAda = 5_000_000L
 
         // Build the transaction with collateral for Plutus script execution
-        // Create TWO outputs:
-        // 1. Minted tokens + minAda to recipient
-        // 2. ADA-only UTxO for future collateral use
+        // Important: Do NOT use .changeTo() - it seems to merge change with token output
+        // Instead, explicitly create all outputs with exact amounts
         TxBuilder(env)
             .spend(utxoToSpend)
             .collaterals(collateralUtxo)
             .mint(
-              redeemer = scalus.builtin.Data.B(ByteString.empty), // Dummy redeemer
+              redeemer = scalus.builtin.Data.B(ByteString.empty),
               assets = Map(assetName -> amount),
               script = mintingScript
             )
-            .payTo(recipientAddress, recipientValue) // Tokens output
-            .payTo(recipientAddress, Value.lovelace(collateralAda)) // ADA-only for future collateral
-            .changeTo(utxoToSpend.output.address)
+            .payTo(recipientAddress, mintedValue + Value.lovelace(minAdaForTokens)) // Tokens + 2 ADA ONLY
+            .payTo(recipientAddress, Value.lovelace(collateralAda)) // 5 ADA collateral
+            .changeTo(recipientAddress) // All remaining ADA as change
             .build()
             .transaction
     }
