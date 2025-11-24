@@ -15,7 +15,7 @@ class CosmexTransactions(
     private val network = env.network
     val protocolVersion = 9
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
-    val script = Script.PlutusV3(cosmexValidator.cborByteString)  // Public for debugging
+    val script = Script.PlutusV3(cosmexValidator.cborByteString) // Public for debugging
 
     // Use override if provided, otherwise use the computed script hash
     private val effectiveScriptHash = scriptHashOverride.getOrElse(script.scriptHash)

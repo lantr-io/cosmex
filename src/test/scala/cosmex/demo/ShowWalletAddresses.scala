@@ -23,18 +23,19 @@ object ShowWalletAddresses extends App {
     val exchangeSeed = config.getInt("exchange.seed")
 
     // Check if mnemonics are provided
-    val aliceHasMnemonic = config.hasPath("alice.mnemonic") && !config.getString("alice.mnemonic").isEmpty
+    val aliceHasMnemonic =
+        config.hasPath("alice.mnemonic") && !config.getString("alice.mnemonic").isEmpty
     val bobHasMnemonic = config.hasPath("bob.mnemonic") && !config.getString("bob.mnemonic").isEmpty
 
     // Create accounts
-    val aliceAccount = if (aliceHasMnemonic) {
+    val aliceAccount = if aliceHasMnemonic then {
         val mnemonic = config.getString("alice.mnemonic")
         new Account(network, mnemonic)
     } else {
         new Account(network, aliceSeed)
     }
 
-    val bobAccount = if (bobHasMnemonic) {
+    val bobAccount = if bobHasMnemonic then {
         val mnemonic = config.getString("bob.mnemonic")
         new Account(network, mnemonic)
     } else {

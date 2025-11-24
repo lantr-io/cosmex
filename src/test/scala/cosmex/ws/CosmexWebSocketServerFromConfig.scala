@@ -19,9 +19,8 @@ import scalus.testing.kit.MockLedgerApi
   *   - preprod: Cardano preprod testnet via Blockfrost (requires funded wallets)
   *   - preview: Cardano preview testnet via Blockfrost (requires funded wallets)
   *
-  * Usage:
-  *   sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig"
-  *   sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig --port 9090"
+  * Usage: sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig" sbt "Test/runMain
+  * cosmex.ws.CosmexWebSocketServerFromConfig --port 9090"
   */
 object CosmexWebSocketServerFromConfig {
 
@@ -169,8 +168,12 @@ object CosmexWebSocketServerFromConfig {
                     // NOTE: Wallets must be funded externally using the faucet
                     println(s"[Server] WARNING: Ensure wallets are funded from the faucet:")
                     import scalus.cardano.address.ShelleyAddress
-                    println(s"[Server]   - Alice: ${aliceAddress.asInstanceOf[ShelleyAddress].toBech32.get}")
-                    println(s"[Server]   - Bob: ${bobAddress.asInstanceOf[ShelleyAddress].toBech32.get}")
+                    println(
+                      s"[Server]   - Alice: ${aliceAddress.asInstanceOf[ShelleyAddress].toBech32.get}"
+                    )
+                    println(
+                      s"[Server]   - Bob: ${bobAddress.asInstanceOf[ShelleyAddress].toBech32.get}"
+                    )
                     config.createProvider()
 
                 case other =>

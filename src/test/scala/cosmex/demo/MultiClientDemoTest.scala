@@ -116,8 +116,12 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     // NOTE: Wallets must be funded externally using the faucet
                     println(s"[Test] Using $provider network provider")
                     println(s"[Test] WARNING: Ensure wallets are funded from the faucet:")
-                    println(s"[Test]   - Alice: ${aliceAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}")
-                    println(s"[Test]   - Bob: ${bobAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}")
+                    println(
+                      s"[Test]   - Alice: ${aliceAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}"
+                    )
+                    println(
+                      s"[Test]   - Bob: ${bobAddress.asInstanceOf[scalus.cardano.address.ShelleyAddress].toBech32.get}"
+                    )
                     config.createProvider()
 
                 case other =>
@@ -263,33 +267,47 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             import cosmex.demo.MintingHelper
 
                             // Find suitable collateral (ADA-only if possible)
-                            val collateralUtxo = if depositUtxo.output.value == Value.lovelace(depositUtxo.output.value.coin.value) then {
-                                // UTxO is ADA-only, can use as both input and collateral
-                                depositUtxo
-                            } else {
-                                // UTxO contains tokens, try to find another ADA-only UTxO
-                                println(s"[$name] Spend UTxO contains tokens, looking for ADA-only collateral...")
-                                provider.findUtxos(
-                                  address = address,
-                                  transactionId = None,
-                                  datum = None,
-                                  minAmount = None,
-                                  minRequiredTotalAmount = None
-                                ) match {
-                                    case Right(utxos) =>
-                                        utxos.find { case (_, output) =>
-                                            output.value == Value.lovelace(output.value.coin.value) &&
-                                            output.value.coin.value >= 5_000_000L // At least 5 ADA for collateral
-                                        }.map { case (input, output) => Utxo(input, output) }
-                                        .getOrElse {
-                                            println(s"[$name] WARNING: No ADA-only UTxO found, using spend UTxO as collateral (may fail)")
+                            val collateralUtxo =
+                                if depositUtxo.output.value == Value.lovelace(
+                                      depositUtxo.output.value.coin.value
+                                    )
+                                then {
+                                    // UTxO is ADA-only, can use as both input and collateral
+                                    depositUtxo
+                                } else {
+                                    // UTxO contains tokens, try to find another ADA-only UTxO
+                                    println(
+                                      s"[$name] Spend UTxO contains tokens, looking for ADA-only collateral..."
+                                    )
+                                    provider.findUtxos(
+                                      address = address,
+                                      transactionId = None,
+                                      datum = None,
+                                      minAmount = None,
+                                      minRequiredTotalAmount = None
+                                    ) match {
+                                        case Right(utxos) =>
+                                            utxos
+                                                .find { case (_, output) =>
+                                                    output.value == Value.lovelace(
+                                                      output.value.coin.value
+                                                    ) &&
+                                                    output.value.coin.value >= 5_000_000L // At least 5 ADA for collateral
+                                                }
+                                                .map { case (input, output) => Utxo(input, output) }
+                                                .getOrElse {
+                                                    println(
+                                                      s"[$name] WARNING: No ADA-only UTxO found, using spend UTxO as collateral (may fail)"
+                                                    )
+                                                    depositUtxo
+                                                }
+                                        case Left(_) =>
+                                            println(
+                                              s"[$name] WARNING: Could not query UTxOs, using spend UTxO as collateral (may fail)"
+                                            )
                                             depositUtxo
-                                        }
-                                    case Left(_) =>
-                                        println(s"[$name] WARNING: Could not query UTxOs, using spend UTxO as collateral (may fail)")
-                                        depositUtxo
+                                    }
                                 }
-                            }
 
                             // Create minting transaction
                             val mintTx = MintingHelper.mintTokens(
@@ -576,70 +594,88 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 val bobMintedPolicyId: Option[ByteString] = if bobMintingConfig.enabled then {
                     println("\n[Bob - Preliminary] Minting custom token before trading...")
 
-                    val (depositUtxo, collateralUtxo) = config.blockchain.provider.toLowerCase match {
-                        case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
-                            import scalus.cardano.address.ShelleyAddress
-                            val addressBech32 = bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
+                    val (depositUtxo, collateralUtxo) =
+                        config.blockchain.provider.toLowerCase match {
+                            case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
+                                import scalus.cardano.address.ShelleyAddress
+                                val addressBech32 =
+                                    bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
 
-                            // Find any UTxO for spending (can have tokens)
-                            val spendUtxo = provider.findUtxo(
-                              address = bobAddress,
-                              transactionId = None,
-                              datum = None,
-                              minAmount = Some(Coin(10_000_000L)) // Need at least 10 ADA
-                            ) match {
-                                case Right(utxo) => utxo
-                                case Left(err) =>
-                                    fail(
-                                      s"[Bob - Preliminary] Failed to find UTxO to spend: ${err.getMessage}"
-                                    )
-                            }
-
-                            // Try to find an ADA-only UTxO for collateral
-                            // Check if the spend UTxO is ADA-only
-                            val collateral = if spendUtxo.output.value == Value.lovelace(spendUtxo.output.value.coin.value) then {
-                                // UTxO is ADA-only, can use as both input and collateral
-                                spendUtxo
-                            } else {
-                                // UTxO contains tokens, try to find another ADA-only UTxO
-                                println("[Bob - Preliminary] Spend UTxO contains tokens, looking for ADA-only collateral...")
-                                // Query all UTxOs and filter for ADA-only
-                                provider.findUtxos(
+                                // Find any UTxO for spending (can have tokens)
+                                val spendUtxo = provider.findUtxo(
                                   address = bobAddress,
                                   transactionId = None,
                                   datum = None,
-                                  minAmount = None,
-                                  minRequiredTotalAmount = None
+                                  minAmount = Some(Coin(10_000_000L)) // Need at least 10 ADA
                                 ) match {
-                                    case Right(utxos) =>
-                                        utxos.find { case (_, output) =>
-                                            output.value == Value.lovelace(output.value.coin.value) &&
-                                            output.value.coin.value >= 5_000_000L // At least 5 ADA for collateral
-                                        }.map { case (input, output) => Utxo(input, output) }
-                                        .getOrElse {
-                                            println("[Bob - Preliminary] WARNING: No ADA-only UTxO found, using spend UTxO as collateral (may fail)")
-                                            spendUtxo
-                                        }
-                                    case Left(_) =>
-                                        println("[Bob - Preliminary] WARNING: Could not query UTxOs, using spend UTxO as collateral (may fail)")
-                                        spendUtxo
+                                    case Right(utxo) => utxo
+                                    case Left(err) =>
+                                        fail(
+                                          s"[Bob - Preliminary] Failed to find UTxO to spend: ${err.getMessage}"
+                                        )
                                 }
-                            }
 
-                            (spendUtxo, collateral)
+                                // Try to find an ADA-only UTxO for collateral
+                                // Check if the spend UTxO is ADA-only
+                                val collateral =
+                                    if spendUtxo.output.value == Value.lovelace(
+                                          spendUtxo.output.value.coin.value
+                                        )
+                                    then {
+                                        // UTxO is ADA-only, can use as both input and collateral
+                                        spendUtxo
+                                    } else {
+                                        // UTxO contains tokens, try to find another ADA-only UTxO
+                                        println(
+                                          "[Bob - Preliminary] Spend UTxO contains tokens, looking for ADA-only collateral..."
+                                        )
+                                        // Query all UTxOs and filter for ADA-only
+                                        provider.findUtxos(
+                                          address = bobAddress,
+                                          transactionId = None,
+                                          datum = None,
+                                          minAmount = None,
+                                          minRequiredTotalAmount = None
+                                        ) match {
+                                            case Right(utxos) =>
+                                                utxos
+                                                    .find { case (_, output) =>
+                                                        output.value == Value.lovelace(
+                                                          output.value.coin.value
+                                                        ) &&
+                                                        output.value.coin.value >= 5_000_000L // At least 5 ADA for collateral
+                                                    }
+                                                    .map { case (input, output) =>
+                                                        Utxo(input, output)
+                                                    }
+                                                    .getOrElse {
+                                                        println(
+                                                          "[Bob - Preliminary] WARNING: No ADA-only UTxO found, using spend UTxO as collateral (may fail)"
+                                                        )
+                                                        spendUtxo
+                                                    }
+                                            case Left(_) =>
+                                                println(
+                                                  "[Bob - Preliminary] WARNING: Could not query UTxOs, using spend UTxO as collateral (may fail)"
+                                                )
+                                                spendUtxo
+                                        }
+                                    }
 
-                        case "mock" =>
-                            val genesisInput = TransactionInput(genesisHash, 1)
-                            val utxo = Utxo(
-                              input = genesisInput,
-                              output = TransactionOutput(
-                                address = bobAddress,
-                                value = bobInitialValue + Value.lovelace(100_000_000L)
-                              )
-                            )
-                            (utxo, utxo) // Mock ledger, same UTxO for both
-                        case other => fail(s"Unsupported provider: $other")
-                    }
+                                (spendUtxo, collateral)
+
+                            case "mock" =>
+                                val genesisInput = TransactionInput(genesisHash, 1)
+                                val utxo = Utxo(
+                                  input = genesisInput,
+                                  output = TransactionOutput(
+                                    address = bobAddress,
+                                    value = bobInitialValue + Value.lovelace(100_000_000L)
+                                  )
+                                )
+                                (utxo, utxo) // Mock ledger, same UTxO for both
+                            case other => fail(s"Unsupported provider: $other")
+                        }
 
                     import cosmex.demo.MintingHelper
                     val mintTx = MintingHelper.mintTokens(

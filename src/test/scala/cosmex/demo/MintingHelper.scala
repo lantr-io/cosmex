@@ -87,7 +87,10 @@ object MintingHelper {
         tx.body.value.outputs.toSeq.zipWithIndex.foreach { case (out, idx) =>
             val hasTokens = !out.value.value.assets.isEmpty
             val ada = out.value.value.coin.value / 1_000_000
-            println(s"[MintingHelper]   Output $idx: ${ada} ADA" + (if (hasTokens) s" + tokens" else ""))
+            println(
+              s"[MintingHelper]   Output $idx: ${ada} ADA" + (if hasTokens then s" + tokens"
+                                                              else "")
+            )
         }
 
         tx

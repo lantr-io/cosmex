@@ -112,7 +112,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 val outputs = json("outputs").arr
 
                 if outputIndex >= outputs.size then {
-                    throw new RuntimeException(s"Output index $outputIndex out of bounds (tx has ${outputs.size} outputs)")
+                    throw new RuntimeException(
+                      s"Output index $outputIndex out of bounds (tx has ${outputs.size} outputs)"
+                    )
                 }
 
                 val outputJson = outputs(outputIndex)
@@ -121,7 +123,8 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 // Parse value
                 val amountArray = outputJson("amount").arr
                 var lovelace = 0L
-                val multiAssetBuilder = scala.collection.mutable.Map[ScriptHash, scala.collection.mutable.Map[AssetName, Long]]()
+                val multiAssetBuilder = scala.collection.mutable
+                    .Map[ScriptHash, scala.collection.mutable.Map[AssetName, Long]]()
 
                 amountArray.foreach { item =>
                     val unit = item("unit").str
@@ -135,7 +138,8 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                         val assetNameHex = unit.drop(56)
                         val assetName = AssetName(ByteString.fromHex(assetNameHex))
 
-                        multiAssetBuilder.getOrElseUpdate(policyId, scala.collection.mutable.Map())
+                        multiAssetBuilder
+                            .getOrElseUpdate(policyId, scala.collection.mutable.Map())
                             .update(assetName, quantity)
                     }
                 }
@@ -146,7 +150,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                     // Convert mutable maps to immutable SortedMaps
                     val immutableAssets: SortedMap[ScriptHash, SortedMap[AssetName, Long]] =
                         SortedMap.from(
-                            multiAssetBuilder.view.mapValues(m => SortedMap.from(m))
+                          multiAssetBuilder.view.mapValues(m => SortedMap.from(m))
                         )
                     Value(Coin(lovelace), MultiAsset(immutableAssets))
                 }
@@ -162,10 +166,10 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                     }
 
                 val output = TransactionOutput(
-                    address = address,
-                    value = value,
-                    datumOption = datumOption,
-                    scriptRef = None
+                  address = address,
+                  value = value,
+                  datumOption = datumOption,
+                  scriptRef = None
                 )
 
                 Right(Utxo(input, output))

@@ -138,10 +138,10 @@ case class DemoConfig(config: Config) {
         def getAsset(symbol: String): AssetConfig = symbol.toLowerCase match {
             case "ada"  => ada
             case "usdm" => usdm
-            case other  =>
+            case other =>
                 customAssets.get(other).getOrElse {
                     throw new IllegalArgumentException(
-                        s"Unknown asset: $other. Available: ${availableAssets.mkString(", ")}"
+                      s"Unknown asset: $other. Available: ${availableAssets.mkString(", ")}"
                     )
                 }
         }
@@ -193,7 +193,7 @@ case class DemoConfig(config: Config) {
         def seed: Int
         def mnemonic: Option[String]
         def initialBalance: Map[String, Long]
-        def channelDepositAmount: Long  // How much ADA to deposit when opening channel (lovelace)
+        def channelDepositAmount: Long // How much ADA to deposit when opening channel (lovelace)
         def defaultOrder: Option[OrderConfig]
 
         /** Create account from config (using mnemonic if available, otherwise seed) */

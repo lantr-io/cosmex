@@ -169,7 +169,8 @@ class Server(
             .filter(_._1.address == CosmexScriptAddress)
             .toVector match
             case Vector((output, idx)) => (output, idx)
-            case Vector()              => return Left(s"No output to Cosmex script address. Expected: $CosmexScriptAddress")
+            case Vector() =>
+                return Left(s"No output to Cosmex script address. Expected: $CosmexScriptAddress")
             case _ => return Left("More than one output to Cosmex script address")
 
         val (output, outputIdx) = cosmexOutput
