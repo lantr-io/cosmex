@@ -121,11 +121,29 @@ case class DemoConfig(config: Config) {
           symbol = config.getString("assets.usdm.symbol")
         )
 
+        // Mutable registry for dynamically registered assets (e.g., minted tokens)
+        private val customAssets = scala.collection.mutable.Map[String, AssetConfig]()
+
+        /** Register a custom asset (e.g., after minting) */
+        def registerAsset(asset: AssetConfig): Unit = {
+            customAssets(asset.symbol.toLowerCase) = asset
+        }
+
+        /** Get all available asset symbols */
+        def availableAssets: List[String] = {
+            List("ADA", "USDM") ++ customAssets.keys.map(_.toUpperCase).toList.sorted
+        }
+
         /** Get asset by symbol */
         def getAsset(symbol: String): AssetConfig = symbol.toLowerCase match {
             case "ada"  => ada
             case "usdm" => usdm
-            case other  => throw new IllegalArgumentException(s"Unknown asset: $other")
+            case other  =>
+                customAssets.get(other).getOrElse {
+                    throw new IllegalArgumentException(
+                        s"Unknown asset: $other. Available: ${availableAssets.mkString(", ")}"
+                    )
+                }
         }
     }
 

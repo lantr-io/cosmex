@@ -5,7 +5,6 @@ import scalus.cardano.ledger.*
 import scalus.cardano.txbuilder.*
 import scalus.ledger.api.v3.TxOutRef
 import scalus.cardano.address.Address
-import scalus.ledger.api.v3.TxId
 
 object MintingHelper {
 
@@ -57,10 +56,19 @@ object MintingHelper {
         // Reserve ADA for a separate collateral UTxO (for future script execution)
         val collateralAda = 5_000_000L
 
+        // Extract existing tokens from input UTxO (must be preserved!)
+        val existingTokens = utxoToSpend.output.value.assets
+        val existingTokenValue = if existingTokens.isEmpty then {
+            Value.zero
+        } else {
+            Value(Coin(0), existingTokens)
+        }
+
+        // Total value for token output: newly minted + existing tokens + min ADA
+        val totalTokenValue = mintedValue + existingTokenValue + Value.lovelace(minAdaForTokens)
+
         // Build the transaction with collateral for Plutus script execution
-        // Important: Do NOT use .changeTo() - it seems to merge change with token output
-        // Instead, explicitly create all outputs with exact amounts
-        TxBuilder(env)
+        val tx = TxBuilder(env)
             .spend(utxoToSpend)
             .collaterals(collateralUtxo)
             .mint(
@@ -68,11 +76,21 @@ object MintingHelper {
               assets = Map(assetName -> amount),
               script = mintingScript
             )
-            .payTo(recipientAddress, mintedValue + Value.lovelace(minAdaForTokens)) // Tokens + 2 ADA ONLY
+            .payTo(recipientAddress, totalTokenValue) // Newly minted + existing tokens + 2 ADA
             .payTo(recipientAddress, Value.lovelace(collateralAda)) // 5 ADA collateral
             .changeTo(recipientAddress) // All remaining ADA as change
             .build()
             .transaction
+
+        // Debug: print outputs
+        println(s"[MintingHelper] Built transaction with ${tx.body.value.outputs.size} outputs:")
+        tx.body.value.outputs.toSeq.zipWithIndex.foreach { case (out, idx) =>
+            val hasTokens = !out.value.value.assets.isEmpty
+            val ada = out.value.value.coin.value / 1_000_000
+            println(s"[MintingHelper]   Output $idx: ${ada} ADA" + (if (hasTokens) s" + tokens" else ""))
+        }
+
+        tx
     }
 
     /** Get the policy ID for a given UTxO reference

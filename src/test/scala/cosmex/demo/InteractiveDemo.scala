@@ -347,7 +347,9 @@ object InteractiveDemo {
             def mintTokens(tokenName: String, amount: Long): (TransactionHash, ByteString) = {
                 println(s"\n[Mint] Minting $amount units of token '$tokenName'...")
 
-                val depositUtxo = findClientUtxo()
+                // Minting needs: 2 ADA (token output) + 5 ADA (collateral) + ~1 ADA (fees) = ~8 ADA
+                val mintingRequiredAmount = 8_000_000L
+                val depositUtxo = findClientUtxo(requiredAmount = mintingRequiredAmount)
 
                 // Find suitable collateral (ADA-only if possible)
                 val collateralUtxo = if depositUtxo.output.value == Value.lovelace(depositUtxo.output.value.coin.value) then {
@@ -574,14 +576,54 @@ object InteractiveDemo {
                         throw new Exception(s"Error waiting for ChannelPending: ${e.getMessage}")
                 }
 
-                // Wait for ChannelOpened
-                println(s"[Connect] Waiting for channel confirmation...")
-                client.receiveMessage(timeoutSeconds = 70) match {
+                // Wait for ChannelOpened (server waits up to 180 seconds, so we need at least that)
+                println(s"[Connect] Waiting for channel confirmation (this may take up to 3 minutes on preprod)...")
+                client.receiveMessage(timeoutSeconds = 200) match {
                     case Success(responseJson) =>
                         read[ClientResponse](responseJson) match {
                             case ClientResponse.ChannelOpened(_) =>
                                 println(s"[Connect] ✓ Channel opened successfully!")
                                 isConnected = true
+
+                                // Start background listener for async notifications
+                                fork {
+                                    while isConnected do {
+                                        client.receiveMessage(timeoutSeconds = 2) match {
+                                            case Success(msgJson) =>
+                                                Try(read[ClientResponse](msgJson)) match {
+                                                    case Success(ClientResponse.OrderCreated(orderId)) =>
+                                                        println(s"\n[Notification] ✓ Order created! OrderID: $orderId")
+                                                        println(s"[Notification] Order is now in the order book")
+                                                        print(s"$partyName> ")
+                                                        System.out.flush()
+
+                                                    case Success(ClientResponse.OrderExecuted(trade)) =>
+                                                        println(s"\n[Notification] ✓✓ Order executed! Trade amount: ${trade.tradeAmount}, price: ${trade.tradePrice}")
+                                                        print(s"$partyName> ")
+                                                        System.out.flush()
+
+                                                    case Success(ClientResponse.Error(msg)) =>
+                                                        println(s"\n[Notification] ERROR: $msg")
+                                                        print(s"$partyName> ")
+                                                        System.out.flush()
+
+                                                    case Success(other) =>
+                                                        // Log unexpected messages for debugging
+                                                        println(s"\n[Notification] Received: ${other.getClass.getSimpleName}")
+                                                        print(s"$partyName> ")
+                                                        System.out.flush()
+
+                                                    case Failure(_) =>
+                                                        // Ignore malformed messages
+                                                        ()
+                                                }
+                                            case Failure(_) =>
+                                                // Timeout or connection error - continue polling
+                                                ()
+                                        }
+                                    }
+                                }
+
                             case ClientResponse.Error(msg) =>
                                 throw new Exception(s"Channel opening failed: $msg")
                             case other =>
@@ -636,8 +678,11 @@ object InteractiveDemo {
                             val quoteAssetClass = config.assets.getAsset(quote).assetClass
                             (baseAssetClass, quoteAssetClass)
                         } catch {
+                            case e: IllegalArgumentException =>
+                                println(s"[Order] ERROR: ${e.getMessage}")
+                                return
                             case _: Exception =>
-                                println(s"[Order] ERROR: Unknown assets. Available: ADA, USDM")
+                                println(s"[Order] ERROR: Unknown assets. Available: ${config.assets.availableAssets.mkString(", ")}")
                                 return
                         }
                 }
@@ -650,45 +695,14 @@ object InteractiveDemo {
                   orderPrice = price
                 )
 
-                client.sendRequest(
-                  ClientRequest.CreateOrder(clientId.get, order),
-                  timeoutSeconds = 10
-                ) match {
-                    case Success(ClientResponse.OrderCreated(orderId)) =>
-                        println(s"[Order] ✓ Order created! OrderID: $orderId")
-
-                        // Listen for potential trade execution
-                        println(s"[Order] Waiting for potential matches...")
-                        var attempts = 0
-                        while attempts < 5 do {
-                            client.receiveMessage(timeoutSeconds = 1) match {
-                                case Success(msgJson) =>
-                                    Try(read[ClientResponse](msgJson)) match {
-                                        case Success(ClientResponse.OrderExecuted(trade)) =>
-                                            println(
-                                              s"[Order] ✓ Order executed! Trade amount: ${trade.tradeAmount}, price: ${trade.tradePrice}"
-                                            )
-                                            return
-                                        case Success(other) =>
-                                            println(
-                                              s"[Order] Received: ${other.getClass.getSimpleName}"
-                                            )
-                                        case Failure(_) =>
-                                    }
-                                case Failure(_) =>
-                                    attempts += 1
-                            }
-                        }
-                        println(s"[Order] No matching orders found")
-
-                    case Success(ClientResponse.Error(msg)) =>
-                        println(s"[Order] ERROR: $msg")
-
-                    case Success(other) =>
-                        println(s"[Order] Unexpected response: $other")
+                // Send order asynchronously - background listener will handle response
+                client.sendMessage(ClientRequest.CreateOrder(clientId.get, order)) match {
+                    case Success(_) =>
+                        println(s"[Order] ✓ Order request sent to exchange")
+                        println(s"[Order] (You will be notified when it's created and/or executed)")
 
                     case Failure(e) =>
-                        println(s"[Order] ERROR: ${e.getMessage}")
+                        println(s"[Order] ERROR: Failed to send order: ${e.getMessage}")
                 }
             }
 
@@ -698,7 +712,9 @@ object InteractiveDemo {
             println(s"${"=" * 60}")
             println("\nAvailable commands:")
             println("  mint <tokenName> <amount>  - Mint custom tokens")
+            println("  register <symbol> <policyId> <assetName> - Register external token")
             println("  connect                     - Connect to the exchange")
+            println("  assets                      - Show available assets for trading")
             println("  buy <base> <quote> <amount> <price>   - Create buy order")
             println("  sell <base> <quote> <amount> <price>  - Create sell order")
             println("  help                        - Show this help")
@@ -733,6 +749,16 @@ object InteractiveDemo {
                                 val (txId, policyId) = mintTokens(tokenName, amount)
                                 mintedPolicyId = Some(policyId)
                                 lastMintTxId = Some(txId)
+
+                                // Register the minted token in the asset registry
+                                val assetConfig = config.assets.AssetConfig(
+                                    policyId = policyId,
+                                    assetName = ByteString.fromString(tokenName),
+                                    decimals = 0, // Tokens typically have 0 decimals unless specified
+                                    symbol = tokenName.toUpperCase
+                                )
+                                config.assets.registerAsset(assetConfig)
+                                println(s"[Mint] ✓ Registered token as tradeable asset: ${tokenName.toUpperCase}")
                             }.recover {
                                 case e: DemoException if e.alreadyPrinted => ()
                                 case e: DemoException => println(s"[Mint] ERROR [${e.code}]: ${e.message}")
@@ -744,6 +770,40 @@ object InteractiveDemo {
                         case Some("mint") =>
                             println("[Mint] ERROR: Invalid syntax. Usage: mint <tokenName> <amount>")
                             println("[Mint] Example: mint MYTOKEN 1000000")
+
+                        case Some("register") if parts.length == 4 =>
+                            Try {
+                                val tokenSymbol = parts(1)
+                                val policyIdHex = parts(2)
+                                val assetNameInput = parts(3)
+
+                                val policyId = ByteString.fromHex(policyIdHex)
+
+                                // Try to parse as hex, if that fails treat as plain text
+                                val assetName = Try(ByteString.fromHex(assetNameInput)).getOrElse {
+                                    // Not hex, convert plain text to hex
+                                    ByteString.fromString(assetNameInput)
+                                }
+
+                                val assetConfig = config.assets.AssetConfig(
+                                    policyId = policyId,
+                                    assetName = assetName,
+                                    decimals = 0,
+                                    symbol = tokenSymbol.toUpperCase
+                                )
+                                config.assets.registerAsset(assetConfig)
+                                println(s"[Register] ✓ Registered token: ${tokenSymbol.toUpperCase}")
+                                println(s"[Register]   Policy ID: ${policyIdHex.take(56)}")
+                                println(s"[Register]   Asset Name: ${assetName.toHex}")
+                            }.recover {
+                                case e: Exception =>
+                                    println(s"[Register] ERROR: ${e.getMessage}")
+                            }
+
+                        case Some("register") =>
+                            println("[Register] ERROR: Invalid syntax. Usage: register <symbol> <policyId> <assetName>")
+                            println("[Register] Example: register bob2 9e593bdb... bob2")
+                            println("[Register] Note: policyId must be hex, assetName can be plain text or hex")
 
                         case Some("connect") =>
                             println(s"[DEBUG] Connect command matched, isConnected=$isConnected")
@@ -826,16 +886,56 @@ object InteractiveDemo {
                             println("[Sell] ERROR: Invalid syntax. Usage: sell <base> <quote> <amount> <price>")
                             println("[Sell] Example: sell ada usdm 100000000 500000")
 
+                        case Some("assets") =>
+                            println("\n" + "=" * 80)
+                            println("Available Assets for Trading")
+                            println("=" * 80)
+                            println(f"${"Symbol"}%-12s ${"Policy ID"}%-58s ${"Asset Name"}%-10s")
+                            println("-" * 80)
+
+                            // Always show ADA first
+                            val ada = config.assets.ada
+                            val adaPolicyStr = if ada.policyId.bytes.isEmpty then "(native ADA)" else ada.policyId.toHex.take(56)
+                            val adaNameStr = if ada.assetName.bytes.isEmpty then "(lovelace)" else ada.assetName.toHex
+                            println(f"${ada.symbol}%-12s ${adaPolicyStr}%-58s ${adaNameStr}%-10s")
+
+                            // Show USDM
+                            val usdm = config.assets.usdm
+                            val usdmPolicyStr = usdm.policyId.toHex.take(56)
+                            val usdmNameStr = usdm.assetName.toHex
+                            println(f"${usdm.symbol}%-12s ${usdmPolicyStr}%-58s ${usdmNameStr}%-10s")
+
+                            // Show any custom/minted assets
+                            val customAssets = config.assets.availableAssets.filterNot(s => s == "ADA" || s == "USDM")
+                            if customAssets.nonEmpty then {
+                                customAssets.foreach { symbol =>
+                                    try {
+                                        val asset = config.assets.getAsset(symbol)
+                                        val policyStr = asset.policyId.toHex.take(56)
+                                        val nameStr = asset.assetName.toHex
+                                        println(f"${asset.symbol}%-12s ${policyStr}%-58s ${nameStr}%-10s")
+                                    } catch {
+                                        case _: Exception => // Skip if error
+                                    }
+                                }
+                            }
+
+                            println("=" * 80)
+                            println(s"Total: ${config.assets.availableAssets.length} assets")
+                            println()
+
                         case Some("help") =>
                             println("\nAvailable commands:")
-                            println("  mint <tokenName> <amount>              - Mint custom tokens")
+                            println("  mint <tokenName> <amount>                        - Mint custom tokens")
+                            println("  register <symbol> <policyId> <assetName>         - Register external token")
                             println(
-                              "  connect                                 - Connect to the exchange"
+                              "  connect                                           - Connect to the exchange"
                             )
-                            println("  buy <base> <quote> <amount> <price>    - Create buy order")
-                            println("  sell <base> <quote> <amount> <price>   - Create sell order")
-                            println("  help                                    - Show this help")
-                            println("  quit                                    - Exit the demo")
+                            println("  assets                                            - Show available assets for trading")
+                            println("  buy <base> <quote> <amount> <price>              - Create buy order")
+                            println("  sell <base> <quote> <amount> <price>             - Create sell order")
+                            println("  help                                              - Show this help")
+                            println("  quit                                              - Exit the demo")
                             println()
 
                         case Some("quit") | Some("exit") =>
