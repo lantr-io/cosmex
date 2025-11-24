@@ -469,11 +469,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             case Success(responseJson) =>
                                 read[ClientResponse](responseJson) match {
                                     case ClientResponse.ChannelPending(txId) =>
-                                        println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
+                                        println(
+                                          s"[$name] ✓ Channel pending, txId: ${txId.take(16)}..."
+                                        )
 
                                         // Wait for ChannelOpened (can take up to 70s on real networks)
                                         println(s"[$name] Waiting for channel confirmation...")
-                                        val openResponse = client.receiveMessage(timeoutSeconds = 200)
+                                        val openResponse =
+                                            client.receiveMessage(timeoutSeconds = 200)
                                         openResponse match {
                                             case Success(openJson) =>
                                                 read[ClientResponse](openJson) match {
@@ -481,17 +484,25 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                                         println(s"[$name] ✓ Channel opened!")
                                                         snapshot
                                                     case ClientResponse.Error(msg) =>
-                                                        fail(s"[$name] Channel confirmation failed: $msg")
+                                                        fail(
+                                                          s"[$name] Channel confirmation failed: $msg"
+                                                        )
                                                     case other =>
-                                                        fail(s"[$name] Expected ChannelOpened, got: $other")
+                                                        fail(
+                                                          s"[$name] Expected ChannelOpened, got: $other"
+                                                        )
                                                 }
                                             case Failure(e) =>
-                                                fail(s"[$name] Error waiting for ChannelOpened: ${e.getMessage}")
+                                                fail(
+                                                  s"[$name] Error waiting for ChannelOpened: ${e.getMessage}"
+                                                )
                                         }
 
                                     case ClientResponse.ChannelOpened(snapshot) if isMockProvider =>
                                         // MockLedgerApi confirms instantly
-                                        println(s"[$name] ✓ Channel opened instantly (mock provider)")
+                                        println(
+                                          s"[$name] ✓ Channel opened instantly (mock provider)"
+                                        )
                                         snapshot
 
                                     case ClientResponse.Error(msg) =>
@@ -533,14 +544,20 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                     case Success(msgJson) =>
                                         read[ClientResponse](msgJson) match {
                                             case ClientResponse.OrderCreated(orderId) =>
-                                                println(s"[$name] ✓ Order created! OrderID: $orderId")
+                                                println(
+                                                  s"[$name] ✓ Order created! OrderID: $orderId"
+                                                )
                                             case ClientResponse.Error(msg) =>
                                                 fail(s"[$name] Order creation failed: $msg")
                                             case other =>
-                                                fail(s"[$name] Unexpected response after retry: $other")
+                                                fail(
+                                                  s"[$name] Unexpected response after retry: $other"
+                                                )
                                         }
                                     case Failure(e) =>
-                                        fail(s"[$name] Error receiving OrderCreated: ${e.getMessage}")
+                                        fail(
+                                          s"[$name] Error receiving OrderCreated: ${e.getMessage}"
+                                        )
                                 }
 
                             case Success(ClientResponse.Error(msg)) =>
@@ -588,7 +605,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                             // Timeout is expected when waiting for trades
                                             attempts += 1
                                         case other =>
-                                            println(s"[$name] Unexpected error receiving message: ${other.getMessage}")
+                                            println(
+                                              s"[$name] Unexpected error receiving message: ${other.getMessage}"
+                                            )
                                             other.printStackTrace()
                                             attempts += 1
                                     }
@@ -622,11 +641,17 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 // Check if token minting is enabled for Bob
                 // Note: Disable minting for mock provider (CI tests) as it requires complex UTxO setup
                 val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
-                val bobMintingConfig = config.bob.minting.getOrElse(
-                  config.MintingConfig(enabled = false, tokenName = "BOBTOKEN", amount = 1000000L)
-                ).copy(enabled = if (isMockProvider) false else config.bob.minting.map(_.enabled).getOrElse(false))
+                val bobMintingConfig = config.bob.minting
+                    .getOrElse(
+                      config
+                          .MintingConfig(enabled = false, tokenName = "BOBTOKEN", amount = 1000000L)
+                    )
+                    .copy(enabled =
+                        if isMockProvider then false
+                        else config.bob.minting.map(_.enabled).getOrElse(false)
+                    )
 
-                if (isMockProvider && config.bob.minting.exists(_.enabled)) {
+                if isMockProvider && config.bob.minting.exists(_.enabled) then {
                     println("[Test] Skipping token minting for mock provider (CI mode)")
                 }
 

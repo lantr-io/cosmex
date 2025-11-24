@@ -152,14 +152,15 @@ object CosmexWebSocketServer {
         println("[Server] Order Book State")
         println("=" * 80)
 
-        if book.buyOrders.isEmpty && book.sellOrders.isEmpty then
-            println("  (empty)")
+        if book.buyOrders.isEmpty && book.sellOrders.isEmpty then println("  (empty)")
         else
             if book.sellOrders.nonEmpty then
                 println("  SELL Orders (asks):")
                 book.sellOrders.reverse.foreach { entry =>
-                    val amount = -entry.order.orderAmount  // Negative for sell orders
-                    println(f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})")
+                    val amount = -entry.order.orderAmount // Negative for sell orders
+                    println(
+                      f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})"
+                    )
                 }
 
             println("  " + "-" * 76)
@@ -167,8 +168,10 @@ object CosmexWebSocketServer {
             if book.buyOrders.nonEmpty then
                 println("  BUY Orders (bids):")
                 book.buyOrders.foreach { entry =>
-                    val amount = entry.order.orderAmount  // Positive for buy orders
-                    println(f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})")
+                    val amount = entry.order.orderAmount // Positive for buy orders
+                    println(
+                      f"    ${amount}%10d @ ${entry.order.orderPrice}%10d  (orderId: ${entry.orderId})"
+                    )
                 }
 
         println("=" * 80 + "\n")

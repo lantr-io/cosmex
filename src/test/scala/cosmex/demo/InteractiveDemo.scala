@@ -1007,8 +1007,12 @@ object InteractiveDemo {
                                 println(
                                   "[Buy] ERROR: Invalid syntax. Usage: buy <base> <quote> <quantity> <price>"
                                 )
-                                println("[Buy] Meaning: Buy <quantity> of base currency, paying in quote currency at <price>")
-                                println("[Buy] Example: buy eurm ada 100 2  -- Buy 100 EURM at 2 ADA per EURM (pay 200 ADA total)")
+                                println(
+                                  "[Buy] Meaning: Buy <quantity> of base currency, paying in quote currency at <price>"
+                                )
+                                println(
+                                  "[Buy] Example: buy eurm ada 100 2  -- Buy 100 EURM at 2 ADA per EURM (pay 200 ADA total)"
+                                )
 
                             case Some("sell") if parts.length == 5 =>
                                 if !isConnected then {
@@ -1036,8 +1040,12 @@ object InteractiveDemo {
                                 println(
                                   "[Sell] ERROR: Invalid syntax. Usage: sell <base> <quote> <quantity> <price>"
                                 )
-                                println("[Sell] Meaning: Sell <quantity> of base currency, receiving quote currency at <price>")
-                                println("[Sell] Example: sell ada eurm 100 2  -- Sell 100 ADA at 2 EURM per ADA (receive 200 EURM total)")
+                                println(
+                                  "[Sell] Meaning: Sell <quantity> of base currency, receiving quote currency at <price>"
+                                )
+                                println(
+                                  "[Sell] Example: sell ada eurm 100 2  -- Sell 100 ADA at 2 EURM per ADA (receive 200 EURM total)"
+                                )
 
                             case Some("assets") =>
                                 println("\n" + "=" * 80)
