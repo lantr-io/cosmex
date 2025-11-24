@@ -251,7 +251,11 @@ object InteractiveDemo {
             val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo, serverScriptHash)
 
             // Helper to find client's UTxO
-            def findClientUtxo(txIdFilter: Option[TransactionHash] = None): Utxo = {
+            // Selects the minimum UTxO that has at least requiredAmount (to avoid fragmentation)
+            def findClientUtxo(
+                txIdFilter: Option[TransactionHash] = None,
+                requiredAmount: Long = 2_000_000L // Default: 2 ADA minimum
+            ): Utxo = {
                 config.blockchain.provider.toLowerCase match {
                     case "mock" =>
                         val genesisHash =
@@ -277,21 +281,25 @@ object InteractiveDemo {
                               address = clientAddress,
                               transactionId = txIdFilter,
                               datum = None,
-                              minAmount = Some(Coin(2_000_000L)),
+                              minAmount = None,
                               minRequiredTotalAmount = None
                             ) match {
                                 case Right(utxos) =>
-                                    // Filter out spent UTxOs (that Blockfrost hasn't indexed yet)
-                                    val available = utxos.filterNot { case (input, _) =>
-                                        spentUtxos.contains(input)
+                                    // Filter: 1) not spent, 2) has enough ADA
+                                    val available = utxos.filter { case (input, output) =>
+                                        !spentUtxos.contains(input) &&
+                                        output.value.coin.value >= requiredAmount
                                     }
 
                                     if available.isEmpty then {
-                                        Left(new RuntimeException("No available UTxOs (all are spent or below minimum)"))
+                                        Left(new RuntimeException(s"No available UTxOs (all are spent or below ${requiredAmount / 1_000_000} ADA)"))
                                     } else {
-                                        val (input, output) = available.head
+                                        // Select the MINIMUM UTxO that's large enough (avoid fragmentation)
+                                        val (input, output) = available.minBy { case (_, output) =>
+                                            output.value.coin.value
+                                        }
                                         val utxo = Utxo(input, output)
-                                        println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA")
+                                        println(s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA (min from ${available.size} UTxOs >= ${requiredAmount / 1_000_000} ADA)")
                                         if spentUtxos.nonEmpty then {
                                             println(s"[$partyName]   (filtered out ${spentUtxos.size} spent UTxOs)")
                                         }
@@ -443,16 +451,19 @@ object InteractiveDemo {
                 println(s"[DEBUG] connectToExchange started, utxoFilter=$utxoFilter")
                 System.out.flush()
 
-                println(s"[DEBUG] About to call findClientUtxo...")
+                // Calculate required amount (deposit + fees)
+                val depositAmountLovelace = clientConfig.getDepositAmount()
+                val feeReserve = 5_000_000L // 5 ADA for fees/change
+                val requiredAmount = depositAmountLovelace + feeReserve
+
+                println(s"[DEBUG] About to call findClientUtxo (need at least ${requiredAmount / 1_000_000} ADA)...")
                 System.out.flush()
-                val depositUtxo = findClientUtxo(utxoFilter)
+                val depositUtxo = findClientUtxo(utxoFilter, requiredAmount)
                 println(s"[DEBUG] findClientUtxo returned successfully")
                 System.out.flush()
 
                 // Deposit configured amount into the channel
-                val depositAmountLovelace = clientConfig.getDepositAmount()
                 val totalAvailable = depositUtxo.output.value.coin.value
-                val feeReserve = 5_000_000L // 5 ADA for fees/change
 
                 // Verify we have enough ADA
                 if totalAvailable < depositAmountLovelace + feeReserve then {
