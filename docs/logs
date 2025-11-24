@@ -1,0 +1,33 @@
+
+Bob> mint bob2 100000 
+[DEBUG] Raw input received: 'mint bob2 100000'
+[DEBUG] Received command: 'mint bob2 100000'
+
+[Mint] Minting 100000 units of token 'bob2'...
+[Bob] Looking for UTxO at address: addr_test1vrmlwfnkk0l9pcp2ng7280acpkw5vgxt4lrmq78ltda4mngu8refr
+[BlockfrostProvider] Querying UTxOs for address: addr_test1vrmlwfnkk0l9pcp2ng7280acpkw5vgxt4lrmq78ltda4mngu8refr
+[BlockfrostProvider] Found 4 UTxOs at address
+[BlockfrostProvider] After filtering: 4 UTxOs match criteria
+[Bob] ✓ Found UTxO with 99 ADA (min from 2 UTxOs >= 8 ADA)
+[Bob]   (filtered out 1 spent UTxOs)
+[MintingHelper] Built transaction with 2 outputs:
+[MintingHelper]   Output 0: 94 ADA + tokens
+[MintingHelper]   Output 1: 5 ADA
+[BlockfrostProvider] Transaction submitted: 5b559ab8edbba055...
+[Mint] ✓ Transaction submitted: 5b559ab8edbba055...
+[Mint]   Tracked 1 spent UTxOs
+[Mint] Waiting for confirmation...
+[Mint] ✓ Minted token policy ID: 1389593330031795a2bcf968866236156aa77870764e00717b542fea
+[Mint] ✓ Registered token as tradeable asset: BOB2
+Bob> sell bob2 ada 10000000 500
+[DEBUG] Raw input received: 'sell bob2 ada 10000000 500'
+[DEBUG] Received command: 'sell bob2 ada 10000000 500'
+
+[Order] Creating SELL order: 10000000 bob2/ada @ 500
+[Client] Sending message: {"$type":"CreateOrder","clientId":{"txOutRef":{"transactionId":"5b3c6bc2a1c0ea8bf72af7db908ff5a3f6d6...
+[Client] Message sent successfully
+[Order] ✓ Order request sent to exchange
+[Order] (You will be notified when it's created and/or executed)
+Bob> 
+[Notification] ✓ Order created! OrderID: 0
+[Notification] Order is now in the order book

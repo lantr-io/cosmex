@@ -835,8 +835,8 @@ object InteractiveDemo {
                 println("  register <symbol> <policyId> <assetName> - Register external token")
                 println("  connect                     - Connect to the exchange")
                 println("  assets                      - Show available assets for trading")
-                println("  buy <base> <quote> <amount> <price>   - Create buy order")
-                println("  sell <base> <quote> <amount> <price>  - Create sell order")
+                println("  buy <buy> <pay> <amt> <price>       - Buy order (e.g., buy eurm ada 100 2)")
+                println("  sell <sell> <get> <amt> <price>     - Sell order (e.g., sell ada eurm 100 2)")
                 println("  help                        - Show this help")
                 println("  quit                        - Exit the demo")
                 println()
@@ -1009,9 +1009,10 @@ object InteractiveDemo {
 
                             case Some("buy") =>
                                 println(
-                                  "[Buy] ERROR: Invalid syntax. Usage: buy <base> <quote> <amount> <price>"
+                                  "[Buy] ERROR: Invalid syntax. Usage: buy <what_to_buy> <pay_with> <amount> <price_per_unit>"
                                 )
-                                println("[Buy] Example: buy ada usdm 100000000 500000")
+                                println("[Buy] Meaning: Buy <amount> units of <what_to_buy>, paying with <pay_with> at <price_per_unit>")
+                                println("[Buy] Example: buy eurm ada 100 2  -- Buy 100 EURM, paying 2 ADA per EURM (total: 200 ADA)")
 
                             case Some("sell") if parts.length == 5 =>
                                 if !isConnected then {
@@ -1037,9 +1038,10 @@ object InteractiveDemo {
 
                             case Some("sell") =>
                                 println(
-                                  "[Sell] ERROR: Invalid syntax. Usage: sell <base> <quote> <amount> <price>"
+                                  "[Sell] ERROR: Invalid syntax. Usage: sell <what_to_sell> <get_paid_in> <amount> <price_per_unit>"
                                 )
-                                println("[Sell] Example: sell ada usdm 100000000 500000")
+                                println("[Sell] Meaning: Sell <amount> units of <what_to_sell>, getting paid in <get_paid_in> at <price_per_unit>")
+                                println("[Sell] Example: sell ada eurm 100 2  -- Sell 100 ADA, receiving 2 EURM per ADA (total: 200 EURM)")
 
                             case Some("assets") =>
                                 println("\n" + "=" * 80)
@@ -1108,10 +1110,10 @@ object InteractiveDemo {
                                   "  assets                                            - Show available assets for trading"
                                 )
                                 println(
-                                  "  buy <base> <quote> <amount> <price>              - Create buy order"
+                                  "  buy <buy> <pay> <amt> <price>                    - Buy order (e.g., buy eurm ada 100 2)"
                                 )
                                 println(
-                                  "  sell <base> <quote> <amount> <price>             - Create sell order"
+                                  "  sell <sell> <get> <amt> <price>                  - Sell order (e.g., sell ada eurm 100 2)"
                                 )
                                 println(
                                   "  help                                              - Show this help"
