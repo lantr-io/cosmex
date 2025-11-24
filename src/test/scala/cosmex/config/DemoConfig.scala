@@ -77,7 +77,14 @@ case class DemoConfig(config: Config) {
 
     // Blockchain Provider Configuration
     object blockchain {
-        val provider: String = config.getString("blockchain.provider")
+        // In CI environment, always use mock provider for fast, reliable tests
+        val provider: String = sys.env.get("CI") match {
+            case Some("true") =>
+                println("[Config] CI environment detected - using mock provider")
+                "mock"
+            case _ =>
+                config.getString("blockchain.provider")
+        }
 
         object yaciDevkit {
             val startupTimeout: Int = config.getInt("blockchain.yaciDevkit.startupTimeout")
