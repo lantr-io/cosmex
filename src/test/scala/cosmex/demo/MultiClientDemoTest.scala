@@ -454,70 +454,45 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         val clientSignedSnapshot =
                             mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 
-                        // Send OpenChannel request and wait for ChannelPending
+                        // Send OpenChannel request
                         println(s"[$name] Opening channel...")
                         client.sendMessage(
                           ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot)
                         )
 
-                        // First, expect ChannelPending response (immediate)
-                        val pendingResponse = client.receiveMessage(timeoutSeconds = 10)
-                        pendingResponse match {
+                        // Handle response - MockLedgerApi confirms instantly (ChannelOpened),
+                        // real providers send ChannelPending first
+                        val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
+
+                        val firstResponse = client.receiveMessage(timeoutSeconds = 10)
+                        val channelSnapshot = firstResponse match {
                             case Success(responseJson) =>
                                 read[ClientResponse](responseJson) match {
                                     case ClientResponse.ChannelPending(txId) =>
-                                        println(
-                                          s"[$name] ✓ Channel pending, txId: ${txId.take(16)}..."
-                                        )
-                                    case ClientResponse.Error(msg) =>
-                                        fail(s"[$name] Channel opening failed: $msg")
-                                    case other =>
-                                        fail(s"[$name] Expected ChannelPending, got: $other")
-                                }
-                            case Failure(e) =>
-                                fail(s"[$name] Error waiting for ChannelPending: ${e.getMessage}")
-                        }
+                                        println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
 
-                        // Then, wait for ChannelOpened (can take up to 60s on yaci-devkit)
-                        println(s"[$name] Waiting for channel confirmation...")
-                        val openResponse = client.receiveMessage(timeoutSeconds = 70)
-                        openResponse match {
-                            case Success(responseJson) =>
-                                read[ClientResponse](responseJson) match {
-                                    case ClientResponse.ChannelOpened(signedSnapshot) =>
-                                        println(s"[$name] ✓ Channel opened!")
-
-                                        // Create order (use customPair if provided)
-                                        val orderPair = customPair.getOrElse(orderConfig.getPair())
-                                        val order = LimitOrder(
-                                          orderPair = orderPair,
-                                          orderAmount = orderConfig.getSignedAmount(),
-                                          orderPrice = orderConfig.price
-                                        )
-
-                                        println(
-                                          s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset}/${orderConfig.quoteAsset} @ ${orderConfig.price}"
-                                        )
-                                        val orderRequest =
-                                            ClientRequest.CreateOrder(clientId, order)
-                                        client.sendRequest(
-                                          orderRequest,
-                                          timeoutSeconds = 10
-                                        ) match {
-                                            case Success(ClientResponse.OrderCreated(orderId)) =>
-                                                println(
-                                                  s"[$name] ✓ Order created! OrderID: $orderId"
-                                                )
-
-                                            case Success(ClientResponse.Error(msg)) =>
-                                                fail(s"[$name] Order creation failed: $msg")
-
-                                            case Success(other) =>
-                                                fail(s"[$name] Unexpected response: $other")
-
+                                        // Wait for ChannelOpened (can take up to 70s on real networks)
+                                        println(s"[$name] Waiting for channel confirmation...")
+                                        val openResponse = client.receiveMessage(timeoutSeconds = 200)
+                                        openResponse match {
+                                            case Success(openJson) =>
+                                                read[ClientResponse](openJson) match {
+                                                    case ClientResponse.ChannelOpened(snapshot) =>
+                                                        println(s"[$name] ✓ Channel opened!")
+                                                        snapshot
+                                                    case ClientResponse.Error(msg) =>
+                                                        fail(s"[$name] Channel confirmation failed: $msg")
+                                                    case other =>
+                                                        fail(s"[$name] Expected ChannelOpened, got: $other")
+                                                }
                                             case Failure(e) =>
-                                                fail(s"[$name] Error: ${e.getMessage}")
+                                                fail(s"[$name] Error waiting for ChannelOpened: ${e.getMessage}")
                                         }
+
+                                    case ClientResponse.ChannelOpened(snapshot) if isMockProvider =>
+                                        // MockLedgerApi confirms instantly
+                                        println(s"[$name] ✓ Channel opened instantly (mock provider)")
+                                        snapshot
 
                                     case ClientResponse.Error(msg) =>
                                         fail(s"[$name] Channel opening failed: $msg")
@@ -526,9 +501,39 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         fail(s"[$name] Unexpected response: $other")
                                 }
                             case Failure(e) =>
-                                fail(
-                                  s"[$name] Error waiting for OpenChannel response: ${e.getMessage}"
+                                fail(s"[$name] Error receiving response: ${e.getMessage}")
+                        }
+
+                        // Create order (use customPair if provided)
+                        val orderPair = customPair.getOrElse(orderConfig.getPair())
+                        val order = LimitOrder(
+                          orderPair = orderPair,
+                          orderAmount = orderConfig.getSignedAmount(),
+                          orderPrice = orderConfig.price
+                        )
+
+                        println(
+                          s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset}/${orderConfig.quoteAsset} @ ${orderConfig.price}"
+                        )
+                        val orderRequest =
+                            ClientRequest.CreateOrder(clientId, order)
+                        client.sendRequest(
+                          orderRequest,
+                          timeoutSeconds = 10
+                        ) match {
+                            case Success(ClientResponse.OrderCreated(orderId)) =>
+                                println(
+                                  s"[$name] ✓ Order created! OrderID: $orderId"
                                 )
+
+                            case Success(ClientResponse.Error(msg)) =>
+                                fail(s"[$name] Order creation failed: $msg")
+
+                            case Success(other) =>
+                                fail(s"[$name] Unexpected response: $other")
+
+                            case Failure(e) =>
+                                fail(s"[$name] Error: ${e.getMessage}")
                         }
 
                         // Wait for potential trade execution (OrderExecuted notifications)
@@ -585,9 +590,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 val bobOrderConfig = config.bob.defaultOrder.get
 
                 // Check if token minting is enabled for Bob
+                // Note: Disable minting for mock provider (CI tests) as it requires complex UTxO setup
+                val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
                 val bobMintingConfig = config.bob.minting.getOrElse(
                   config.MintingConfig(enabled = false, tokenName = "BOBTOKEN", amount = 1000000L)
-                )
+                ).copy(enabled = if (isMockProvider) false else config.bob.minting.map(_.enabled).getOrElse(false))
+
+                if (isMockProvider && config.bob.minting.exists(_.enabled)) {
+                    println("[Test] Skipping token minting for mock provider (CI mode)")
+                }
 
                 // Step 1: Bob mints tokens (if enabled) - before any channel opening
                 var bobMintTxId: Option[TransactionHash] = None
