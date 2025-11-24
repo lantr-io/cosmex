@@ -12,16 +12,12 @@ import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.txbuilder.{Environment, TransactionSigner}
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.ledger.rules.Context
 import scalus.ledger.api.v3.{TxId, TxOutRef}
-import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
 import sttp.tapir.server.netty.sync.NettySyncServerBinding
 
-import scala.collection.immutable.IndexedSeq
-import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
 import upickle.default.*
 
@@ -162,7 +158,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     name: String,
                     account: Account,
                     pubKey: ByteString,
-                    pubKeyHash: ByteString,
+                    @annotation.unused pubKeyHash: ByteString,
                     address: Address,
                     initialValue: Value,
                     orderConfig: DemoConfig#OrderConfig,
@@ -170,11 +166,11 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     mintToken: Boolean = false,
                     tokenName: String = "BOBTOKEN",
                     tokenAmount: Long = 1000000L,
-                    customPair: Option[Pair] = None,
-                    txIdFilter: Option[TransactionHash] = None
+                    customPair: Option[Pair],
+                    txIdFilter: Option[TransactionHash]
                 ): (Unit, Option[ByteString]) = {
                     var client: SimpleWebSocketClient = null // Declare client outside try block
-                    var mintedPolicyId: Option[ByteString] = None
+                    val mintedPolicyId: Option[ByteString] = None
 
                     try {
                         println(s"\n[$name] Starting scenario...")
@@ -465,7 +461,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
 
                         val firstResponse = client.receiveMessage(timeoutSeconds = 10)
-                        val channelSnapshot = firstResponse match {
+                        firstResponse match {
                             case Success(responseJson) =>
                                 read[ClientResponse](responseJson) match {
                                     case ClientResponse.ChannelPending(txId) =>
@@ -663,10 +659,6 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     val (depositUtxo, collateralUtxo) =
                         config.blockchain.provider.toLowerCase match {
                             case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
-                                import scalus.cardano.address.ShelleyAddress
-                                val addressBech32 =
-                                    bobAddress.asInstanceOf[ShelleyAddress].toBech32.get
-
                                 // Find any UTxO for spending (can have tokens)
                                 val spendUtxo = provider.findUtxo(
                                   address = bobAddress,
@@ -838,7 +830,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       aliceInitialValue,
                       aliceOrderConfig,
                       clientIndex = 0,
-                      customPair = aliceTradingPair
+                      customPair = aliceTradingPair,
+                      txIdFilter = None
                     )
                 }
 

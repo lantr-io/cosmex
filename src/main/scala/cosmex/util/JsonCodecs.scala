@@ -8,7 +8,6 @@ import scalus.ledger.api.v1
 import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
 import scalus.prelude
 import scalus.prelude.{Eq, Ord}
-import scalus.serialization.cbor.Cbor
 import scalus.utils.Hex.*
 import upickle.default.*
 

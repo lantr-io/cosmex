@@ -1,14 +1,12 @@
 package cosmex.ws
 
-import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 import cosmex.*
 import ox.*
-import ox.channels.{Channel, ChannelClosedUnion, Source}
+import ox.channels.{Channel, ChannelClosedUnion}
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
-import cats.Id
 
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
@@ -253,7 +251,6 @@ object CosmexWebSocketServer {
 
                                     // Use submitAndWait extension (handles both transaction status and UTxO polling)
                                     // Transaction already submitted, so we just poll for first output
-                                    import cosmex.util.submitAndWait
                                     var attempts = 0
                                     val maxAttempts =
                                         180 // 3 minutes - preprod blocks are ~20s, plus Blockfrost indexing delay
@@ -308,7 +305,7 @@ object CosmexWebSocketServer {
                 server.handleCreateOrder(clientId, order) match {
                     case Left(error) =>
                         List(ClientResponse.Error(error))
-                    case Right((orderId, snapshot, trades)) =>
+                    case Right((orderId, _, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
 

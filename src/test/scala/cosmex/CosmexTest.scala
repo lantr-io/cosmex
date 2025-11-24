@@ -10,7 +10,7 @@ import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.txbuilder.Environment
-import scalus.ledger.api.v1.{PolicyId, PubKeyHash, TokenName}
+import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
@@ -19,7 +19,6 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     // Environment
     private val cardanoInfo: CardanoInfo = CardanoInfo.mainnet
     private val network: Network = Networks.preview()
-    private val testProtocolParams: ProtocolParams = cardanoInfo.protocolParams
     private val testEnv: Environment = cardanoInfo
     // Accounts and keys
     private val exchangeAccount = new Account(network, 1)
@@ -439,7 +438,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
         assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
 
-        val (aliceOrderId, aliceSnapshot1, aliceTrades) = aliceOrderResult.toOption.get
+        val (_, aliceSnapshot1, aliceTrades) = aliceOrderResult.toOption.get
         assert(aliceTrades.isEmpty, "Alice's order should not match anything (no trades)")
         assert(aliceSnapshot1.signedSnapshot.snapshotVersion == 1, "Alice snapshot should be v1")
 
@@ -459,7 +458,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
         assert(bobOrderResult.isRight, s"Bob order creation failed: $bobOrderResult")
 
-        val (bobOrderId, bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
+        val (_, bobSnapshot1, bobTrades) = bobOrderResult.toOption.get
 
         // 5. Verify trade execution: 70 ADA @ 0.50 (Alice's ask price)
         // Now we get TWO trades: one for Bob's order, one for Alice's order

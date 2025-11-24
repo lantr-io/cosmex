@@ -270,7 +270,7 @@ object InteractiveDemo {
                 // Selects the minimum UTxO that has at least requiredAmount (to avoid fragmentation)
                 def findClientUtxo(
                     txIdFilter: Option[TransactionHash] = None,
-                    requiredAmount: Long = 2_000_000L // Default: 2 ADA minimum
+                    requiredAmount: Long
                 ): Utxo = {
                     config.blockchain.provider.toLowerCase match {
                         case "mock" =>

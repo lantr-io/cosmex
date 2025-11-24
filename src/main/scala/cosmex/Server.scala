@@ -3,12 +3,12 @@ package cosmex
 import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
 
-import scala.collection.concurrent.{Map as ConcurrentMap, TrieMap}
+import scala.collection.concurrent.TrieMap
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
-import scalus.ledger.api.v3.{PubKeyHash, TxId, TxOutRef}
-import scalus.prelude.{Eq, Ord}
+import scalus.ledger.api.v3.{TxId, TxOutRef}
+import scalus.prelude.Eq
 import upickle.default.*
 
 import java.time.Instant

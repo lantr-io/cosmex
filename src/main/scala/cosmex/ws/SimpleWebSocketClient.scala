@@ -7,7 +7,8 @@ import sttp.client4.ws.{sync, SyncWebSocket}
 import sttp.ws.WebSocketFrame
 
 import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, TimeUnit}
-import scala.util.{Failure, Try}
+import scala.util.{boundary, Failure, Try}
+import boundary.break
 
 /** Simple synchronous WebSocket client for demos using sttp
   *
@@ -35,14 +36,16 @@ class SimpleWebSocketClient(serverUrl: String) {
 
                 // Process messages in this thread (blocking call)
                 try {
-                    while true do {
-                        val frame = ws.receive()
-                        frame match {
-                            case WebSocketFrame.Text(payload, _, _) =>
-                                responseQueue.put(payload)
-                            case WebSocketFrame.Close(_, _) =>
-                                return ()
-                            case _ => // Ignore other frame types
+                    boundary {
+                        while true do {
+                            val frame = ws.receive()
+                            frame match {
+                                case WebSocketFrame.Text(payload, _, _) =>
+                                    responseQueue.put(payload)
+                                case WebSocketFrame.Close(_, _) =>
+                                    break()
+                                case _ => // Ignore other frame types
+                            }
                         }
                     }
                 } catch {

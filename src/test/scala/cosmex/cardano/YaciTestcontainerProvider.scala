@@ -6,10 +6,9 @@ import com.bloxbean.cardano.yaci.test.{Funding, YaciCardanoContainer}
 import cosmex.util.TransactionStatusProvider
 import scalus.cardano.ledger.{AssetName, Coin, DatumOption, ProtocolParams, ScriptHash, Transaction, TransactionHash, TransactionInput, TransactionOutput, Utxo, Utxos, Value}
 import scalus.cardano.address.Address
-import scalus.builtin.ByteString
 
 import scala.jdk.CollectionConverters.*
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 /** Provider implementation using Yaci DevKit testcontainers
   *
@@ -156,7 +155,6 @@ class YaciTestcontainerProvider private (
         minAmount: Option[Coin],
         minRequiredTotalAmount: Option[Coin]
     ): Either[RuntimeException, Utxos] = {
-        import scala.math.BigInt.javaBigInteger2bigInt
         import scalus.cardano.address.{ShelleyAddress, StakeAddress}
 
         Try {
@@ -233,7 +231,6 @@ class YaciTestcontainerProvider private (
         txHashHex: String,
         outputIndex: Long
     ): Utxo = {
-        import scala.math.BigInt.javaBigInteger2bigInt
         import scalus.builtin.ByteString
 
         val txHash = TransactionHash.fromHex(txHashHex)
@@ -278,7 +275,7 @@ class YaciTestcontainerProvider private (
       *
       * TODO: Implement using Yaci API
       */
-    def getAllUtxos(address: Address): Either[RuntimeException, Seq[Utxo]] = {
+    def getAllUtxos(@annotation.unused address: Address): Either[RuntimeException, Seq[Utxo]] = {
         // TODO: Query all UTxOs from Yaci for address
 
         Left(
@@ -405,7 +402,7 @@ object YaciTestcontainerProvider {
                 attempt += 1
 
                 // Check if all funded addresses have UTxOs
-                val addressesWithUtxos = initialFunding.count { case (address, amount) =>
+                val addressesWithUtxos = initialFunding.count { case (address, _) =>
                     val utxoCount = Try(utxoSupplier.getAll(address).size()).getOrElse(0)
                     val hasUtxos = utxoCount > 0
                     if attempt == 1 || attempt % 5 == 0 then {
@@ -443,7 +440,7 @@ object YaciTestcontainerProvider {
     def startWithConfig(
         network: String = "preview",
         slotLength: Int = 1000,
-        epochLength: Int = 432000
+        @annotation.unused epochLength: Int = 432000
     ): YaciTestcontainerProvider = {
         println(s"[YaciProvider] Starting with config: network=$network, slotLength=$slotLength")
 
