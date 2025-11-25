@@ -508,4 +508,218 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           s"Alice's remaining order should be 30 ADA, got ${remainingOrder.orderAmount}"
         )
     }
+
+    test("Server: reject SELL order when insufficient base asset balance") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Alice opens channel with 100 ADA
+        val aliceDepositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(100)))
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(100L)
+        val aliceOpenChannelTx = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+
+        val aliceActualDeposit = aliceOpenChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), 0)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        // Store Alice's client state
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, 0))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clientStates.put(aliceClientId, aliceClientState)
+
+        // Alice tries to SELL 200 ADA but only has ~100 ADA
+        val sellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 200_000_000, // 200 ADA - more than she has
+          price = 500_000
+        )
+
+        val result = server.handleCreateOrder(aliceClientId, sellOrder)
+        assert(result.isLeft, "Should reject order with insufficient base asset")
+        val (code, msg) = result.left.getOrElse(("", ""))
+        assert(code == ErrorCode.InsufficientBalance, s"Expected INSUFFICIENT_BALANCE, got $code")
+        assert(msg.contains("base asset"), s"Error message should mention base asset: $msg")
+    }
+
+    test("Server: reject BUY order when insufficient quote asset balance") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Bob opens channel with 50 ADA + 10 USDM (small amount of USDM)
+        val bobDepositUtxo = provider
+            .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .toOption
+            .get
+
+        val bobDepositAmount =
+            Value.ada(50L) + Value.asset(usdmPolicyId, usdmAssetName, 10_000_000) // Only 10 USDM
+
+        val bobOpenChannelTx = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+        val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+
+        val bobActualDeposit = bobChannelTxOut._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        // Store Bob's client state
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clientStates.put(bobClientId, bobClientState)
+
+        // Bob tries to BUY 100 ADA @ 0.50 USDM/ADA = needs 50 USDM, but only has 10 USDM
+        val buyOrder = mkBuyOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000, // 100 ADA
+          price = 500_000 // 0.50 USDM/ADA -> needs 50 USDM
+        )
+
+        val result = server.handleCreateOrder(bobClientId, buyOrder)
+        assert(result.isLeft, "Should reject order with insufficient quote asset")
+        val (code, msg) = result.left.getOrElse(("", ""))
+        assert(code == ErrorCode.InsufficientBalance, s"Expected INSUFFICIENT_BALANCE, got $code")
+        assert(msg.contains("quote asset"), s"Error message should mention quote asset: $msg")
+    }
+
+    test("Server: accept SELL order when sufficient base asset balance") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Alice opens channel with 500 ADA
+        val aliceDepositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(500)))
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(500L)
+        val aliceOpenChannelTx = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+
+        val aliceActualDeposit = aliceOpenChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), 0)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        // Store Alice's client state
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, 0))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clientStates.put(aliceClientId, aliceClientState)
+
+        // Alice SELLS 100 ADA - she has ~500 ADA, so this should succeed
+        val sellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000, // 100 ADA
+          price = 500_000
+        )
+
+        val result = server.handleCreateOrder(aliceClientId, sellOrder)
+        assert(result.isRight, s"Should accept order with sufficient balance: $result")
+    }
+
+    test("Server: accept BUY order when sufficient quote asset balance") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Bob opens channel with 50 ADA + 500 USDM
+        val bobDepositUtxo = provider
+            .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .toOption
+            .get
+
+        val bobDepositAmount =
+            Value.ada(50L) + Value.asset(usdmPolicyId, usdmAssetName, 500_000_000) // 500 USDM
+
+        val bobOpenChannelTx = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+        val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+
+        val bobActualDeposit = bobChannelTxOut._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        // Store Bob's client state
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clientStates.put(bobClientId, bobClientState)
+
+        // Bob BUYs 100 ADA @ 0.50 USDM/ADA = needs 50 USDM, has 500 USDM
+        val buyOrder = mkBuyOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000, // 100 ADA
+          price = 500_000 // 0.50 USDM/ADA -> needs 50 USDM
+        )
+
+        val result = server.handleCreateOrder(bobClientId, buyOrder)
+        assert(result.isRight, s"Should accept order with sufficient balance: $result")
+    }
+
+    test("Server: reject order for non-existent client") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Try to create order for non-existent client
+        val fakeClientId = ClientId(TransactionInput(genesisHash, 999))
+        val order = mkBuyOrder(pair = (ADA, USDM), amount = 100_000_000, price = 500_000)
+
+        val result = server.handleCreateOrder(fakeClientId, order)
+        assert(result.isLeft, "Should reject order for non-existent client")
+        val (code, _) = result.left.getOrElse(("", ""))
+        assert(code == ErrorCode.ClientNotFound, s"Expected CLIENT_NOT_FOUND, got $code")
+    }
 }
