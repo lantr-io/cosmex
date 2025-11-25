@@ -59,7 +59,7 @@ class CosmexValidatorTest
     test(s"Cosmex Validator size is ${program.cborEncoded.length}") {
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = program.cborEncoded.length
-        assert(length == 10893)
+        assert(length == 10907)
     }
 
     test("validRange") {

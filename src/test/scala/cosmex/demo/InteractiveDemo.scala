@@ -695,8 +695,8 @@ object InteractiveDemo {
                                     println(
                                       s"[Connect] ✓ Channel pending, txId: ${txId.take(16)}..."
                                     )
-                                case ClientResponse.Error(msg) =>
-                                    throw new Exception(s"Channel opening failed: $msg")
+                                case ClientResponse.Error(code, msg) =>
+                                    throw new Exception(s"Channel opening failed [$code]: $msg")
                                 case other =>
                                     throw new Exception(s"Expected ChannelPending, got: $other")
                             }
@@ -744,8 +744,12 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.Error(msg)) =>
-                                                            println(s"\n[Notification] ERROR: $msg")
+                                                        case Success(
+                                                              ClientResponse.Error(code, msg)
+                                                            ) =>
+                                                            println(
+                                                              s"\n[Notification] ERROR [$code]: $msg"
+                                                            )
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
@@ -768,8 +772,8 @@ object InteractiveDemo {
                                         }
                                     }
 
-                                case ClientResponse.Error(msg) =>
-                                    throw new Exception(s"Channel opening failed: $msg")
+                                case ClientResponse.Error(code, msg) =>
+                                    throw new Exception(s"Channel opening failed [$code]: $msg")
                                 case other =>
                                     throw new Exception(s"Unexpected response: $other")
                             }

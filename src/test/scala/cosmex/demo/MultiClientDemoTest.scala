@@ -386,13 +386,24 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                             (mintedUtxo, mintedTokenValue)
                         } else {
-                            // No minting - use original UTxO and amount
-                            // For yaci-devkit, only deposit ADA (no multiassets available in funded UTxOs)
-                            val depositAmount = config.blockchain.provider.toLowerCase match {
-                                case "yaci-devkit" | "yaci" =>
-                                    Value.lovelace(initialValue.coin.value)
-                                case _ =>
-                                    initialValue
+                            // No minting in this step - determine deposit amount
+                            val depositAmount = txIdFilter match {
+                                case Some(_) =>
+                                    // UTxO was found by tx ID (e.g., from preliminary minting step)
+                                    // Use actual UTxO value which may contain minted tokens
+                                    // Reserve some ADA for transaction fees
+                                    val feeReserve = 5_000_000L // 5 ADA for fees
+                                    val utxoValue = depositUtxo.output.value
+                                    utxoValue.copy(coin = Coin(utxoValue.coin.value - feeReserve))
+                                case None =>
+                                    // No tx filter - use configured initial value
+                                    // For yaci-devkit, only deposit ADA (no multiassets in funded UTxOs)
+                                    config.blockchain.provider.toLowerCase match {
+                                        case "yaci-devkit" | "yaci" =>
+                                            Value.lovelace(initialValue.coin.value)
+                                        case _ =>
+                                            initialValue
+                                    }
                             }
                             (depositUtxo, depositAmount)
                         }
@@ -479,9 +490,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                                     case ClientResponse.ChannelOpened(snapshot) =>
                                                         println(s"[$name] ✓ Channel opened!")
                                                         snapshot
-                                                    case ClientResponse.Error(msg) =>
+                                                    case ClientResponse.Error(code, msg) =>
                                                         fail(
-                                                          s"[$name] Channel confirmation failed: $msg"
+                                                          s"[$name] Channel confirmation failed [$code]: $msg"
                                                         )
                                                     case other =>
                                                         fail(
@@ -501,8 +512,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         )
                                         snapshot
 
-                                    case ClientResponse.Error(msg) =>
-                                        fail(s"[$name] Channel opening failed: $msg")
+                                    case ClientResponse.Error(code, msg) =>
+                                        fail(s"[$name] Channel opening failed [$code]: $msg")
 
                                     case other =>
                                         fail(s"[$name] Unexpected response: $other")
@@ -543,8 +554,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                                 println(
                                                   s"[$name] ✓ Order created! OrderID: $orderId"
                                                 )
-                                            case ClientResponse.Error(msg) =>
-                                                fail(s"[$name] Order creation failed: $msg")
+                                            case ClientResponse.Error(code, msg) =>
+                                                fail(s"[$name] Order creation failed [$code]: $msg")
                                             case other =>
                                                 fail(
                                                   s"[$name] Unexpected response after retry: $other"
@@ -556,8 +567,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         )
                                 }
 
-                            case Success(ClientResponse.Error(msg)) =>
-                                fail(s"[$name] Order creation failed: $msg")
+                            case Success(ClientResponse.Error(code, msg)) =>
+                                fail(s"[$name] Order creation failed [$code]: $msg")
 
                             case Success(other) =>
                                 fail(s"[$name] Unexpected response: $other")
@@ -635,8 +646,13 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 val bobOrderConfig = config.bob.defaultOrder.get
 
                 // Check if token minting is enabled for Bob
-                // Note: Disable minting for mock provider (CI tests) as it requires complex UTxO setup
+                // Note: Disable minting for mock provider as it requires complex UTxO setup
+                // Force minting for yaci-devkit since it doesn't support pre-funded native assets
                 val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
+                val isYaciDevkit = config.blockchain.provider.toLowerCase match {
+                    case "yaci-devkit" | "yaci" => true
+                    case _                      => false
+                }
                 val bobMintingConfig = config.bob.minting
                     .getOrElse(
                       config
@@ -644,11 +660,17 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     )
                     .copy(enabled =
                         if isMockProvider then false
+                        else if isYaciDevkit then true // Force minting on yaci-devkit
                         else config.bob.minting.map(_.enabled).getOrElse(false)
                     )
 
                 if isMockProvider && config.bob.minting.exists(_.enabled) then {
                     println("[Test] Skipping token minting for mock provider (CI mode)")
+                }
+                if isYaciDevkit then {
+                    println(
+                      "[Test] Forcing token minting for yaci-devkit (no pre-funded native assets)"
+                    )
                 }
 
                 // Step 1: Bob mints tokens (if enabled) - before any channel opening

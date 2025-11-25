@@ -137,6 +137,15 @@ object ExchangeParams
 @Compile
 object CosmexValidator extends DataParameterizedValidator {
 
+    /** Price scale divisor for fixed-point price arithmetic.
+      *
+      * Prices are expressed as "quote smallest units per whole base unit", scaled by PRICE_SCALE.
+      * For example, 0.55 USDM/ADA is represented as 550,000 (0.55 * 1,000,000).
+      *
+      * quoteAmount = baseAmount * price / PRICE_SCALE
+      */
+    val PRICE_SCALE: BigInt = BigInt(1_000_000)
+
     def findOwnInputAndIndex(
         inputs: List[TxInInfo],
         spendingTxOutRef: TxOutRef
@@ -238,7 +247,9 @@ object CosmexValidator extends DataParameterizedValidator {
                     val orderValue =
                         if orderAmount < 0 then
                             assetClassValue(base, orderAmount) // Sell base asset
-                        else assetClassValue(quote, orderAmount * orderPrice) // Buy quote asset
+                        else
+                            // Buy: lock quote asset (amount * price / PRICE_SCALE)
+                            assetClassValue(quote, orderAmount * orderPrice / PRICE_SCALE)
                     acc + orderValue
         }
     }
@@ -946,7 +957,7 @@ object CosmexValidator extends DataParameterizedValidator {
                                   )
                                 ) =>
                                 if validTrade(orderAmount, orderPrice, tradeAmount, tradePrice) then
-                                    val quoteAmount = tradeAmount * tradePrice
+                                    val quoteAmount = tradeAmount * tradePrice / PRICE_SCALE
                                     val baseAssetValue = assetClassValue(baseAsset, tradeAmount)
                                     val quoteAssetValue = assetClassValue(quoteAsset, quoteAmount)
                                     val clientBalance1 =

@@ -52,7 +52,8 @@ object CosmexWebSocketServer {
                         case NonFatal(e) =>
                             println(s"[Server] Error handling message: ${e.getMessage}")
                             e.printStackTrace()
-                            val errorResponse = ClientResponse.Error(e.getMessage)
+                            val errorResponse =
+                                ClientResponse.Error(ErrorCode.InternalError, e.getMessage)
                             List(write(errorResponse))
                     }
                 }
@@ -176,7 +177,7 @@ object CosmexWebSocketServer {
                 // Validate the opening request
                 server.validateOpenChannelRequest(tx, snapshot) match {
                     case Left(error) =>
-                        List(ClientResponse.Error(error))
+                        List(ClientResponse.Error(ErrorCode.InvalidTransaction, error))
                     case Right(openChannelInfo) =>
                         // Extract client TxOutRef from first input
                         val firstInput = tx.body.value.inputs.toSeq.head
@@ -210,6 +211,7 @@ object CosmexWebSocketServer {
                                 println(s"[Server] Transaction submission failed: $submitError")
                                 return List(
                                   ClientResponse.Error(
+                                    ErrorCode.TransactionFailed,
                                     s"Transaction submission failed: ${submitError.getMessage}"
                                   )
                                 )
@@ -225,7 +227,7 @@ object CosmexWebSocketServer {
                                 val errorMsg =
                                     s"Internal error: No async channel for client ${clientId}"
                                 println(s"[Server] ERROR: $errorMsg")
-                                List(ClientResponse.Error(errorMsg))
+                                List(ClientResponse.Error(ErrorCode.InternalError, errorMsg))
 
                             case Some(channel) =>
                                 // Launch background thread to wait for confirmation using submitAndWait
@@ -274,7 +276,10 @@ object CosmexWebSocketServer {
                                           s"[Server] Channel confirmation timeout for: ${clientId}"
                                         )
                                         channel.send(
-                                          ClientResponse.Error("Transaction confirmation timeout")
+                                          ClientResponse.Error(
+                                            ErrorCode.TransactionFailed,
+                                            "Transaction confirmation timeout"
+                                          )
                                         )
                                     }
                                 })
@@ -288,8 +293,8 @@ object CosmexWebSocketServer {
 
             case ClientRequest.CreateOrder(clientId, order) =>
                 server.handleCreateOrder(clientId, order) match {
-                    case Left(error) =>
-                        List(ClientResponse.Error(error))
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
                     case Right((orderId, _, trades)) =>
                         // The orderId is the one that was assigned (nextOrderId was incremented)
                         println(s"[Server] Order created: $orderId, trades: ${trades.size}")
@@ -340,15 +345,17 @@ object CosmexWebSocketServer {
 
             case ClientRequest.CancelOrder(clientId, orderId) =>
                 // TODO: Implement cancel order
-                List(ClientResponse.Error("CancelOrder not implemented yet"))
+                List(
+                  ClientResponse.Error(ErrorCode.InternalError, "CancelOrder not implemented yet")
+                )
 
             case ClientRequest.Deposit(clientId, amount) =>
                 // TODO: Implement deposit
-                List(ClientResponse.Error("Deposit not implemented yet"))
+                List(ClientResponse.Error(ErrorCode.InternalError, "Deposit not implemented yet"))
 
             case ClientRequest.Withdraw(clientId, amount) =>
                 // TODO: Implement withdraw
-                List(ClientResponse.Error("Withdraw not implemented yet"))
+                List(ClientResponse.Error(ErrorCode.InternalError, "Withdraw not implemented yet"))
 
             case ClientRequest.GetBalance(clientId) =>
                 val response = server.clientStates.get(clientId) match {
@@ -357,7 +364,7 @@ object CosmexWebSocketServer {
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
                         ClientResponse.Balance(balance)
                     case None =>
-                        ClientResponse.Error("Client not found")
+                        ClientResponse.Error(ErrorCode.ClientNotFound, "Client not found")
                 }
                 List(response)
 
@@ -368,7 +375,7 @@ object CosmexWebSocketServer {
                             state.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders
                         ClientResponse.Orders(orders)
                     case None =>
-                        ClientResponse.Error("Client not found")
+                        ClientResponse.Error(ErrorCode.ClientNotFound, "Client not found")
                 }
                 List(response)
         }

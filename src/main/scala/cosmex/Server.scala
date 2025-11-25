@@ -43,10 +43,22 @@ enum BlockchainEvent derives ReadWriter:
     case Rollback(chainState: OnChainChannelState)
     case Tick(chainTime: Instant, chainSlot: ChainSlot)
 
+/** Error codes for ClientResponse.Error */
+object ErrorCode:
+    val ClientNotFound = "CLIENT_NOT_FOUND"
+    val ChannelNotOpen = "CHANNEL_NOT_OPEN"
+    val InsufficientBalance = "INSUFFICIENT_BALANCE"
+    val InvalidOrder = "INVALID_ORDER"
+    val OrderNotFound = "ORDER_NOT_FOUND"
+    val InvalidSnapshot = "INVALID_SNAPSHOT"
+    val InvalidTransaction = "INVALID_TRANSACTION"
+    val TransactionFailed = "TRANSACTION_FAILED"
+    val InternalError = "INTERNAL_ERROR"
+
 enum ClientResponse derives ReadWriter:
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
     case ChannelOpened(snapshot: SignedSnapshot)
-    case Error(message: String)
+    case Error(code: String, message: String)
     case OrderCreated(orderId: OrderId)
     case OrderCancelled(orderId: OrderId)
     case OrderExecuted(trade: Trade)
@@ -138,7 +150,8 @@ class Server(
 
                         // Reply with the both-signed snapshot
                         reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
-                    case Left(error) => reply(ClientResponse.Error(error))
+                    case Left(error) =>
+                        reply(ClientResponse.Error(ErrorCode.InvalidTransaction, error))
             case _ => List.empty
 
     }
@@ -238,23 +251,76 @@ class Server(
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)
     }
 
+    /** Validate that the client has sufficient balance for the order.
+      *
+      * For SELL orders (orderAmount < 0): need base asset (|orderAmount|) For BUY orders
+      * (orderAmount > 0): need quote asset (orderAmount * orderPrice / PRICE_SCALE)
+      */
+    def validateOrderBalance(
+        clientBalance: scalus.ledger.api.v3.Value,
+        order: LimitOrder
+    ): Either[(String, String), Unit] = {
+        val (baseAsset, quoteAsset) = order.orderPair
+        val orderAmount = order.orderAmount
+        val orderPrice = order.orderPrice
+
+        if orderAmount < 0 then {
+            // SELL order: need base asset
+            val requiredAmount = -orderAmount // Make positive
+            val availableAmount = clientBalance.quantityOf(baseAsset._1, baseAsset._2)
+            if availableAmount < requiredAmount then
+                Left(
+                  (
+                    ErrorCode.InsufficientBalance,
+                    s"Insufficient base asset balance: have $availableAmount, need $requiredAmount"
+                  )
+                )
+            else Right(())
+        } else if orderAmount > 0 then {
+            // BUY order: need quote asset (amount * price / PRICE_SCALE)
+            val requiredAmount = orderAmount * orderPrice / CosmexValidator.PRICE_SCALE
+            val availableAmount = clientBalance.quantityOf(quoteAsset._1, quoteAsset._2)
+            if availableAmount < requiredAmount then
+                Left(
+                  (
+                    ErrorCode.InsufficientBalance,
+                    s"Insufficient quote asset balance: have $availableAmount, need $requiredAmount"
+                  )
+                )
+            else Right(())
+        } else {
+            // Zero amount order is invalid
+            Left((ErrorCode.InvalidOrder, "Order amount cannot be zero"))
+        }
+    }
+
     def handleCreateOrder(
         clientId: ClientId,
         order: LimitOrder
-    ): Either[String, (Long, SignedSnapshot, List[Trade])] = {
+    ): Either[(String, String), (Long, SignedSnapshot, List[Trade])] = {
         clientStates.get(clientId) match
-            case None => Left("Client not found")
+            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
             case Some(clientState) =>
                 if clientState.status != ChannelStatus.Open then
-                    return Left(s"Channel is not open, status: ${clientState.status}")
+                    return Left(
+                      (
+                        ErrorCode.ChannelNotOpen,
+                        s"Channel is not open, status: ${clientState.status}"
+                      )
+                    )
+
+                // Get current trading state
+                val currentSnapshot = clientState.latestSnapshot.signedSnapshot
+                val currentTradingState = currentSnapshot.snapshotTradingState
+
+                // Validate that client has sufficient balance for the order
+                validateOrderBalance(currentTradingState.tsClientBalance, order) match
+                    case Left(error) => return Left(error)
+                    case Right(())   => () // Validation passed
 
                 // Assign order ID
                 val longOrderId = nextOrderId.getAndIncrement()
                 val orderId = BigInt(longOrderId)
-
-                // Add order to client's trading state
-                val currentSnapshot = clientState.latestSnapshot.signedSnapshot
-                val currentTradingState = currentSnapshot.snapshotTradingState
 
                 import scalus.prelude.AssocMap
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
@@ -326,12 +392,17 @@ class Server(
     def handleCancelOrder(
         clientId: ClientId,
         orderId: OrderId
-    ): Either[String, SignedSnapshot] = {
+    ): Either[(String, String), SignedSnapshot] = {
         clientStates.get(clientId) match
-            case None => Left("Client not found")
+            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
             case Some(clientState) =>
                 if clientState.status != ChannelStatus.Open then
-                    return Left(s"Channel is not open, status: ${clientState.status}")
+                    return Left(
+                      (
+                        ErrorCode.ChannelNotOpen,
+                        s"Channel is not open, status: ${clientState.status}"
+                      )
+                    )
 
                 // Remove order from client's trading state
                 val currentSnapshot = clientState.latestSnapshot.signedSnapshot
