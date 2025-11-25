@@ -20,6 +20,7 @@ import cosmex.util.submitAndWait
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
+    case CloseChannel(clientId: ClientId, tx: Transaction, snapshot: SignedSnapshot)
     case CreateOrder(clientId: ClientId, order: LimitOrder)
     case CancelOrder(clientId: ClientId, orderId: Int)
     case Deposit(clientId: ClientId, amount: Value)
@@ -59,6 +60,7 @@ object ErrorCode:
 enum ClientResponse derives ReadWriter:
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
     case ChannelOpened(snapshot: SignedSnapshot)
+    case ChannelClosed(snapshot: SignedSnapshot)
     case Error(code: String, message: String)
     case OrderCreated(orderId: OrderId)
     case OrderCancelled(orderId: OrderId)
@@ -164,6 +166,24 @@ class Server(
     }
 
     def handleEvent(event: ServerEvent) = {}
+
+    def handleCloseChannel(
+        clientId: ClientId,
+        tx: Transaction,
+        snapshot: SignedSnapshot
+    ): Either[(String, String), Unit] = {
+        clientStates.get(clientId) match
+            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
+            case Some(clientState) =>
+                if clientState.status != ChannelStatus.Open then
+                    return Left(
+                      (
+                        ErrorCode.ChannelNotOpen,
+                        s"Channel is not open, status: ${clientState.status}"
+                      )
+                    )
+                else Right(())
+    }
 
     def validateOpenChannelRequest(
         tx: Transaction,

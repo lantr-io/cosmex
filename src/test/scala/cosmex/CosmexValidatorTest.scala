@@ -51,9 +51,8 @@ class CosmexValidatorTest
     private val clientTxOutRef =
         TxOutRef(TxId(Builtins.blake2b_256(ByteString.fromString("client tx"))), 0)
     private val program = CosmexContract.mkCosmexProgram(exchangeParams)
-    private val testProtocolParams: ProtocolParams = CardanoInfo.mainnet.protocolParams
-
-    private val testEnv: Environment = CardanoInfo.mainnet
+    private val testEnv: CardanoInfo = CardanoInfo.mainnet
+    private val testProtocolParams: ProtocolParams = testEnv.protocolParams
     private val txbuilder = CosmexTransactions(exchangeParams, testEnv)
 
     test(s"Cosmex Validator size is ${program.cborEncoded.length}") {

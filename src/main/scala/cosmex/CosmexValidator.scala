@@ -297,45 +297,59 @@ object CosmexValidator extends DataParameterizedValidator {
     ) = {
         state match
             case OnChainState(clientPkh, clientPubKey, clientTxOutRef, _) =>
+                val clientSigned = txSignedBy(signatories, clientPkh)
+                val exchangeSigned = txSignedBy(signatories, params.exchangePkh)
                 val validInitiator = initiator match
-                    case Party.Client   => txSignedBy(signatories, clientPkh)
-                    case Party.Exchange => txSignedBy(signatories, params.exchangePkh)
+                    case Party.Client   => clientSigned
+                    case Party.Exchange => exchangeSigned
                 newSignedSnapshot match
                     case SignedSnapshot(
                           signedSnapshot,
                           snapshotClientSignature,
                           snapshotExchangeSignature
                         ) =>
-                        val newChannelState =
-                            OnChainChannelState.SnapshotContestState(
-                              contestSnapshot = signedSnapshot,
-                              contestSnapshotStart = contestSnapshotStart,
-                              contestInitiator = initiator,
-                              // save the channel tx out ref so that we can check it in the contest
-                              contestChannelTxOutRef = spendingTxOutRef
+                        val balanced =
+                            balancedSnapshot(
+                              signedSnapshot.snapshotTradingState,
+                              ownTxInResolvedTxOut.value
                             )
+                        val validSnapshot = validSignedSnapshot(
+                          newSignedSnapshot,
+                          clientTxOutRef,
+                          clientPubKey,
+                          params.exchangePubKey
+                        )
+                        // Graceful close if both parties agreed on the snapshot
+                        if validSnapshot && balanced && clientSigned && exchangeSigned then true
+                        else {
+                            val newChannelState =
+                                OnChainChannelState.SnapshotContestState(
+                                  contestSnapshot = signedSnapshot,
+                                  contestSnapshotStart = contestSnapshotStart,
+                                  contestInitiator = initiator,
+                                  // save the channel tx out ref so that we can check it in the contest
+                                  contestChannelTxOutRef = spendingTxOutRef
+                                )
 
-                        val newState =
-                            OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
-                        ownTxInResolvedTxOut match
-                            case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                                validInitiator.?
-                                && balancedSnapshot(
-                                  signedSnapshot.snapshotTradingState,
-                                  ownInputValue
-                                )
-                                && validSignedSnapshot(
-                                  newSignedSnapshot,
-                                  clientTxOutRef,
+                            val newState =
+                                OnChainState(
+                                  clientPkh,
                                   clientPubKey,
-                                  params.exchangePubKey
+                                  clientTxOutRef,
+                                  newChannelState
                                 )
-                                && expectNewState(
-                                  ownOutput,
-                                  ownInputAddress,
-                                  newState,
-                                  ownInputValue
-                                )
+                            ownTxInResolvedTxOut match
+                                case TxOut(ownInputAddress, ownInputValue, _, _) =>
+                                    validInitiator.?
+                                    && balanced.?
+                                    && validSnapshot.?
+                                    && expectNewState(
+                                      ownOutput,
+                                      ownInputAddress,
+                                      newState,
+                                      ownInputValue
+                                    )
+                        }
     }
 
     def handleContestClose(

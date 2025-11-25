@@ -3,8 +3,7 @@ package cosmex.demo
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Server}
-import cosmex.CardanoInfoTestNet
+import cosmex.{CardanoInfoTestNet, ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Server, SignedSnapshot}
 import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
@@ -860,6 +859,19 @@ object InteractiveDemo {
                     }
                 }
 
+                def closeChannel(clientId: ClientId, snapshot: SignedSnapshot): Unit = {
+                    if !isConnected then {
+                        println("[Close] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    println(s"\n[Close] Closing channel with exchange...")
+
+//                    txbuilder.closeChannel(provider,
+                    val tx: Transaction = ???
+                    client.sendMessage(ClientRequest.CloseChannel(clientId, tx, snapshot))
+                }
+
                 // Main command loop
                 println(s"\n${"=" * 60}")
                 println(s"$partyName's Trading Terminal")
@@ -1279,6 +1291,14 @@ object InteractiveDemo {
                                 println("=" * 80)
                                 println(s"Total: ${config.assets.availableAssets.length} assets")
                                 println()
+
+                            case Some("close") =>
+                                if isConnected then {
+                                    println("\n[Close] Closing the channel")
+//                                    closeChannel(clientId.get, )
+                                } else {
+                                    println("\n[Close] Not connected to exchange.")
+                                }
 
                             case Some("help") =>
                                 println("\nAvailable commands:")

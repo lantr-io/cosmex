@@ -291,6 +291,10 @@ object CosmexWebSocketServer {
                         }
                 }
 
+            case ClientRequest.CloseChannel(clientId, tx, snapshot) =>
+                server.handleCloseChannel(clientId, tx, snapshot)
+                List(ClientResponse.ChannelClosed(snapshot))
+
             case ClientRequest.CreateOrder(clientId, order) =>
                 server.handleCreateOrder(clientId, order) match {
                     case Left((code, error)) =>

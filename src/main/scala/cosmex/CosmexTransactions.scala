@@ -1,9 +1,11 @@
 package cosmex
 import scalus.builtin.Data.toData
-import scalus.builtin.platform
+import scalus.builtin.{platform, ByteString}
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
+import scalus.cardano.node.Provider
 import scalus.cardano.txbuilder.*
+import scalus.cardano.wallet.Account
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
@@ -12,7 +14,7 @@ class CosmexTransactions(
     env: Environment
 ) {
     private val network = env.network
-    val protocolVersion = 9
+    val protocolVersion = env.protocolParams.protocolVersion.major
     private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
     val script = Script.PlutusV3(cosmexValidator.cborByteString) // Public for debugging
 
@@ -169,5 +171,52 @@ class CosmexTransactions(
             case Right(context) => context.transaction
             case Left(error) =>
                 throw new RuntimeException(s"Channel opening transaction build failed: $error")
+    }
+
+    /** Closes the channel by creating a transaction that spends the client's UTxO at the script
+      * address and pays out the locked value to the specified payout address.
+      *
+      * @param provider
+      *   The Provider to use for building the transaction
+      * @param clientInput
+      *   The UTxO at the script address representing the channel
+      * @param clientAccount
+      *   The client's account for signing the transaction
+      * @param payoutAddress
+      *   The address to pay out the locked funds to
+      * @param clientState
+      *   The current ClientState containing the locked value
+      * @return
+      *   A signed Transaction that closes the channel and pays out the funds
+      */
+    def closeChannel(
+        provider: Provider,
+        clientAccount: Account,
+        payoutAddress: Address,
+        clientState: ClientState
+    ) = {
+        val clientUtxo = provider
+            .findUtxo(clientState.channelRef)
+            .getOrElse(
+              throw new RuntimeException(
+                s"Client UTxO not found for channelRef: ${clientState.channelRef}"
+              )
+            )
+        val addrKeyHash = AddrKeyHash(
+          ByteString.fromArray(clientAccount.paymentKeyPair.publicKeyBytes)
+        )
+        TxBuilder(env)
+            .spend(
+              clientUtxo,
+              Action.Close(Party.Client, clientState.latestSnapshot),
+              Set(addrKeyHash)
+            )
+            .attach(script)
+            .payTo(payoutAddress, clientState.lockedValue)
+            .changeTo(payoutAddress)
+            .complete(provider, sponsor = payoutAddress)
+            .build()
+            .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
+            .transaction
     }
 }
