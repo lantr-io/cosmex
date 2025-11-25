@@ -10,6 +10,7 @@ import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.txbuilder.Environment
+import scalus.cardano.wallet.BloxbeanAccount
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
@@ -738,4 +739,53 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val (code, _) = result.left.getOrElse(("", ""))
         assert(code == ErrorCode.ClientNotFound, s"Expected CLIENT_NOT_FOUND, got $code")
     }
+
+    test("Server: graceful close") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Bob opens channel with 50 ADA + 500 USDM
+        val bobDepositUtxo = provider
+            .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .toOption
+            .get
+
+        val bobDepositAmount =
+            Value.ada(50L) + Value.asset(usdmPolicyId, usdmAssetName, 500_000_000) // 500 USDM
+
+        val bobOpenChannelTx = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+        provider.submit(bobOpenChannelTx)
+        val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+
+        val bobActualDeposit = bobChannelTxOut._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        // Store Bob's client state
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open
+        )
+        server.clientStates.put(bobClientId, bobClientState)
+
+        val tx = txbuilder.closeChannel(
+          provider,
+          BloxbeanAccount(bobAccount),
+          bobAddress,
+          bobClientState
+        )
+        pprint.pprintln(tx)
+    }
+
 }

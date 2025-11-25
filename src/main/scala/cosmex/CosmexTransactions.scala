@@ -1,6 +1,6 @@
 package cosmex
 import scalus.builtin.Data.toData
-import scalus.builtin.{platform, ByteString}
+import scalus.builtin.{ByteString, platform}
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
@@ -8,6 +8,8 @@ import scalus.cardano.txbuilder.*
 import scalus.cardano.wallet.Account
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
+
+import java.time.Instant
 
 class CosmexTransactions(
     val exchangeParams: ExchangeParams,
@@ -202,19 +204,21 @@ class CosmexTransactions(
                 s"Client UTxO not found for channelRef: ${clientState.channelRef}"
               )
             )
-        val addrKeyHash = AddrKeyHash(
-          ByteString.fromArray(clientAccount.paymentKeyPair.publicKeyBytes)
-        )
+        val publicKey = ByteString.fromArray(clientAccount.paymentKeyPair.publicKeyBytes.take(32))
+        val pubKeyHash = platform.blake2b_224(publicKey)
+        val addrKeyHash = AddrKeyHash(pubKeyHash)
         TxBuilder(env)
             .spend(
               clientUtxo,
               Action.Close(Party.Client, clientState.latestSnapshot),
+              script,
               Set(addrKeyHash)
             )
-            .attach(script)
             .payTo(payoutAddress, clientState.lockedValue)
             .changeTo(payoutAddress)
-            .complete(provider, sponsor = payoutAddress)
+            .validFrom(Instant.now())
+            .validTo(Instant.now().plusSeconds(60))
+//            .complete(provider, sponsor = payoutAddress)
             .build()
             .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
             .transaction
