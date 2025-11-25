@@ -67,9 +67,8 @@ object MintingHelper {
         // Total value for token output: newly minted + existing tokens + min ADA
         val totalTokenValue = mintedValue + existingTokenValue + Value.lovelace(minAdaForTokens)
 
-
-        //val bobInput = mBuilder.spend(utxoToSpend)
-        //val myOutput = mBuilder.payTo(recipientAddress, totalTokenValue).output
+        // val bobInput = mBuilder.spend(utxoToSpend)
+        // val myOutput = mBuilder.payTo(recipientAddress, totalTokenValue).output
 
         // Build the transaction with collateral for Plutus script execution
         val tx = TxBuilder(env)

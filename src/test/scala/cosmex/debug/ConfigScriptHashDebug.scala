@@ -9,8 +9,8 @@ import scalus.cardano.ledger.Script
 
 /** Debug tool to diagnose script hash non-determinism when using config.
   *
-  * This tool loads the actual config (same as the demo apps) and prints
-  * all the intermediate values to help identify where differences occur.
+  * This tool loads the actual config (same as the demo apps) and prints all the intermediate values
+  * to help identify where differences occur.
   *
   * Run this from multiple terminals to see if the hashes differ:
   * {{{

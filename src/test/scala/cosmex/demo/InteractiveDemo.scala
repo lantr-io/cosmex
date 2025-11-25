@@ -491,14 +491,74 @@ object InteractiveDemo {
                     (signedMintTx.id, policyId)
                 }
 
+                // Helper to parse deposit arguments: "ada 100 usdm 30" -> Value
+                def parseDepositValue(args: Seq[String]): Value = {
+                    if args.isEmpty then {
+                        // Default: use configured deposit amount (ADA only)
+                        Value.lovelace(clientConfig.getDepositAmount())
+                    } else {
+                        // Parse token/amount pairs
+                        val pairs = args.grouped(2).toList
+                        if pairs.exists(_.length != 2) then {
+                            throw new IllegalArgumentException(
+                              "Invalid deposit format. Usage: connect [token amount ...]"
+                            )
+                        }
+
+                        pairs.foldLeft(Value.lovelace(0L)) { case (acc, Seq(token, amountStr)) =>
+                            val amount = Try(amountStr.toLong).getOrElse {
+                                throw new IllegalArgumentException(
+                                  s"Invalid amount '$amountStr' for token '$token'"
+                                )
+                            }
+
+                            token.toLowerCase match {
+                                case "ada" =>
+                                    // Amount is in ADA, convert to lovelace
+                                    acc.copy(coin = Coin(acc.coin.value + amount * 1_000_000L))
+                                case other =>
+                                    // Look up token in asset registry
+                                    try {
+                                        val asset = config.assets.getAsset(other)
+                                        acc + Value.asset(
+                                          ScriptHash.fromByteString(asset.policyId),
+                                          AssetName(asset.assetName),
+                                          amount
+                                        )
+                                    } catch {
+                                        case _: IllegalArgumentException =>
+                                            // Check if we have a minted token with this name
+                                            mintedPolicyId match {
+                                                case Some(policyId) =>
+                                                    acc + Value.asset(
+                                                      ScriptHash.fromByteString(policyId),
+                                                      AssetName(
+                                                        ByteString.fromString(other.toUpperCase)
+                                                      ),
+                                                      amount
+                                                    )
+                                                case None =>
+                                                    throw new IllegalArgumentException(
+                                                      s"Unknown asset '$other'. Available: ${config.assets.availableAssets.mkString(", ")}"
+                                                    )
+                                            }
+                                    }
+                            }
+                        }
+                    }
+                }
+
                 // Helper to connect to exchange
-                def connectToExchange(utxoFilter: Option[TransactionHash]): Unit = {
+                def connectToExchange(
+                    utxoFilter: Option[TransactionHash],
+                    depositValue: Value
+                ): Unit = {
                     println(s"\n[Connect] Opening channel with exchange...")
                     println(s"[DEBUG] connectToExchange started, utxoFilter=$utxoFilter")
                     System.out.flush()
 
                     // Calculate required amount (deposit + fees)
-                    val depositAmountLovelace = clientConfig.getDepositAmount()
+                    val depositAmountLovelace = depositValue.coin.value
                     val feeReserve = 5_000_000L // 5 ADA for fees/change
                     val requiredAmount = depositAmountLovelace + feeReserve
 
@@ -520,12 +580,15 @@ object InteractiveDemo {
                         )
                     }
 
-                    // Keep all tokens but only deposit configured ADA amount
-                    val depositAmount =
-                        depositUtxo.output.value.copy(coin = Coin(depositAmountLovelace))
+                    // Use the deposit value provided (may include multiple tokens)
+                    val depositAmount = depositValue
 
+                    // Display deposit info
+                    val tokenInfo =
+                        if depositAmount == Value.lovelace(depositAmount.coin.value) then ""
+                        else s" + tokens"
                     println(
-                      s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA (keeping ${(totalAvailable - depositAmountLovelace) / 1_000_000} ADA in wallet for fees/change)"
+                      s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA$tokenInfo (keeping ${(totalAvailable - depositAmountLovelace) / 1_000_000} ADA in wallet for fees/change)"
                     )
 
                     println(s"[DEBUG] Building openChannel transaction...")
@@ -800,7 +863,9 @@ object InteractiveDemo {
                 println("\nAvailable commands:")
                 println("  mint <tokenName> <amount>  - Mint custom tokens")
                 println("  register <symbol> <policyId> <assetName> - Register external token")
-                println("  connect                     - Connect to the exchange")
+                println("  connect [token amount ...]  - Connect to the exchange with deposit")
+                println("                               Example: connect ada 100 usdm 30")
+                println("                               (deposits 100 ADA and 30 USDM)")
                 println("  assets                      - Show available assets for trading")
                 println("  buy <base> <quote> <quantity> <price>   - Buy base for quote")
                 println("  sell <base> <quote> <quantity> <price>  - Sell base for quote")
@@ -913,7 +978,11 @@ object InteractiveDemo {
                                     println("[DEBUG] About to call connectToExchange...")
                                     System.out.flush()
                                     Try {
-                                        connectToExchange(lastMintTxId)
+                                        // Parse deposit arguments (e.g., "connect ada 100 usdm 30")
+                                        val depositArgs =
+                                            parts.drop(1).toSeq // Remove "connect" from args
+                                        val depositValue = parseDepositValue(depositArgs)
+                                        connectToExchange(lastMintTxId, depositValue)
                                     }.recover {
                                         case e: DemoException if e.alreadyPrinted =>
                                             // Error message already displayed, don't repeat it
@@ -1075,7 +1144,10 @@ object InteractiveDemo {
                                   "  register <symbol> <policyId> <assetName>         - Register external token"
                                 )
                                 println(
-                                  "  connect                                           - Connect to the exchange"
+                                  "  connect [token amount ...]                        - Connect to the exchange with deposit"
+                                )
+                                println(
+                                  "                                                      Example: connect ada 100 usdm 30"
                                 )
                                 println(
                                   "  assets                                            - Show available assets for trading"
