@@ -26,6 +26,7 @@ enum ClientRequest derives ReadWriter:
     case Withdraw(clientId: ClientId, amount: Value)
     case GetBalance(clientId: ClientId)
     case GetOrders(clientId: ClientId)
+    case GetState(clientId: ClientId)
 
 end ClientRequest
 
@@ -64,6 +65,12 @@ enum ClientResponse derives ReadWriter:
     case OrderExecuted(trade: Trade)
     case Balance(balance: scalus.ledger.api.v3.Value)
     case Orders(orders: scalus.prelude.AssocMap[OrderId, LimitOrder])
+    case State(
+        balance: scalus.ledger.api.v3.Value,
+        orders: scalus.prelude.AssocMap[OrderId, LimitOrder],
+        channelStatus: ChannelStatus,
+        snapshotVersion: BigInt
+    )
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)
@@ -453,6 +460,21 @@ class Server(
 
     def getLatestSnapshot(clientId: ClientId): Option[SignedSnapshot] = {
         clientStates.get(clientId).map(_.latestSnapshot)
+    }
+
+    def handleGetState(clientId: ClientId): Either[(String, String), ClientResponse.State] = {
+        clientStates.get(clientId) match
+            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
+            case Some(clientState) =>
+                val tradingState = clientState.latestSnapshot.signedSnapshot.snapshotTradingState
+                Right(
+                  ClientResponse.State(
+                    balance = tradingState.tsClientBalance,
+                    orders = tradingState.tsOrders,
+                    channelStatus = clientState.status,
+                    snapshotVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
+                  )
+                )
     }
 
     def getChannelStatus(clientId: ClientId): Option[ChannelStatus] = {

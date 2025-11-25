@@ -152,6 +152,13 @@ case class DemoConfig(config: Config) {
                     )
                 }
         }
+
+        /** Get asset by policy ID (returns None if not found) */
+        def getAssetByPolicyId(policyId: ByteString): Option[AssetConfig] = {
+            if policyId.bytes.isEmpty then Some(ada)
+            else if policyId == usdm.policyId then Some(usdm)
+            else customAssets.values.find(_.policyId == policyId)
+        }
     }
 
     // Exchange Configuration

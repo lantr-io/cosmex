@@ -378,6 +378,13 @@ object CosmexWebSocketServer {
                         ClientResponse.Error(ErrorCode.ClientNotFound, "Client not found")
                 }
                 List(response)
+
+            case ClientRequest.GetState(clientId) =>
+                server.handleGetState(clientId) match {
+                    case Right(state) => List(state)
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
+                }
         }
         responses
     }

@@ -870,6 +870,9 @@ object InteractiveDemo {
                 println("  connect [token amount ...]  - Connect to the exchange with deposit")
                 println("                               Example: connect ada 100 usdm 30")
                 println("                               (deposits 100 ADA and 30 USDM)")
+                println(
+                  "  get-state                   - Show current client state (balance, orders)"
+                )
                 println("  assets                      - Show available assets for trading")
                 println("  buy <base> <quote> <quantity> <price>   - Buy base for quote")
                 println("  sell <base> <quote> <quantity> <price>  - Sell base for quote")
@@ -1021,6 +1024,144 @@ object InteractiveDemo {
                                     }
                                 }
 
+                            case Some("get-state") =>
+                                if !isConnected then {
+                                    println(
+                                      "[State] ERROR: Not connected to exchange. Please use 'connect' first."
+                                    )
+                                } else {
+                                    Try {
+                                        client.sendMessage(ClientRequest.GetState(clientId.get))
+                                        client.receiveMessage(timeoutSeconds = 10) match {
+                                            case Success(responseJson) =>
+                                                read[ClientResponse](responseJson) match {
+                                                    case ClientResponse.State(
+                                                          balance,
+                                                          orders,
+                                                          channelStatus,
+                                                          snapshotVersion
+                                                        ) =>
+                                                        println("\n" + "=" * 60)
+                                                        println("Client State")
+                                                        println("=" * 60)
+                                                        println(
+                                                          s"Channel Status:    ${channelStatus}"
+                                                        )
+                                                        println(
+                                                          s"Snapshot Version:  ${snapshotVersion}"
+                                                        )
+                                                        println()
+                                                        println("Balance:")
+                                                        // Display ADA balance
+                                                        val adaBalance = balance.quantityOf(
+                                                          scalus.builtin.ByteString.empty,
+                                                          scalus.builtin.ByteString.empty
+                                                        )
+                                                        println(
+                                                          f"  ADA:             ${adaBalance.toLong / 1_000_000.0}%.6f"
+                                                        )
+                                                        // Display other token balances from the Value map
+                                                        balance.toSortedMap.toList.foreach {
+                                                            case (policyId, assets) =>
+                                                                if policyId.bytes.nonEmpty then {
+                                                                    assets.toList.foreach {
+                                                                        case (assetName, amount) =>
+                                                                            // Try to find symbol and decimals from registered assets
+                                                                            val (symbol, decimals) =
+                                                                                try {
+                                                                                    config.assets
+                                                                                        .getAssetByPolicyId(
+                                                                                          policyId
+                                                                                        )
+                                                                                        .map(a =>
+                                                                                            (
+                                                                                              a.symbol,
+                                                                                              a.decimals
+                                                                                            )
+                                                                                        )
+                                                                                        .getOrElse(
+                                                                                          (
+                                                                                            assetName.toHex
+                                                                                                .take(
+                                                                                                  16
+                                                                                                ),
+                                                                                            0
+                                                                                          )
+                                                                                        )
+                                                                                } catch {
+                                                                                    case _: Exception =>
+                                                                                        (
+                                                                                          assetName.toHex
+                                                                                              .take(
+                                                                                                16
+                                                                                              ),
+                                                                                          0
+                                                                                        )
+                                                                                }
+                                                                            val displayAmount =
+                                                                                if decimals > 0
+                                                                                then
+                                                                                    amount.toLong / Math
+                                                                                        .pow(
+                                                                                          10,
+                                                                                          decimals
+                                                                                        )
+                                                                                else amount.toDouble
+                                                                            val formatStr =
+                                                                                s"  %-16s %.${decimals}f"
+                                                                            println(
+                                                                              formatStr.format(
+                                                                                symbol,
+                                                                                displayAmount
+                                                                              )
+                                                                            )
+                                                                    }
+                                                                }
+                                                        }
+                                                        println()
+                                                        println("Orders:")
+                                                        if orders.isEmpty then {
+                                                            println("  (no open orders)")
+                                                        } else {
+                                                            orders.toList.foreach {
+                                                                case (orderId, order) =>
+                                                                    val side =
+                                                                        if order.orderAmount > 0
+                                                                        then "BUY"
+                                                                        else "SELL"
+                                                                    val amount =
+                                                                        order.orderAmount.abs
+                                                                    println(
+                                                                      f"  #${orderId}%-6s ${side}%-4s ${amount}%10d @ ${order.orderPrice}"
+                                                                    )
+                                                            }
+                                                        }
+                                                        println("=" * 60)
+
+                                                    case ClientResponse.Error(code, msg) =>
+                                                        println(
+                                                          s"[State] ERROR [$code]: $msg"
+                                                        )
+                                                    case other =>
+                                                        println(
+                                                          s"[State] Unexpected response: $other"
+                                                        )
+                                                }
+                                            case Failure(e) =>
+                                                println(
+                                                  s"[State] ERROR: Failed to get state: ${e.getMessage}"
+                                                )
+                                        }
+                                    }.recover {
+                                        case e: DemoException if e.alreadyPrinted => ()
+                                        case e: DemoException =>
+                                            println(s"[State] ERROR [${e.code}]: ${e.message}")
+                                        case e: Exception =>
+                                            println(s"[State] UNEXPECTED ERROR: ${e.getMessage}")
+                                            e.printStackTrace()
+                                    }
+                                }
+
                             case Some("buy") if parts.length == 5 =>
                                 if !isConnected then {
                                     println(
@@ -1152,6 +1293,9 @@ object InteractiveDemo {
                                 )
                                 println(
                                   "                                                      Example: connect ada 100 usdm 30"
+                                )
+                                println(
+                                  "  get-state                                         - Show current client state (balance, orders)"
                                 )
                                 println(
                                   "  assets                                            - Show available assets for trading"
