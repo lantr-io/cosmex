@@ -19,7 +19,6 @@ import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import cosmex.util.submitAndWait
 
 enum ClientRequest derives ReadWriter:
-    case AskScriptHash
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
     case CreateOrder(clientId: ClientId, order: LimitOrder)
     case CancelOrder(clientId: ClientId, orderId: Int)
@@ -45,7 +44,6 @@ enum BlockchainEvent derives ReadWriter:
     case Tick(chainTime: Instant, chainSlot: ChainSlot)
 
 enum ClientResponse derives ReadWriter:
-    case TellScriptHash(scriptHash: String)
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
     case ChannelOpened(snapshot: SignedSnapshot)
     case Error(message: String)
@@ -112,8 +110,6 @@ class Server(
 
     private def handleClientRequest(request: ClientRequest): Unit = {
         request match
-            case ClientRequest.AskScriptHash =>
-                reply(ClientResponse.TellScriptHash(script.scriptHash.toHex))
             case ClientRequest.OpenChannel(tx, snapshot) =>
                 validateOpenChannelRequest(tx, snapshot) match
                     case Right(openChannelInfo) =>

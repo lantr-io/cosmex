@@ -157,13 +157,26 @@ case class DemoConfig(config: Config) {
     // Exchange Configuration
     object exchange {
         val seed: Int = config.getInt("exchange.seed")
+        val mnemonic: Option[String] =
+            if config.hasPath("exchange.mnemonic") then Some(config.getString("exchange.mnemonic"))
+            else None
         val minDeposit: Long = config.getLong("exchange.params.minDeposit")
         val snapshotContestPeriod: Int = config.getInt("exchange.params.snapshotContestPeriod")
         val tradesContestPeriod: Int = config.getInt("exchange.params.tradesContestPeriod")
 
-        /** Create exchange account from config */
+        /** Create exchange account from config (using mnemonic if available, otherwise seed) */
         def createAccount(): Account = {
-            new Account(network.bloxbeanNetwork, seed)
+            mnemonic match {
+                case Some(words) =>
+                    import com.bloxbean.cardano.client.crypto.cip1852.DerivationPath.createExternalAddressDerivationPathForAccount
+                    Account.createFromMnemonic(
+                      network.bloxbeanNetwork,
+                      words,
+                      createExternalAddressDerivationPathForAccount(seed)
+                    )
+                case None =>
+                    new Account(network.bloxbeanNetwork, seed)
+            }
         }
 
         /** Create ExchangeParams from config */

@@ -233,38 +233,8 @@ object InteractiveDemo {
                     }
                 }
 
-                // Fetch script hash from server (if using external server)
-                val serverScriptHash: Option[ScriptHash] = if externalServer then {
-                    try {
-                        println(
-                          s"[Setup] Fetching script hash from server at http://localhost:$port/script-hash..."
-                        )
-                        val url = new java.net.URL(s"http://localhost:$port/script-hash")
-                        val connection = url.openConnection()
-                        connection.setConnectTimeout(5000)
-                        connection.setReadTimeout(5000)
-                        val scriptHashHex =
-                            scala.io.Source.fromInputStream(connection.getInputStream).mkString.trim
-                        println(s"[Setup] ✓ Received script hash from server: $scriptHashHex")
-                        Some(ScriptHash.fromByteString(ByteString.fromHex(scriptHashHex)))
-                    } catch {
-                        case e: Exception =>
-                            println(
-                              s"[Setup] ERROR: Failed to fetch script hash from server: ${e.getMessage}"
-                            )
-                            println(s"[Setup] Make sure the server is running on port $port")
-                            throw DemoException(
-                              "SCRIPT_HASH_FETCH_FAILED",
-                              "Could not fetch script hash from server",
-                              alreadyPrinted = true
-                            )
-                    }
-                } else {
-                    None
-                }
-
-                // Transaction builder (with optional script hash override from server)
-                val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo, serverScriptHash)
+                // Transaction builder
+                val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
 
                 // Helper to find client's UTxO
                 // Selects the minimum UTxO that has at least requiredAmount (to avoid fragmentation)
@@ -597,12 +567,9 @@ object InteractiveDemo {
                     val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
 
                     // Find the actual output index for the Cosmex script output
-                    // Use the server's script hash if we fetched it, otherwise use local compilation
-                    val effectiveScriptHash =
-                        serverScriptHash.getOrElse(txbuilder.script.scriptHash)
                     val cosmexScriptAddress = Address(
                       scalusNetwork,
-                      Credential.ScriptHash(effectiveScriptHash)
+                      Credential.ScriptHash(txbuilder.script.scriptHash)
                     )
 
                     println(s"[Connect] Looking for output to script address: $cosmexScriptAddress")
