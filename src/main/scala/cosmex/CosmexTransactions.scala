@@ -219,4 +219,85 @@ class CosmexTransactions(
             .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
             .transaction
     }
+
+    /** Build a rebalance transaction that updates multiple channels to match their snapshot states.
+      *
+      * This transaction:
+      *   - Spends all affected channel UTxOs using the Update action
+      *   - Creates new outputs with values matching each client's snapshot total
+      *   - Requires signatures from all affected clients + exchange
+      *
+      * @param channelData
+      *   Sequence of (UTxO, OnChainState, TradingState) for each channel to rebalance
+      * @param exchangePkh
+      *   Exchange public key hash for signature requirement
+      * @return
+      *   An unsigned Transaction for rebalancing
+      */
+    def rebalance(
+        channelData: Seq[(Utxo, OnChainState, TradingState)],
+        exchangePkh: PubKeyHash
+    ): Transaction = {
+        val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+
+        // Collect all signatories needed (all clients + exchange)
+        val clientPkhs = channelData.map(_._2.clientPkh)
+        val allSignatories = (clientPkhs :+ exchangePkh).distinct
+
+        // Build spend steps for each channel
+        val spendSteps = channelData.map { case (utxo, onChainState, _) =>
+            val witness = ThreeArgumentPlutusScriptWitness(
+              scriptSource = ScriptSource.PlutusScriptValue(script),
+              redeemer = Action.Update.toData,
+              datum = Datum.DatumInlined,
+              additionalSigners = allSignatories.map { pkh =>
+                  ExpectedSigner(AddrKeyHash(pkh.hash))
+              }.toSet
+            )
+            TransactionBuilderStep.Spend(utxo, witness)
+        }
+
+        // Build output steps for each channel with updated values
+        val outputSteps = channelData.map { case (utxo, onChainState, tradingState) =>
+            // Calculate new locked value from snapshot: client + exchange + locked in orders
+            val newLockedValue = tradingState.tsClientBalance +
+                tradingState.tsExchangeBalance +
+                CosmexValidator.lockedInOrders(tradingState.tsOrders)
+
+            // Create output with same OnChainState but new value
+            val output = TransactionOutput(
+              address = scriptAddress,
+              value = newLockedValue.toLedgerValue,
+              datumOption = Some(DatumOption.Inline(onChainState.toData)),
+              scriptRef = None
+            )
+            TransactionBuilderStep.Send(output)
+        }
+
+        // Combine all steps
+        val steps = spendSteps ++ outputSteps ++ Seq(
+          TransactionBuilderStep.ValidityStartSlot(0),
+          TransactionBuilderStep.ValidityEndSlot(100000000), // Large validity window
+          TransactionBuilderStep.Fee(Coin(500000)) // 0.5 ADA fee (higher for multi-input tx)
+        )
+
+        val diffHandler = ChangeOutputDiffHandler(env.protocolParams, 0).changeOutputDiffHandler
+
+        // Build the transaction
+        val result =
+            for
+                ctx <- TransactionBuilder.build(network, steps)
+                r <- ctx.finalizeContext(
+                  env.protocolParams,
+                  diffHandler,
+                  PlutusScriptEvaluator.noop,
+                  Seq.empty
+                )
+            yield r
+
+        result match
+            case Right(context) => context.transaction
+            case Left(error) =>
+                throw new RuntimeException(s"Rebalance transaction build failed: $error")
+    }
 }

@@ -1,6 +1,7 @@
 package cosmex
 
 import com.bloxbean.cardano.client.account.Account
+import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
 import scalus.builtin.{Builtins, ByteString}
 import scalus.cardano.ledger.*
 import scalus.ledger.api.v3.{TxOutRef, Value as V3Value}
@@ -13,6 +14,9 @@ object DemoHelpers {
       *
       * Signs the (clientTxOutRef, snapshot) tuple with the client's Ed25519 private key. Exchange
       * signature is left empty - will be filled by server.
+      *
+      * Uses Cardano's extended Ed25519 signing (BIP32-Ed25519) which requires the full 64-byte
+      * extended private key.
       */
     def mkClientSignedSnapshot(
         clientAccount: Account,
@@ -23,10 +27,18 @@ object DemoHelpers {
         import scalus.builtin.Data.toData
         val msg = Builtins.serialiseData(signedInfo.toData)
 
-        // Sign with client private key (first 32 bytes only - Ed25519 private key)
-        val clientPrivKeyBytes = clientAccount.privateKeyBytes()
-        val clientPrivKey = ByteString.fromArray(clientPrivKeyBytes.take(32))
-        val clientSignature = scalus.builtin.platform.signEd25519(clientPrivKey, msg)
+        // Use Bloxbean's signExtended for Cardano's BIP32-Ed25519 extended keys
+        // Note: getKeyData returns 64-byte extended key, getBytes returns 96-byte (includes chain code)
+        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+        val extendedPrivKey = clientAccount.hdKeyPair().getPrivateKey.getKeyData
+        val clientPubKey = ByteString.fromArray(
+          clientAccount.hdKeyPair().getPublicKey.getKeyData.take(32)
+        )
+
+        // Sign with extended private key (64 bytes)
+        val clientSignature = ByteString.fromArray(
+          signingProvider.signExtended(msg.bytes, extendedPrivKey)
+        )
 
         SignedSnapshot(
           signedSnapshot = snapshot,
@@ -90,9 +102,10 @@ object DemoHelpers {
         ByteString.fromArray(account.hdKeyPair().getPublicKey.getKeyHash)
     }
 
-    /** Extract public key from account */
+    /** Extract public key (Ed25519 - first 32 bytes) from account */
     def getPubKey(account: Account): ByteString = {
-        ByteString.fromArray(account.publicKeyBytes())
+        // Ed25519 public keys are 32 bytes - ensure consistency
+        ByteString.fromArray(account.hdKeyPair().getPublicKey.getKeyData.take(32))
     }
 
     /** Extract private key (Ed25519 - first 32 bytes) from account */

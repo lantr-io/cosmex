@@ -22,7 +22,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     private val testEnv: Environment = cardanoInfo
     // Accounts and keys
     private val exchangeAccount = new Account(network, 1)
-    private val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+    private val exchangePrivKey =
+        ByteString.fromArray(exchangeAccount.hdKeyPair().getPrivateKey.getKeyData)
     private val exchangePubKey = ByteString.fromArray(exchangeAccount.publicKeyBytes())
     private val exchangePubKeyHash =
         ByteString.fromArray(exchangeAccount.hdKeyPair().getPublicKey.getKeyHash)
@@ -92,12 +93,16 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     ): SignedSnapshot = {
         val signedInfo = (clientTxOutRef, snapshot)
         import scalus.builtin.Data.toData
+        import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
         val msg = Builtins.serialiseData(signedInfo.toData)
 
-        // Sign with client private key (first 32 bytes only - Ed25519 private key)
-        val clientPrivKeyBytes = clientAccount.privateKeyBytes()
-        val clientPrivKey = ByteString.fromArray(clientPrivKeyBytes.take(32))
-        val clientSignature = platform.signEd25519(clientPrivKey, msg)
+        // Sign with extended private key (64 bytes for Cardano's BIP32-Ed25519)
+        // Note: getKeyData returns 64-byte extended key, not getBytes/privateKeyBytes which include chain code
+        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+        val extendedPrivKey = clientAccount.hdKeyPair().getPrivateKey.getKeyData
+        val clientSignature = ByteString.fromArray(
+          signingProvider.signExtended(msg.bytes, extendedPrivKey)
+        )
 
         SignedSnapshot(
           signedSnapshot = snapshot,
@@ -168,7 +173,9 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     test("Server: open channel end-to-end") {
         val provider = this.newEmulator()
-        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        // Use getKeyData for 64-byte extended key (not privateKeyBytes which is 96 bytes)
+        val exchangePrivKey =
+            ByteString.fromArray(exchangeAccount.hdKeyPair().getPrivateKey.getKeyData)
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
         // 1. Client builds open channel transaction
@@ -194,8 +201,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .find(_.address == server.CosmexScriptAddress)
             .get
             .value
-        val firstInput = openChannelTx.body.value.inputs.toSeq.head
-        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
+        // Use OUTPUT tx.id (openChannelTx.id), not input tx.id - server uses tx.id for verification
+        val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
         val initialSnapshot = mkInitialSnapshot(actualDepositAmount)
         val clientSignedSnapshot =
             mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
@@ -223,7 +230,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     test("Server: reject invalid snapshot version") {
         val provider = this.newEmulator()
-        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val exchangePrivKey =
+            ByteString.fromArray(exchangeAccount.hdKeyPair().getPrivateKey.getKeyData)
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
         val depositUtxo = provider
@@ -257,7 +265,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     test("Server: reject snapshot with non-zero exchange balance") {
         val provider = this.newEmulator()
-        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val exchangePrivKey =
+            ByteString.fromArray(exchangeAccount.hdKeyPair().getPrivateKey.getKeyData)
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
         val depositUtxo = provider
@@ -306,7 +315,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
     test("Server: reject snapshot with wrong balance") {
         val provider = this.newEmulator()
-        val exchangePrivKey = ByteString.fromArray(exchangeAccount.privateKeyBytes().take(32))
+        val exchangePrivKey =
+            ByteString.fromArray(exchangeAccount.hdKeyPair().getPrivateKey.getKeyData)
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 
         val depositUtxo = provider
@@ -380,7 +390,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
           lockedValue = aliceActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
         )
         server.clientStates.put(aliceClientId, aliceClientState)
 
@@ -423,7 +434,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
           lockedValue = bobActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = bobPubKey
         )
         server.clientStates.put(bobClientId, bobClientState)
 
@@ -542,7 +554,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
           lockedValue = aliceActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
         )
         server.clientStates.put(aliceClientId, aliceClientState)
 
@@ -594,7 +607,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
           lockedValue = bobActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = bobPubKey
         )
         server.clientStates.put(bobClientId, bobClientState)
 
@@ -645,7 +659,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
           lockedValue = aliceActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
         )
         server.clientStates.put(aliceClientId, aliceClientState)
 
@@ -694,7 +709,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
           lockedValue = bobActualDeposit,
-          status = ChannelStatus.Open
+          status = ChannelStatus.Open,
+          clientPubKey = bobPubKey
         )
         server.clientStates.put(bobClientId, bobClientState)
 

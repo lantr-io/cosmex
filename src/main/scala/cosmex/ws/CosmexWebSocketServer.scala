@@ -201,7 +201,8 @@ object CosmexWebSocketServer {
                           latestSnapshot = signedSnapshot,
                           channelRef = channelRef,
                           lockedValue = actualDeposit,
-                          status = ChannelStatus.PendingOpen
+                          status = ChannelStatus.PendingOpen,
+                          clientPubKey = openChannelInfo.clientPubKey
                         )
                         server.clientStates.put(clientId, clientState)
 
@@ -386,6 +387,24 @@ object CosmexWebSocketServer {
             case ClientRequest.GetState(clientId) =>
                 server.handleGetState(clientId) match {
                     case Right(state) => List(state)
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
+                }
+
+            case ClientRequest.FixBalance(clientId) =>
+                server.handleFixBalance(clientId) match {
+                    case Right(_) =>
+                        println(s"[Server] Rebalancing started by client: $clientId")
+                        List(ClientResponse.RebalanceStarted)
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
+                }
+
+            case ClientRequest.SignRebalance(clientId, signedTx) =>
+                server.handleSignRebalance(clientId, signedTx) match {
+                    case Right(_) =>
+                        // Response will be sent asynchronously when all signatures collected
+                        List.empty
                     case Left((code, error)) =>
                         List(ClientResponse.Error(code, error))
                 }

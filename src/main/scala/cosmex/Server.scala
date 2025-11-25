@@ -1,5 +1,6 @@
 package cosmex
 
+import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
 import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
 
@@ -28,6 +29,8 @@ enum ClientRequest derives ReadWriter:
     case GetBalance(clientId: ClientId)
     case GetOrders(clientId: ClientId)
     case GetState(clientId: ClientId)
+    case FixBalance(clientId: ClientId)
+    case SignRebalance(clientId: ClientId, signedTx: Transaction)
 
 end ClientRequest
 
@@ -56,6 +59,9 @@ object ErrorCode:
     val InvalidTransaction = "INVALID_TRANSACTION"
     val TransactionFailed = "TRANSACTION_FAILED"
     val InternalError = "INTERNAL_ERROR"
+    val RebalancingInProgress = "REBALANCING_IN_PROGRESS"
+    val RebalancingFailed = "REBALANCING_FAILED"
+    val NoRebalancingNeeded = "NO_REBALANCING_NEEDED"
 
 enum ClientResponse derives ReadWriter:
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
@@ -73,6 +79,10 @@ enum ClientResponse derives ReadWriter:
         channelStatus: ChannelStatus,
         snapshotVersion: BigInt
     )
+    case RebalanceStarted
+    case RebalanceRequired(tx: Transaction)
+    case RebalanceComplete(snapshot: SignedSnapshot)
+    case RebalanceAborted(reason: String)
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)
@@ -93,7 +103,8 @@ case class ClientState(
     latestSnapshot: SignedSnapshot,
     channelRef: TransactionInput,
     lockedValue: Value,
-    status: ChannelStatus
+    status: ChannelStatus,
+    clientPubKey: ByteString // Client's public key for signature verification and rebalancing
 ) derives ReadWriter
 
 case class ClientRecord(
@@ -105,8 +116,17 @@ case class OpenChannelInfo(
     channelRef: TransactionInput,
     amount: Value,
     tx: Transaction,
-    snapshot: SignedSnapshot
+    snapshot: SignedSnapshot,
+    clientPubKey: ByteString
 ) derives ReadWriter
+
+/** Context for tracking an in-progress rebalancing operation */
+case class RebalancingContext(
+    startTime: Instant,
+    affectedClients: Set[ClientId],
+    rebalanceTx: Transaction,
+    collectedSignatures: Map[ClientId, Transaction]
+)
 
 class Server(
     env: CardanoInfo,
@@ -125,6 +145,9 @@ class Server(
     var orderBookRef: AtomicReference[OrderBook] = new AtomicReference(OrderBook.empty)
     var nextOrderId: AtomicLong = new AtomicLong(0L)
     val orderOwners = TrieMap.empty[OrderId, ClientId] // Maps order ID to client
+
+    // Rebalancing state: None = normal operation, Some = rebalancing in progress
+    val rebalancingState: AtomicReference[Option[RebalancingContext]] = new AtomicReference(None)
 
     def handleCommand(command: Command): Unit = command match
         case Command.ClientCommand(clientId, action) => handleClientRequest(action)
@@ -150,7 +173,8 @@ class Server(
                           latestSnapshot = bothSignedSnapshot,
                           channelRef = openChannelInfo.channelRef,
                           lockedValue = openChannelInfo.amount,
-                          status = ChannelStatus.PendingOpen
+                          status = ChannelStatus.PendingOpen,
+                          clientPubKey = openChannelInfo.clientPubKey
                         )
                         clientStates.put(clientId, clientState)
 
@@ -242,17 +266,37 @@ class Server(
         // Check that there are no orders
         if !tradingState.tsOrders.isEmpty then return Left("Initial snapshot must have no orders")
 
-        // Extract client public key from the datum (we need to check the OnChainState in the output)
-        // For now, we'll assume it's validated elsewhere or extract it from the datum
-        // TODO: Extract clientPubKey from the output's inline datum if needed for signature verification
+        // Extract client public key from the inline datum (OnChainState)
+        val clientPubKey: ByteString = output.datumOption match
+            case Some(DatumOption.Inline(data)) =>
+                val onChainState = data.to[OnChainState]
+                onChainState.clientPubKey
+            case _ =>
+                return Left("Output must have inline datum with OnChainState")
 
-        // Verify client signature
-        // Note: We can't verify the signature here without the client's public key
-        // The public key should be in the output's datum (OnChainState.clientPubKey)
-        // For now, we'll skip this check and verify it when we have access to the client pub key
-        // This will be verified when the transaction is submitted with the proper datum
+        // Verify client signature using the extracted public key
+        val clientTxOutRef = TxOutRef(TxId(tx.id), outputIdx)
+        println(s"[Server] Verifying client signature:")
+        println(
+          s"[Server]   Public key length: ${clientPubKey.length}, hex: ${clientPubKey.toHex.take(32)}..."
+        )
+        println(
+          s"[Server]   TxOutRef full: ${clientTxOutRef.id.hash.toHex} index ${clientTxOutRef.idx}"
+        )
+        println(s"[Server]   tx.id: ${tx.id.toHex}")
+        println(s"[Server]   Signature length: ${snapshot.snapshotClientSignature.length}")
+        if !verifyClientSignature(clientPubKey, clientTxOutRef, snapshot) then
+            return Left("Invalid client signature on snapshot")
 
-        Right(OpenChannelInfo(TransactionInput(tx.id, outputIdx), depositAmount, tx, snapshot))
+        Right(
+          OpenChannelInfo(
+            TransactionInput(tx.id, outputIdx),
+            depositAmount,
+            tx,
+            snapshot,
+            clientPubKey
+          )
+        )
     }
 
     def verifyClientSignature(
@@ -274,7 +318,11 @@ class Server(
         val signedInfo = (clientTxOutRef, snapshot.signedSnapshot)
         import scalus.builtin.Data.toData
         val msg = Builtins.serialiseData(signedInfo.toData)
-        val cosmexSignature = platform.signEd25519(CosmexSignKey, msg)
+        // Use Bloxbean's signExtended for Cardano's BIP32-Ed25519 extended keys
+        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+        val cosmexSignature = ByteString.fromArray(
+          signingProvider.signExtended(msg.bytes, CosmexSignKey.bytes)
+        )
         snapshot.copy(snapshotExchangeSignature = cosmexSignature)
     }
 
@@ -356,23 +404,38 @@ class Server(
                 // Register order owner BEFORE matching so notifications can be sent
                 orderOwners.put(orderId, clientId)
 
+                // Check if rebalancing is in progress - if so, pause matching
+                val isRebalancing = rebalancingState.get().isDefined
+
                 var orderBookUpdated = false
                 var matchResult: OrderBook.MatchResult = null
                 while !orderBookUpdated do
                     val orderBook = orderBookRef.get()
-                    // Match against order book
-                    matchResult = OrderBook.matchOrder(orderBook, orderId, order)
 
-                    // Update order book with remaining order (if any)
-                    var newOrderBook = matchResult.updatedBook
-                    if matchResult.remainingAmount != 0 then
-                        newOrderBook = OrderBook.addOrder(
-                          newOrderBook,
-                          orderId,
-                          order.copy(orderAmount = matchResult.remainingAmount)
+                    if isRebalancing then
+                        // During rebalancing: accept order but don't match, just add to book
+                        matchResult = OrderBook.MatchResult(
+                          trades = List.empty,
+                          updatedBook = orderBook,
+                          remainingAmount = order.orderAmount
                         )
-                    if orderBookRef.compareAndSet(orderBook, newOrderBook) then
-                        orderBookUpdated = true
+                        val newOrderBook = OrderBook.addOrder(orderBook, orderId, order)
+                        if orderBookRef.compareAndSet(orderBook, newOrderBook) then
+                            orderBookUpdated = true
+                    else
+                        // Normal operation: match against order book
+                        matchResult = OrderBook.matchOrder(orderBook, orderId, order)
+
+                        // Update order book with remaining order (if any)
+                        var newOrderBook = matchResult.updatedBook
+                        if matchResult.remainingAmount != 0 then
+                            newOrderBook = OrderBook.addOrder(
+                              newOrderBook,
+                              orderId,
+                              order.copy(orderAmount = matchResult.remainingAmount)
+                            )
+                        if orderBookRef.compareAndSet(orderBook, newOrderBook) then
+                            orderBookUpdated = true
 
                 // Note: Trade notifications are now sent from CosmexWebSocketServer.handleRequest
                 // This ensures OrderCreated is sent before OrderExecuted for the initiating client
@@ -522,6 +585,211 @@ class Server(
     /** Check if a transaction output exists on-chain (i.e., transaction is confirmed) */
     def isUtxoConfirmed(txOutRef: TransactionInput): Boolean = {
         provider.findUtxo(txOutRef).isRight
+    }
+
+    /** Check if a client needs rebalancing (on-chain locked value != snapshot balances) */
+    def needsRebalancing(clientId: ClientId): Boolean = {
+        clientStates.get(clientId) match
+            case None => false
+            case Some(clientState) =>
+                val tradingState = clientState.latestSnapshot.signedSnapshot.snapshotTradingState
+                // Total snapshot balance = client + exchange + locked in orders
+                val snapshotTotal = tradingState.tsClientBalance +
+                    tradingState.tsExchangeBalance +
+                    CosmexValidator.lockedInOrders(tradingState.tsOrders)
+                // Compare with on-chain locked value
+                val lockedValue = LedgerToPlutusTranslation.getValue(clientState.lockedValue)
+                snapshotTotal != lockedValue
+    }
+
+    /** Find all clients that need rebalancing */
+    def findClientsNeedingRebalancing(): Set[ClientId] = {
+        clientStates.keys.filter(needsRebalancing).toSet
+    }
+
+    /** Handle fix-balance request - initiates global rebalancing */
+    def handleFixBalance(
+        requestingClientId: ClientId
+    ): Either[(String, String), Unit] = {
+        // Check if already rebalancing
+        if rebalancingState.get().isDefined then
+            return Left((ErrorCode.RebalancingInProgress, "Rebalancing already in progress"))
+
+        // Find all clients needing rebalancing
+        val affectedClients = findClientsNeedingRebalancing()
+
+        if affectedClients.isEmpty then
+            println(s"[Server] No clients need rebalancing - on-chain state matches snapshot state")
+            return Left(
+              (
+                ErrorCode.NoRebalancingNeeded,
+                "All client balances are already synchronized with on-chain state"
+              )
+            )
+
+        println(s"[Server] Starting rebalancing for ${affectedClients.size} clients")
+
+        // Build the rebalance transaction
+        // We need to fetch current UTxOs for all affected channels
+        val channelUtxos = affectedClients.flatMap { clientId =>
+            clientStates.get(clientId).flatMap { clientState =>
+                provider.findUtxo(clientState.channelRef) match
+                    case Right(utxo) => Some((clientId, utxo, clientState))
+                    case Left(_) =>
+                        println(s"[Server] Warning: Could not find UTxO for client $clientId")
+                        None
+            }
+        }.toSeq
+
+        if channelUtxos.isEmpty then
+            return Left((ErrorCode.RebalancingFailed, "Could not find any channel UTxOs"))
+
+        // Build rebalance transaction using CosmexTransactions
+        val txBuilder = CosmexTransactions(exchangeParams, env)
+
+        // Reconstruct OnChainState from ClientState (we have all the info we need)
+        val channelDataWithOnChainState = channelUtxos.map { case (clientId, utxo, state) =>
+            // Compute clientPkh from clientPubKey
+            val clientPkh = scalus.ledger.api.v2.PubKeyHash(
+              platform.blake2b_224(state.clientPubKey)
+            )
+            val clientTxOutRef = scalus.ledger.api.v3.TxOutRef(
+              scalus.ledger.api.v3.TxId(state.channelRef.transactionId),
+              state.channelRef.index
+            )
+            val onChainState = OnChainState(
+              clientPkh = clientPkh,
+              clientPubKey = state.clientPubKey,
+              clientTxOutRef = clientTxOutRef,
+              channelState = OnChainChannelState.OpenState
+            )
+            (utxo, onChainState, state.latestSnapshot.signedSnapshot.snapshotTradingState)
+        }
+
+        val rebalanceTx = txBuilder.rebalance(
+          channelDataWithOnChainState,
+          exchangeParams.exchangePkh
+        )
+
+        // Set rebalancing state
+        val context = RebalancingContext(
+          startTime = Instant.now(),
+          affectedClients = affectedClients,
+          rebalanceTx = rebalanceTx,
+          collectedSignatures = Map.empty
+        )
+
+        if !rebalancingState.compareAndSet(None, Some(context)) then
+            return Left((ErrorCode.RebalancingInProgress, "Rebalancing started by another request"))
+
+        // Send RebalanceRequired to all affected clients
+        affectedClients.foreach { clientId =>
+            clientChannels.get(clientId).foreach { channel =>
+                println(s"[Server] Sending RebalanceRequired to client $clientId")
+                channel.send(ClientResponse.RebalanceRequired(rebalanceTx))
+            }
+        }
+
+        Right(())
+    }
+
+    /** Handle signed rebalance transaction from a client */
+    def handleSignRebalance(
+        clientId: ClientId,
+        signedTx: Transaction
+    ): Either[(String, String), Unit] = {
+        rebalancingState.get() match
+            case None =>
+                Left((ErrorCode.InternalError, "No rebalancing in progress"))
+            case Some(context) =>
+                if !context.affectedClients.contains(clientId) then
+                    return Left((ErrorCode.InternalError, "Client not part of rebalancing"))
+
+                // Store the signed transaction
+                val newContext = context.copy(
+                  collectedSignatures = context.collectedSignatures + (clientId -> signedTx)
+                )
+                rebalancingState.set(Some(newContext))
+
+                println(
+                  s"[Server] Received signature from client $clientId (${newContext.collectedSignatures.size}/${context.affectedClients.size})"
+                )
+
+                // Check if we have all signatures
+                if newContext.collectedSignatures.size == context.affectedClients.size then
+                    completeRebalancing(newContext)
+                else Right(())
+    }
+
+    /** Complete rebalancing by assembling and submitting the final transaction */
+    private def completeRebalancing(context: RebalancingContext): Either[(String, String), Unit] = {
+        println(s"[Server] All signatures collected, assembling final transaction")
+
+        // Combine all signatures from collected transactions
+        // The final transaction needs witness set from all clients + exchange
+        import scalus.cardano.ledger.{TaggedSortedSet, VKeyWitness}
+        val allWitnesses: Seq[VKeyWitness] = context.collectedSignatures.values.flatMap { tx =>
+            tx.witnessSet.vkeyWitnesses.toSeq
+        }.toSeq
+
+        // Create final transaction with all witnesses
+        val finalWitnessSet = context.rebalanceTx.witnessSet.copy(
+          vkeyWitnesses = TaggedSortedSet.from(allWitnesses)
+        )
+        val finalTx = context.rebalanceTx.copy(
+          witnessSet = finalWitnessSet
+        )
+
+        // Sign with exchange key and submit
+        // TODO: Add exchange signature to finalTx
+
+        println(s"[Server] Submitting rebalance transaction: ${finalTx.id.toHex.take(16)}...")
+
+        provider.submitAndWait(finalTx, maxAttempts = 30, delayMs = 1000) match {
+            case Left(error) =>
+                println(s"[Server] Rebalance transaction failed: $error")
+                // Notify clients of failure
+                context.affectedClients.foreach { clientId =>
+                    clientChannels.get(clientId).foreach { channel =>
+                        channel.send(ClientResponse.RebalanceAborted(s"Transaction failed: $error"))
+                    }
+                }
+                // Release lock
+                rebalancingState.set(None)
+                Left((ErrorCode.RebalancingFailed, s"Transaction failed: $error"))
+
+            case Right(_) =>
+                println(s"[Server] Rebalance transaction confirmed!")
+
+                // Update client states with new locked values
+                context.affectedClients.foreach { clientId =>
+                    clientStates.get(clientId).foreach { clientState =>
+                        // Find the new output for this client in the transaction
+                        // For now, we assume locked value matches snapshot total after rebalancing
+                        val tradingState =
+                            clientState.latestSnapshot.signedSnapshot.snapshotTradingState
+                        val newLockedValue = tradingState.tsClientBalance +
+                            tradingState.tsExchangeBalance +
+                            CosmexValidator.lockedInOrders(tradingState.tsOrders)
+
+                        val updatedState = clientState.copy(
+                          lockedValue = newLockedValue.toLedgerValue
+                        )
+                        clientStates.put(clientId, updatedState)
+
+                        // Send completion notification
+                        clientChannels.get(clientId).foreach { channel =>
+                            channel.send(
+                              ClientResponse.RebalanceComplete(clientState.latestSnapshot)
+                            )
+                        }
+                    }
+                }
+
+                // Release lock
+                rebalancingState.set(None)
+                Right(())
+        }
     }
 
     def reply(@unused response: ClientResponse): List[ServerEvent] = {

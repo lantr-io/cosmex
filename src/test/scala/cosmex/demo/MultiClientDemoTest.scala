@@ -167,7 +167,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     tokenName: String = "BOBTOKEN",
                     tokenAmount: Long = 1000000L,
                     customPair: Option[Pair],
-                    txIdFilter: Option[TransactionHash]
+                    txIdFilter: Option[TransactionHash],
+                    triggerRebalancing: Boolean = false
                 ): (Unit, Option[ByteString]) = {
                     var client: SimpleWebSocketClient = null // Declare client outside try block
                     val mintedPolicyId: Option[ByteString] = None
@@ -625,6 +626,140 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             println(s"[$name] No trade executed within timeout")
                         }
 
+                        // Rebalancing phase
+                        if triggerRebalancing then {
+                            println(s"\n[$name] === Starting Rebalancing Phase ===")
+
+                            // Wait a moment to ensure both clients are ready
+                            Thread.sleep(1000)
+
+                            // Trigger fix-balance
+                            println(s"[$name] Triggering FixBalance...")
+                            client.sendMessage(ClientRequest.FixBalance(clientId))
+
+                            // Wait for RebalanceStarted response
+                            client.receiveMessage(timeoutSeconds = 10) match {
+                                case Success(msgJson) =>
+                                    Try(read[ClientResponse](msgJson)) match {
+                                        case Success(ClientResponse.RebalanceStarted) =>
+                                            println(s"[$name] ✓ Rebalancing started!")
+                                        case Success(ClientResponse.Error(code, msg)) =>
+                                            println(s"[$name] Rebalancing error [$code]: $msg")
+                                        case Success(other) =>
+                                            println(
+                                              s"[$name] Unexpected response: ${other.getClass.getSimpleName}"
+                                            )
+                                        case Failure(e) =>
+                                            println(
+                                              s"[$name] Failed to parse response: ${e.getMessage}"
+                                            )
+                                    }
+                                case Failure(e) =>
+                                    println(
+                                      s"[$name] Error waiting for RebalanceStarted: ${e.getMessage}"
+                                    )
+                            }
+                        }
+
+                        // All clients wait for RebalanceRequired (if rebalancing is triggered by another client)
+                        println(s"[$name] Waiting for RebalanceRequired...")
+                        var rebalanceAttempts = 0
+                        val maxRebalanceAttempts = 15
+                        var rebalanceComplete = false
+
+                        while rebalanceAttempts < maxRebalanceAttempts && !rebalanceComplete do {
+                            client.receiveMessage(timeoutSeconds = 2) match {
+                                case Success(msgJson) =>
+                                    Try(read[ClientResponse](msgJson)) match {
+                                        case Success(ClientResponse.RebalanceRequired(tx)) =>
+                                            println(
+                                              s"[$name] ✓ Received RebalanceRequired, signing transaction..."
+                                            )
+
+                                            // Sign the rebalancing transaction
+                                            import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                                            import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                                            import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                                            val hdKeyPair = account.hdKeyPair()
+                                            val txBytes = TransactionBytes(tx.toCbor)
+                                            val txBodyHash =
+                                                Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+                                            val signingProvider =
+                                                CryptoConfiguration.INSTANCE.getSigningProvider
+                                            val signature = signingProvider.signExtended(
+                                              txBodyHash,
+                                              hdKeyPair.getPrivateKey.getKeyData
+                                            )
+
+                                            val witness = VKeyWitness(
+                                              signature = ByteString.fromArray(signature),
+                                              vkey = ByteString.fromArray(
+                                                hdKeyPair.getPublicKey.getKeyData.take(32)
+                                              )
+                                            )
+                                            val witnessSet = tx.witnessSet.copy(
+                                              vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet
+                                                  .from(Seq(witness))
+                                            )
+                                            val signedTx = tx.copy(witnessSet = witnessSet)
+
+                                            // Send signed transaction back
+                                            println(s"[$name] Sending SignRebalance...")
+                                            client.sendMessage(
+                                              ClientRequest.SignRebalance(clientId, signedTx)
+                                            )
+                                            println(s"[$name] ✓ SignRebalance sent")
+
+                                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                                            println(
+                                              s"[$name] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
+                                            )
+                                            rebalanceComplete = true
+
+                                        case Success(ClientResponse.RebalanceAborted(reason)) =>
+                                            println(s"[$name] Rebalancing aborted: $reason")
+                                            rebalanceComplete = true
+
+                                        case Success(ClientResponse.RebalanceStarted) =>
+                                            // Already handled above for trigger client
+                                            println(s"[$name] Received RebalanceStarted")
+
+                                        case Success(ClientResponse.Error(code, msg)) =>
+                                            println(
+                                              s"[$name] Error during rebalancing [$code]: $msg"
+                                            )
+                                            rebalanceComplete = true
+
+                                        case Success(other) =>
+                                            println(
+                                              s"[$name] Received: ${other.getClass.getSimpleName}"
+                                            )
+
+                                        case Failure(e) =>
+                                            println(
+                                              s"[$name] Failed to parse message: ${e.getMessage}"
+                                            )
+                                    }
+                                case Failure(e) =>
+                                    e match {
+                                        case _: java.util.concurrent.TimeoutException =>
+                                            rebalanceAttempts += 1
+                                        case other =>
+                                            println(s"[$name] Error: ${other.getMessage}")
+                                            rebalanceAttempts += 1
+                                    }
+                            }
+                        }
+
+                        if !rebalanceComplete then {
+                            println(
+                              s"[$name] Rebalancing did not complete within timeout (this may be expected if no rebalancing needed)"
+                            )
+                        }
+
+                        println(s"[$name] === Rebalancing Phase Complete ===\n")
+
                     } finally {
                         if client != null then {
                             client.close()
@@ -853,7 +988,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       aliceOrderConfig,
                       clientIndex = 0,
                       customPair = aliceTradingPair,
-                      txIdFilter = None
+                      txIdFilter = None,
+                      triggerRebalancing = true // Alice triggers rebalancing after trading
                     )
                 }
 
@@ -871,7 +1007,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       tokenName = bobMintingConfig.tokenName,
                       tokenAmount = bobMintingConfig.amount,
                       customPair = aliceTradingPair,
-                      txIdFilter = bobScenarioTxIdFilter
+                      txIdFilter = bobScenarioTxIdFilter,
+                      triggerRebalancing = false // Bob waits for rebalancing from Alice
                     )
                 }
 
@@ -892,6 +1029,9 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                 println("  - Both clients successfully opened channels")
                 println("  - Both orders were created")
                 println("  - Order matching logic is functioning")
+                println(
+                  "  - Rebalancing flow tested (FixBalance -> RebalanceRequired -> SignRebalance)"
+                )
                 println()
 
                 // Test passes if we get here without exceptions

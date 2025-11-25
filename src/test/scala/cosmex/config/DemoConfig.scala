@@ -207,10 +207,11 @@ case class DemoConfig(config: Config) {
             )
         }
 
-        /** Get exchange private key (Ed25519) */
+        /** Get exchange private key (Ed25519 extended - 64 bytes for Cardano BIP32-Ed25519) */
         def getPrivateKey(): ByteString = {
             val account = createAccount()
-            ByteString.fromArray(account.privateKeyBytes().take(32))
+            // getKeyData returns 64-byte extended key (not getBytes which is 96 bytes with chain code)
+            ByteString.fromArray(account.hdKeyPair().getPrivateKey.getKeyData)
         }
     }
 
@@ -247,16 +248,18 @@ case class DemoConfig(config: Config) {
             ByteString.fromArray(account.hdKeyPair().getPublicKey.getKeyHash)
         }
 
-        /** Get public key */
+        /** Get public key (Ed25519 - first 32 bytes) */
         def getPubKey(): ByteString = {
             val account = createAccount()
-            ByteString.fromArray(account.publicKeyBytes())
+            // Ed25519 public keys are 32 bytes - ensure consistency
+            ByteString.fromArray(account.hdKeyPair().getPublicKey.getKeyData.take(32))
         }
 
-        /** Get private key (Ed25519) */
+        /** Get private key (Ed25519 extended - 64 bytes for Cardano BIP32-Ed25519) */
         def getPrivKey(): ByteString = {
             val account = createAccount()
-            ByteString.fromArray(account.privateKeyBytes().take(32))
+            // Full 64-byte extended private key for Cardano's BIP32-Ed25519
+            ByteString.fromArray(account.privateKeyBytes())
         }
 
         /** Get initial balance as Value */
