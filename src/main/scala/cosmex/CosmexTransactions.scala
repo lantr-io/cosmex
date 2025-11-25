@@ -1,6 +1,6 @@
 package cosmex
 import scalus.builtin.Data.toData
-import scalus.builtin.{ByteString, platform}
+import scalus.builtin.{platform, ByteString}
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
