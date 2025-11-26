@@ -273,11 +273,6 @@ object CosmexValidator extends DataParameterizedValidator {
                     verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
                 val validClientSig =
                     verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
-                log(appendString("msg: ", msg.show))
-                log(appendString("snapshotClientSignature: ", snapshotClientSignature.show))
-                log(appendString("snapshotExchangeSignature: ", snapshotExchangeSignature.show))
-                log(appendString("validExchangeSig: ", validExchangeSig.show))
-                log(appendString("validClientSig: ", validClientSig.show))
                 validClientSig && validExchangeSig
     }
 
@@ -323,10 +318,6 @@ object CosmexValidator extends DataParameterizedValidator {
                           clientPubKey,
                           params.exchangePubKey
                         )
-                        log(appendString("clientSigned: ", clientSigned.show))
-                        log(appendString("exchangeSigned: ", exchangeSigned.show))
-                        log(appendString("balanced: ", balanced.show))
-                        log(appendString("validSnapshot: ", validSnapshot.show))
                         // Graceful close if both parties agreed on the snapshot
                         if validSnapshot && balanced && clientSigned && exchangeSigned then true
                         else {
