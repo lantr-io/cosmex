@@ -4,7 +4,8 @@ import com.bloxbean.cardano.client.account.Account
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Pair, Server}
+import cosmex.demo.MultiClientTestHelpers.*
+import cosmex.{ClientId, CosmexTransactions, LimitOrder, Pair, Server}
 import cosmex.CardanoInfoTestNet
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -18,8 +19,6 @@ import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.testing.kit.MockLedgerApi
 import sttp.tapir.server.netty.sync.NettySyncServerBinding
 
-import scala.util.{Failure, Success, Try}
-import upickle.default.*
 
 class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
@@ -318,31 +317,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                             // Sign the minting transaction
                             println(s"[$name] Signing minting transaction...")
-                            import com.bloxbean.cardano.client.crypto.Blake2bUtil
-                            import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
-                            import com.bloxbean.cardano.client.transaction.util.TransactionBytes
-
-                            val hdKeyPair = account.hdKeyPair()
-                            val txBytes = TransactionBytes(mintTx.toCbor)
-                            val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
-
-                            val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                            val signature = signingProvider.signExtended(
-                              txBodyHash,
-                              hdKeyPair.getPrivateKey.getKeyData
-                            )
-
-                            val witness = VKeyWitness(
-                              signature = ByteString.fromArray(signature),
-                              vkey =
-                                  ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
-                            )
-
-                            val witnessSet = mintTx.witnessSet.copy(
-                              vkeyWitnesses =
-                                  scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
-                            )
-                            val signedMintTx = mintTx.copy(witnessSet = witnessSet)
+                            val signedMintTx = signTransaction(account, mintTx)
 
                             // Submit the minting transaction
                             println(s"[$name] Submitting minting transaction...")
@@ -415,37 +390,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           depositAmount = finalDepositAmount
                         )
 
-                        // Sign the transaction using Bloxbean's signExtended (yaci-devkit compatible)
-                        println(s"[$name] Signing transaction with Bloxbean signExtended...")
-                        import com.bloxbean.cardano.client.crypto.Blake2bUtil
-                        import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
-                        import com.bloxbean.cardano.client.transaction.util.TransactionBytes
-
-                        val hdKeyPair = account.hdKeyPair()
-                        val txBytes = TransactionBytes(unsignedTx.toCbor)
-                        val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
-
-                        // Sign using Bloxbean's native Ed25519 signing
-                        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                        val signature = signingProvider.signExtended(
-                          txBodyHash,
-                          hdKeyPair.getPrivateKey.getKeyData
-                        )
-
-                        // Create VKeyWitness with Bloxbean signature
-                        val witness = VKeyWitness(
-                          signature = ByteString.fromArray(signature),
-                          vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
-                        )
-
-                        // Add witness to transaction
-                        val witnessSet = unsignedTx.witnessSet.copy(
-                          vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
-                        )
-                        val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
-                        println(
-                          s"[$name] Transaction signed successfully with Bloxbean signExtended"
-                        )
+                        // Sign the transaction
+                        println(s"[$name] Signing open channel transaction...")
+                        val openChannelTx = signTransaction(account, unsignedTx)
+                        println(s"[$name] Transaction signed successfully")
 
                         // The ClientId should be based on openChannelTx.id and 0
                         val clientId = ClientId(TransactionInput(openChannelTx.id, 0))
@@ -462,66 +410,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         val clientSignedSnapshot =
                             mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 
-                        // Send OpenChannel request
+                        // Open channel and wait for confirmation
                         println(s"[$name] Opening channel...")
-                        client.sendMessage(
-                          ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot)
-                        )
-
-                        // Handle response - MockLedgerApi confirms instantly (ChannelOpened),
-                        // real providers send ChannelPending first
                         val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
-
-                        val firstResponse = client.receiveMessage(timeoutSeconds = 10)
-                        firstResponse match {
-                            case Success(responseJson) =>
-                                read[ClientResponse](responseJson) match {
-                                    case ClientResponse.ChannelPending(txId) =>
-                                        println(
-                                          s"[$name] ✓ Channel pending, txId: ${txId.take(16)}..."
-                                        )
-
-                                        // Wait for ChannelOpened (can take up to 70s on real networks)
-                                        println(s"[$name] Waiting for channel confirmation...")
-                                        val openResponse =
-                                            client.receiveMessage(timeoutSeconds = 200)
-                                        openResponse match {
-                                            case Success(openJson) =>
-                                                read[ClientResponse](openJson) match {
-                                                    case ClientResponse.ChannelOpened(snapshot) =>
-                                                        println(s"[$name] ✓ Channel opened!")
-                                                        snapshot
-                                                    case ClientResponse.Error(code, msg) =>
-                                                        fail(
-                                                          s"[$name] Channel confirmation failed [$code]: $msg"
-                                                        )
-                                                    case other =>
-                                                        fail(
-                                                          s"[$name] Expected ChannelOpened, got: $other"
-                                                        )
-                                                }
-                                            case Failure(e) =>
-                                                fail(
-                                                  s"[$name] Error waiting for ChannelOpened: ${e.getMessage}"
-                                                )
-                                        }
-
-                                    case ClientResponse.ChannelOpened(snapshot) if isMockProvider =>
-                                        // MockLedgerApi confirms instantly
-                                        println(
-                                          s"[$name] ✓ Channel opened instantly (mock provider)"
-                                        )
-                                        snapshot
-
-                                    case ClientResponse.Error(code, msg) =>
-                                        fail(s"[$name] Channel opening failed [$code]: $msg")
-
-                                    case other =>
-                                        fail(s"[$name] Unexpected response: $other")
-                                }
-                            case Failure(e) =>
-                                fail(s"[$name] Error receiving response: ${e.getMessage}")
-                        }
+                        openChannel(client, openChannelTx, clientSignedSnapshot, isMockProvider, name)
 
                         // Create order (use customPair if provided)
                         val orderPair = customPair.getOrElse(orderConfig.getPair())
@@ -534,231 +426,13 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         println(
                           s"[$name] Creating ${orderConfig.side} order: ${orderConfig.amount} ${orderConfig.baseAsset}/${orderConfig.quoteAsset} @ ${orderConfig.price}"
                         )
-                        val orderRequest =
-                            ClientRequest.CreateOrder(clientId, order)
-                        client.sendRequest(
-                          orderRequest,
-                          timeoutSeconds = 10
-                        ) match {
-                            case Success(ClientResponse.OrderCreated(orderId)) =>
-                                println(
-                                  s"[$name] ✓ Order created! OrderID: $orderId"
-                                )
+                        createOrder(client, clientId, order, name)
 
-                            case Success(ClientResponse.ChannelPending(_)) =>
-                                // Ignore stale ChannelPending (can arrive out of order with MockLedgerApi)
-                                println(s"[$name] Ignoring stale ChannelPending, retrying...")
-                                client.receiveMessage(timeoutSeconds = 10) match {
-                                    case Success(msgJson) =>
-                                        read[ClientResponse](msgJson) match {
-                                            case ClientResponse.OrderCreated(orderId) =>
-                                                println(
-                                                  s"[$name] ✓ Order created! OrderID: $orderId"
-                                                )
-                                            case ClientResponse.Error(code, msg) =>
-                                                fail(s"[$name] Order creation failed [$code]: $msg")
-                                            case other =>
-                                                fail(
-                                                  s"[$name] Unexpected response after retry: $other"
-                                                )
-                                        }
-                                    case Failure(e) =>
-                                        fail(
-                                          s"[$name] Error receiving OrderCreated: ${e.getMessage}"
-                                        )
-                                }
+                        // Wait for potential trade execution
+                        waitForTradeExecution(client, name)
 
-                            case Success(ClientResponse.Error(code, msg)) =>
-                                fail(s"[$name] Order creation failed [$code]: $msg")
-
-                            case Success(other) =>
-                                fail(s"[$name] Unexpected response: $other")
-
-                            case Failure(e) =>
-                                fail(s"[$name] Error: ${e.getMessage}")
-                        }
-
-                        // Wait for potential trade execution (OrderExecuted notifications)
-                        println(s"[$name] Waiting for potential order matching...")
-                        var attempts = 0
-                        val maxAttempts = 10
-                        var tradeReceived = false
-
-                        while attempts < maxAttempts && !tradeReceived do {
-                            client.receiveMessage(timeoutSeconds = 1) match {
-                                case Success(msgJson) =>
-                                    Try(read[ClientResponse](msgJson)) match {
-                                        case Success(ClientResponse.OrderExecuted(trade)) =>
-                                            println(
-                                              s"[$name] ✓ Order executed! Trade: ${trade.orderId}, amount: ${trade.tradeAmount}, price: ${trade.tradePrice}"
-                                            )
-                                            tradeReceived = true
-                                        case Success(ClientResponse.ChannelPending(_)) =>
-                                            // Ignore stale ChannelPending messages
-                                            println(
-                                              s"[$name] Ignoring stale ChannelPending message"
-                                            )
-                                        case Success(other) =>
-                                            println(
-                                              s"[$name] Received other message: ${other.getClass.getSimpleName}"
-                                            )
-                                        case Failure(e) =>
-                                            println(
-                                              s"[$name] Failed to parse message: ${e.getMessage}"
-                                            )
-                                    }
-                                case Failure(e) =>
-                                    e match {
-                                        case _: java.util.concurrent.TimeoutException =>
-                                            // Timeout is expected when waiting for trades
-                                            attempts += 1
-                                        case other =>
-                                            println(
-                                              s"[$name] Unexpected error receiving message: ${other.getMessage}"
-                                            )
-                                            other.printStackTrace()
-                                            attempts += 1
-                                    }
-                            }
-                        }
-
-                        if !tradeReceived && attempts >= maxAttempts then {
-                            println(s"[$name] No trade executed within timeout")
-                        }
-
-                        // Rebalancing phase
-                        if triggerRebalancing then {
-                            println(s"\n[$name] === Starting Rebalancing Phase ===")
-
-                            // Wait a moment to ensure both clients are ready
-                            Thread.sleep(1000)
-
-                            // Trigger fix-balance
-                            println(s"[$name] Triggering FixBalance...")
-                            client.sendMessage(ClientRequest.FixBalance(clientId))
-
-                            // Wait for RebalanceStarted response
-                            client.receiveMessage(timeoutSeconds = 10) match {
-                                case Success(msgJson) =>
-                                    Try(read[ClientResponse](msgJson)) match {
-                                        case Success(ClientResponse.RebalanceStarted) =>
-                                            println(s"[$name] ✓ Rebalancing started!")
-                                        case Success(ClientResponse.Error(code, msg)) =>
-                                            println(s"[$name] Rebalancing error [$code]: $msg")
-                                        case Success(other) =>
-                                            println(
-                                              s"[$name] Unexpected response: ${other.getClass.getSimpleName}"
-                                            )
-                                        case Failure(e) =>
-                                            println(
-                                              s"[$name] Failed to parse response: ${e.getMessage}"
-                                            )
-                                    }
-                                case Failure(e) =>
-                                    println(
-                                      s"[$name] Error waiting for RebalanceStarted: ${e.getMessage}"
-                                    )
-                            }
-                        }
-
-                        // All clients wait for RebalanceRequired (if rebalancing is triggered by another client)
-                        println(s"[$name] Waiting for RebalanceRequired...")
-                        var rebalanceAttempts = 0
-                        val maxRebalanceAttempts = 15
-                        var rebalanceComplete = false
-
-                        while rebalanceAttempts < maxRebalanceAttempts && !rebalanceComplete do {
-                            client.receiveMessage(timeoutSeconds = 2) match {
-                                case Success(msgJson) =>
-                                    Try(read[ClientResponse](msgJson)) match {
-                                        case Success(ClientResponse.RebalanceRequired(tx)) =>
-                                            println(
-                                              s"[$name] ✓ Received RebalanceRequired, signing transaction..."
-                                            )
-
-                                            // Sign the rebalancing transaction
-                                            import com.bloxbean.cardano.client.crypto.Blake2bUtil
-                                            import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
-                                            import com.bloxbean.cardano.client.transaction.util.TransactionBytes
-
-                                            val hdKeyPair = account.hdKeyPair()
-                                            val txBytes = TransactionBytes(tx.toCbor)
-                                            val txBodyHash =
-                                                Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
-                                            val signingProvider =
-                                                CryptoConfiguration.INSTANCE.getSigningProvider
-                                            val signature = signingProvider.signExtended(
-                                              txBodyHash,
-                                              hdKeyPair.getPrivateKey.getKeyData
-                                            )
-
-                                            val witness = VKeyWitness(
-                                              signature = ByteString.fromArray(signature),
-                                              vkey = ByteString.fromArray(
-                                                hdKeyPair.getPublicKey.getKeyData.take(32)
-                                              )
-                                            )
-                                            val witnessSet = tx.witnessSet.copy(
-                                              vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet
-                                                  .from(Seq(witness))
-                                            )
-                                            val signedTx = tx.copy(witnessSet = witnessSet)
-
-                                            // Send signed transaction back
-                                            println(s"[$name] Sending SignRebalance...")
-                                            client.sendMessage(
-                                              ClientRequest.SignRebalance(clientId, signedTx)
-                                            )
-                                            println(s"[$name] ✓ SignRebalance sent")
-
-                                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
-                                            println(
-                                              s"[$name] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
-                                            )
-                                            rebalanceComplete = true
-
-                                        case Success(ClientResponse.RebalanceAborted(reason)) =>
-                                            println(s"[$name] Rebalancing aborted: $reason")
-                                            rebalanceComplete = true
-
-                                        case Success(ClientResponse.RebalanceStarted) =>
-                                            // Already handled above for trigger client
-                                            println(s"[$name] Received RebalanceStarted")
-
-                                        case Success(ClientResponse.Error(code, msg)) =>
-                                            println(
-                                              s"[$name] Error during rebalancing [$code]: $msg"
-                                            )
-                                            rebalanceComplete = true
-
-                                        case Success(other) =>
-                                            println(
-                                              s"[$name] Received: ${other.getClass.getSimpleName}"
-                                            )
-
-                                        case Failure(e) =>
-                                            println(
-                                              s"[$name] Failed to parse message: ${e.getMessage}"
-                                            )
-                                    }
-                                case Failure(e) =>
-                                    e match {
-                                        case _: java.util.concurrent.TimeoutException =>
-                                            rebalanceAttempts += 1
-                                        case other =>
-                                            println(s"[$name] Error: ${other.getMessage}")
-                                            rebalanceAttempts += 1
-                                    }
-                            }
-                        }
-
-                        if !rebalanceComplete then {
-                            println(
-                              s"[$name] Rebalancing did not complete within timeout (this may be expected if no rebalancing needed)"
-                            )
-                        }
-
-                        println(s"[$name] === Rebalancing Phase Complete ===\n")
+                        // Handle rebalancing flow
+                        handleRebalancing(client, account, clientId, name, triggerRebalancing)
 
                     } finally {
                         if client != null then {
@@ -902,26 +576,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       amount = bobMintingConfig.amount
                     )
 
-                    // Sign and submit minting transaction
-                    import com.bloxbean.cardano.client.crypto.Blake2bUtil
-                    import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
-                    import com.bloxbean.cardano.client.transaction.util.TransactionBytes
-
-                    val hdKeyPair = bobAccount.hdKeyPair()
-                    val txBytes = TransactionBytes(mintTx.toCbor)
-                    val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
-                    val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                    val signature =
-                        signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
-
-                    val witness = VKeyWitness(
-                      signature = ByteString.fromArray(signature),
-                      vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
-                    )
-                    val witnessSet = mintTx.witnessSet.copy(
-                      vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
-                    )
-                    val signedMintTx = mintTx.copy(witnessSet = witnessSet)
+                    // Sign the minting transaction
+                    val signedMintTx = signTransaction(bobAccount, mintTx)
 
                     import cosmex.util.submitAndWait
 
