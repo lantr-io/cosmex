@@ -9,12 +9,14 @@ import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
-import scalus.cardano.txbuilder.Environment
+import scalus.cardano.txbuilder.{Environment, TransactionSigner}
 import scalus.cardano.wallet.BloxbeanAccount
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
 import scalus.testing.kit.MockLedgerApi
+
+import java.time.Instant
 
 class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     // Environment
@@ -782,11 +784,15 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val tx = txbuilder.closeChannel(
           provider,
-          BloxbeanAccount(bobAccount),
+          new BloxbeanAccount(bobAccount),
           bobAddress,
           bobClientState
         )
-        pprint.pprintln(tx)
+        val signer = new TransactionSigner(Set(new BloxbeanAccount(exchangeAccount).paymentKeyPair))
+        val bothSignedTx = signer.sign(tx)
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(Instant.now().plusSeconds(5).toEpochMilli))
+        val result = provider.submit(bothSignedTx)
+        assert(result.isRight)
     }
 
 }
