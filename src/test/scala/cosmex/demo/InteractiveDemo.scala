@@ -659,7 +659,7 @@ object InteractiveDemo {
                     println(s"[Connect] Found script output at index: $channelOutputIdx")
 
                     // Create client ID and connect
-                    val cId = ClientId(TransactionInput(openChannelTx.id, channelOutputIdx))
+                    val cId = ClientId(depositUtxo.input)
                     val wsUrl =
                         s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
 

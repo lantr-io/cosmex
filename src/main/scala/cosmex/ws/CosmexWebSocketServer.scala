@@ -191,7 +191,7 @@ object CosmexWebSocketServer {
 
                         // Store client state - use the actual channel ref from validation
                         val channelRef = openChannelInfo.channelRef
-                        val clientId = ClientId(channelRef)
+                        val clientId = ClientId(firstInput)
 
                         // Use the deposit amount from validation result
                         val actualDeposit = openChannelInfo.amount

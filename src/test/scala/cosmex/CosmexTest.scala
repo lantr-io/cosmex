@@ -203,7 +203,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .get
             .value
         // Use OUTPUT tx.id (openChannelTx.id), not input tx.id - server uses tx.id for verification
-        val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
+        val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(depositUtxo.input)
         val initialSnapshot = mkInitialSnapshot(actualDepositAmount)
         val clientSignedSnapshot =
             mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
@@ -375,7 +375,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .find(_.address == server.CosmexScriptAddress)
             .get
             .value
-        val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), 0)
+        val aliceClientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(aliceDepositUtxo.input)
         val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
         val aliceClientSignedSnapshot =
             mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
@@ -764,7 +764,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .get
 
         val bobActualDeposit = bobChannelTxOut._1.value.value
-        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+        val bobClientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(bobDepositUtxo.input)
         val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
         val bobClientSignedSnapshot =
             mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)

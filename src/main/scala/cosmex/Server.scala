@@ -213,10 +213,7 @@ class Server(
         tx: Transaction,
         snapshot: SignedSnapshot
     ): Either[String, OpenChannelInfo] = {
-        // Validate transaction has at least one input
-        if tx.body.value.inputs.toSeq.headOption.isEmpty then
-            return Left("Transaction has no inputs")
-
+        val firstInput = tx.body.value.inputs.toSeq.head
         // Find the unique output to Cosmex script address
         println(s"[Server] Expected Cosmex script address: $CosmexScriptAddress")
         println(s"[Server] Transaction outputs:")
@@ -275,7 +272,7 @@ class Server(
                 return Left("Output must have inline datum with OnChainState")
 
         // Verify client signature using the extracted public key
-        val clientTxOutRef = TxOutRef(TxId(tx.id), outputIdx)
+        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         println(s"[Server] Verifying client signature:")
         println(
           s"[Server]   Public key length: ${clientPubKey.length}, hex: ${clientPubKey.toHex.take(32)}..."

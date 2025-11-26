@@ -395,14 +395,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         println(s"[$name] Transaction signed successfully")
 
                         // The ClientId should be based on openChannelTx.id and 0
-                        val clientId = ClientId(TransactionInput(openChannelTx.id, 0))
+                        val clientId = ClientId(finalDepositUtxo.input)
 
                         // Now construct the WebSocket URL using clientId components
                         val wsUrl =
                             s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
                         client = SimpleWebSocketClient(wsUrl)
 
-                        val clientTxOutRef = TxOutRef(TxId(openChannelTx.id), 0)
+                        val clientTxOutRef =
+                            LedgerToPlutusTranslation.getTxOutRefV3(clientId.txOutRef)
 
                         // Create and sign initial snapshot (must match finalDepositAmount)
                         val initialSnapshot = mkInitialSnapshot(finalDepositAmount)
