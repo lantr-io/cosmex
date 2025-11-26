@@ -3,7 +3,7 @@ package cosmex.demo
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{CardanoInfoTestNet, ClientId, ClientRequest, ClientResponse, CosmexTransactions, LimitOrder, Server, SignedSnapshot}
+import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, Server, SignedSnapshot}
 import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
@@ -127,6 +127,7 @@ object InteractiveDemo {
             var clientId: Option[ClientId] = None
             var isConnected = false
             var mintedPolicyId: Option[ByteString] = None
+            var clientState: Option[ClientState] = None
 
             // Track spent UTxOs to filter them out from Blockfrost queries (indexing delay)
             val spentUtxos = scala.collection.mutable.Set[TransactionInput]()
@@ -712,9 +713,18 @@ object InteractiveDemo {
                     client.receiveMessage(timeoutSeconds = 200) match {
                         case Success(responseJson) =>
                             read[ClientResponse](responseJson) match {
-                                case ClientResponse.ChannelOpened(_) =>
+                                case ClientResponse.ChannelOpened(snapshot) =>
                                     println(s"[Connect] ✓ Channel opened successfully!")
                                     isConnected = true
+                                    // Store client state for later use (e.g., close)
+                                    val channelRef = TransactionInput(openChannelTx.id, channelOutputIdx)
+                                    clientState = Some(ClientState(
+                                      latestSnapshot = snapshot,
+                                      channelRef = channelRef,
+                                      lockedValue = depositAmount,
+                                      status = ChannelStatus.Open,
+                                      clientPubKey = clientPubKey
+                                    ))
 
                                     // Start background listener for async notifications
                                     fork {
@@ -859,17 +869,38 @@ object InteractiveDemo {
                     }
                 }
 
-                def closeChannel(clientId: ClientId, snapshot: SignedSnapshot): Unit = {
+                def closeChannel(): Unit = {
                     if !isConnected then {
                         println("[Close] ERROR: Not connected to the exchange!")
                         return
                     }
 
-                    println(s"\n[Close] Closing channel with exchange...")
+                    clientState match {
+                        case None =>
+                            println("[Close] ERROR: No client state available!")
+                            return
+                        case Some(state) =>
+                            println(s"\n[Close] Closing channel with exchange...")
+                            println(s"[Close] Channel ref: ${state.channelRef}")
+                            println(s"[Close] Locked value: ${state.lockedValue.coin.value / 1_000_000} ADA")
 
-//                    txbuilder.closeChannel(provider,
-                    val tx: Transaction = ???
-                    client.sendMessage(ClientRequest.CloseChannel(clientId, tx, snapshot))
+                            Try {
+                                val tx = txbuilder.closeChannel(
+                                  provider,
+                                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
+                                  clientAddress,
+                                  state
+                                )
+                                println(s"[Close] Close transaction built: ${tx.id.toHex.take(16)}...")
+                                client.sendMessage(ClientRequest.CloseChannel(clientId.get, tx, state.latestSnapshot))
+                                println(s"[Close] Close request sent to exchange")
+                            } match {
+                                case Success(_) => ()
+                                case Failure(e) =>
+                                    println(s"[Close] ERROR: Failed to build close transaction: ${e.getMessage}")
+                                    e.printStackTrace()
+                            }
+                    }
                 }
 
                 // Main command loop
@@ -888,6 +919,7 @@ object InteractiveDemo {
                 println("  assets                      - Show available assets for trading")
                 println("  buy <base> <quote> <quantity> <price>   - Buy base for quote")
                 println("  sell <base> <quote> <quantity> <price>  - Sell base for quote")
+                println("  close                       - Close the channel and withdraw funds")
                 println("  help                        - Show this help")
                 println("  quit                        - Exit the demo")
                 println()
@@ -1293,12 +1325,7 @@ object InteractiveDemo {
                                 println()
 
                             case Some("close") =>
-                                if isConnected then {
-                                    println("\n[Close] Closing the channel")
-//                                    closeChannel(clientId.get, )
-                                } else {
-                                    println("\n[Close] Not connected to exchange.")
-                                }
+                                closeChannel()
 
                             case Some("help") =>
                                 println("\nAvailable commands:")
@@ -1325,6 +1352,9 @@ object InteractiveDemo {
                                 )
                                 println(
                                   "  sell <base> <quote> <quantity> <price>           - Sell base for quote"
+                                )
+                                println(
+                                  "  close                                             - Close channel and withdraw funds"
                                 )
                                 println(
                                   "  help                                              - Show this help"

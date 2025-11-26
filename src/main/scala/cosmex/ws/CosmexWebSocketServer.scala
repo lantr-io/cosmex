@@ -293,8 +293,83 @@ object CosmexWebSocketServer {
                 }
 
             case ClientRequest.CloseChannel(clientId, tx, snapshot) =>
-                server.handleCloseChannel(clientId, tx, snapshot)
-                List(ClientResponse.ChannelClosed(snapshot))
+                server.handleCloseChannel(clientId, tx, snapshot) match
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
+                    case Right((signedTx, finalSnapshot)) =>
+                        // Get the client's async response channel
+                        server.clientChannels.get(clientId) match {
+                            case None =>
+                                val errorMsg =
+                                    s"Internal error: No async channel for client ${clientId}"
+                                println(s"[Server] ERROR: $errorMsg")
+                                List(ClientResponse.Error(ErrorCode.InternalError, errorMsg))
+
+                            case Some(channel) =>
+                                // Get the channel ref to poll for spending
+                                val channelRef = server.clientStates.get(clientId).get.channelRef
+
+                                // Launch background thread to wait for confirmation
+                                val pollingThread = new Thread(() => {
+                                    println(
+                                      s"[Server] Starting background close confirmation wait for: ${clientId}"
+                                    )
+
+                                    var attempts = 0
+                                    val maxAttempts = 180 // 3 minutes
+                                    val delayMs = 1000
+
+                                    var confirmed = false
+                                    while attempts < maxAttempts && !confirmed do {
+                                        // Check if the channel UTxO is spent (no longer exists)
+                                        server.provider.findUtxo(channelRef) match {
+                                            case Left(_) =>
+                                                // UTxO not found = channel is closed
+                                                println(
+                                                  s"[Server] Close confirmed after ${attempts + 1} attempt(s): ${clientId}"
+                                                )
+                                                server.updateChannelStatus(
+                                                  clientId,
+                                                  ChannelStatus.Closed
+                                                )
+                                                channel.send(
+                                                  ClientResponse.ChannelClosed(finalSnapshot)
+                                                )
+                                                confirmed = true
+                                            case Right(_) =>
+                                                // UTxO still exists, keep waiting
+                                                attempts += 1
+                                                if attempts < maxAttempts then {
+                                                    if attempts % 5 == 0 then {
+                                                        println(
+                                                          s"[Server] Still waiting for close confirmation... (attempt ${attempts}/${maxAttempts})"
+                                                        )
+                                                    }
+                                                    Thread.sleep(delayMs)
+                                                }
+                                        }
+                                    }
+
+                                    if !confirmed then {
+                                        println(
+                                          s"[Server] Close confirmation timeout for: ${clientId}"
+                                        )
+                                        // Revert status back to Open since close failed
+                                        server.updateChannelStatus(clientId, ChannelStatus.Open)
+                                        channel.send(
+                                          ClientResponse.Error(
+                                            ErrorCode.TransactionFailed,
+                                            "Close transaction confirmation timeout"
+                                          )
+                                        )
+                                    }
+                                })
+                                pollingThread.setDaemon(true)
+                                pollingThread.start()
+
+                                println(s"[Server] Close pending for client: ${clientId}")
+                                List(ClientResponse.ClosePending(signedTx.id.toHex))
+                        }
 
             case ClientRequest.CreateOrder(clientId, order) =>
                 server.handleCreateOrder(clientId, order) match {

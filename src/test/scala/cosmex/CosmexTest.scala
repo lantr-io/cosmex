@@ -5,11 +5,11 @@ import com.bloxbean.cardano.client.common.model.{Network, Networks}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.builtin.ByteString.hex
-import scalus.builtin.{platform, Builtins, ByteString}
+import scalus.builtin.{Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
-import scalus.cardano.txbuilder.{Environment, TransactionSigner}
+import scalus.cardano.txbuilder.Environment
 import scalus.cardano.wallet.BloxbeanAccount
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
@@ -788,11 +788,83 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           bobAddress,
           bobClientState
         )
-        val signer = new TransactionSigner(Set(new BloxbeanAccount(exchangeAccount).paymentKeyPair))
-        val bothSignedTx = signer.sign(tx)
         provider.setSlot(SlotConfig.Mainnet.timeToSlot(Instant.now().plusSeconds(5).toEpochMilli))
-        val result = provider.submit(bothSignedTx)
-        assert(result.isRight)
+        val result = server.handleCloseChannel(bobClientId, tx, bobClientState.latestSnapshot)
+        assert(result.isRight, s"Expected Right but got $result")
+
+        // After handleCloseChannel, status should be Closing (tx submitted but not confirmed yet)
+        assert(server.clientStates.get(bobClientId).get.status == ChannelStatus.Closing)
+
+        // Verify the close transaction was actually submitted and channel UTxO is spent
+        val channelUtxo = provider.findUtxo(bobClientState.channelRef)
+        assert(channelUtxo.isLeft, "Channel UTxO should be spent after close")
+    }
+
+    test("Server: graceful close fails when open orders exist") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // Alice opens channel with 900 ADA
+        val aliceDepositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(900)))
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(900L)
+        val aliceOpenChannelTx = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+        provider.submit(aliceOpenChannelTx)
+
+        val aliceChannelTxOut = aliceOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+        val aliceActualDeposit = aliceChannelTxOut._1.value.value
+        val aliceClientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(aliceDepositUtxo.input)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, aliceChannelTxOut._2))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
+        )
+        server.clientStates.put(aliceClientId, aliceClientState)
+
+        // Alice creates SELL order (this will leave an open order)
+        val aliceSellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000, // 100 ADA
+          price = 500_000 // 0.50 USDM/ADA
+        )
+        val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
+        assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
+
+        // Now Alice has an open order - try to close
+        val aliceCurrentState = server.clientStates.get(aliceClientId).get
+        val aliceSnapshot = aliceCurrentState.latestSnapshot
+
+        // We don't need to build actual close transaction - validation will fail before signing
+        // Use a dummy transaction (validation checks snapshot state first)
+        val dummyTx = aliceOpenChannelTx // Just reuse any valid transaction structure
+
+        val closeResult = server.handleCloseChannel(aliceClientId, dummyTx, aliceSnapshot)
+
+        // Close should fail with REBALANCING_REQUIRED because of open orders
+        assert(closeResult.isLeft, s"Expected close to fail, but got: $closeResult")
+        val (errorCode, errorMsg) = closeResult.swap.getOrElse(("", ""))
+        assert(
+          errorCode == ErrorCode.RebalancingRequired,
+          s"Expected REBALANCING_REQUIRED error, got: $errorCode - $errorMsg"
+        )
+
+        println(s"Close correctly failed with: $errorCode - $errorMsg")
     }
 
 }

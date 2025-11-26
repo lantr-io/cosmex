@@ -62,10 +62,12 @@ object ErrorCode:
     val RebalancingInProgress = "REBALANCING_IN_PROGRESS"
     val RebalancingFailed = "REBALANCING_FAILED"
     val NoRebalancingNeeded = "NO_REBALANCING_NEEDED"
+    val RebalancingRequired = "REBALANCING_REQUIRED"
 
 enum ClientResponse derives ReadWriter:
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
     case ChannelOpened(snapshot: SignedSnapshot)
+    case ClosePending(txId: String) // Close transaction submitted, waiting for confirmation
     case ChannelClosed(snapshot: SignedSnapshot)
     case Error(code: String, message: String)
     case OrderCreated(orderId: OrderId)
@@ -195,7 +197,7 @@ class Server(
         clientId: ClientId,
         tx: Transaction,
         snapshot: SignedSnapshot
-    ): Either[(String, String), Unit] = {
+    ): Either[(String, String), (Transaction, SignedSnapshot)] = {
         clientStates.get(clientId) match
             case None => Left((ErrorCode.ClientNotFound, "Client not found"))
             case Some(clientState) =>
@@ -206,7 +208,77 @@ class Server(
                         s"Channel is not open, status: ${clientState.status}"
                       )
                     )
-                else Right(())
+
+                // Validate snapshot matches server's view
+                val serverSnapshot = clientState.latestSnapshot
+                if snapshot.signedSnapshot.snapshotVersion != serverSnapshot.signedSnapshot.snapshotVersion then
+                    return Left(
+                      (
+                        ErrorCode.InvalidSnapshot,
+                        s"Snapshot version mismatch: client=${snapshot.signedSnapshot.snapshotVersion}, server=${serverSnapshot.signedSnapshot.snapshotVersion}"
+                      )
+                    )
+
+                // Validate graceful close prerequisites:
+                // 1. exchangeBalance == 0
+                // 2. No open orders
+                // 3. clientBalance == lockedValue
+                import scalus.ledger.api.v3.Value as V3Value
+                import scalus.prelude.AssocMap
+                val tradingState = serverSnapshot.signedSnapshot.snapshotTradingState
+                val exchangeBalance = tradingState.tsExchangeBalance
+                val clientBalance = tradingState.tsClientBalance
+                val orders = tradingState.tsOrders
+
+                if exchangeBalance != V3Value.zero then
+                    return Left(
+                      (
+                        ErrorCode.RebalancingRequired,
+                        s"Graceful close requires exchangeBalance == 0. Current exchange balance: $exchangeBalance. Rebalancing needed."
+                      )
+                    )
+
+                if orders != AssocMap.empty then
+                    return Left(
+                      (
+                        ErrorCode.RebalancingRequired,
+                        s"Graceful close requires no open orders. Cancel orders first."
+                      )
+                    )
+
+                val lockedValueV3 = LedgerToPlutusTranslation.getValue(clientState.lockedValue)
+                if clientBalance != lockedValueV3 then
+                    return Left(
+                      (
+                        ErrorCode.RebalancingRequired,
+                        s"Graceful close requires clientBalance == lockedValue. Client balance: $clientBalance, locked: $lockedValueV3. Rebalancing needed."
+                      )
+                    )
+
+                // Sign the transaction with exchange key
+                val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                val signature = ByteString.fromArray(
+                  signingProvider.signExtended(tx.id.bytes, CosmexSignKey.bytes)
+                )
+                val exchangeWitness = VKeyWitness(CosmexPubKey, signature)
+
+                // Add exchange witness to transaction
+                val existingWitnesses = tx.witnessSet.vkeyWitnesses.toSeq
+                val allWitnesses = existingWitnesses :+ exchangeWitness
+                val bothSignedTx = tx.copy(
+                  witnessSet = tx.witnessSet.copy(
+                    vkeyWitnesses = TaggedSortedSet.from(allWitnesses)
+                  )
+                )
+
+                // Submit the transaction (non-blocking)
+                provider.submit(bothSignedTx) match
+                    case Left(error) =>
+                        Left((ErrorCode.TransactionFailed, s"Failed to submit close transaction: $error"))
+                    case Right(_) =>
+                        // Update channel status to Closing
+                        clientStates.update(clientId, clientState.copy(status = ChannelStatus.Closing))
+                        Right((bothSignedTx, serverSnapshot))
     }
 
     def validateOpenChannelRequest(
