@@ -86,12 +86,16 @@ object MultiClientTestHelpers {
                     case ClientResponse.ChannelOpened(_) =>
                         println(s"[$name] ✓ Channel opened!")
                     case ClientResponse.Error(code, msg) =>
-                        throw new RuntimeException(s"[$name] Channel confirmation failed [$code]: $msg")
+                        throw new RuntimeException(
+                          s"[$name] Channel confirmation failed [$code]: $msg"
+                        )
                     case other =>
                         throw new RuntimeException(s"[$name] Expected ChannelOpened, got: $other")
                 }
             case Failure(e) =>
-                throw new RuntimeException(s"[$name] Error waiting for ChannelOpened: ${e.getMessage}")
+                throw new RuntimeException(
+                  s"[$name] Error waiting for ChannelOpened: ${e.getMessage}"
+                )
         }
     }
 
@@ -132,7 +136,9 @@ object MultiClientTestHelpers {
                     case ClientResponse.Error(code, msg) =>
                         throw new RuntimeException(s"[$name] Order creation failed [$code]: $msg")
                     case other =>
-                        throw new RuntimeException(s"[$name] Unexpected response after retry: $other")
+                        throw new RuntimeException(
+                          s"[$name] Unexpected response after retry: $other"
+                        )
                 }
             case Failure(e) =>
                 throw new RuntimeException(s"[$name] Error receiving OrderCreated: ${e.getMessage}")
@@ -161,7 +167,9 @@ object MultiClientTestHelpers {
                         case Success(ClientResponse.ChannelPending(_)) =>
                             println(s"[$name] Ignoring stale ChannelPending message")
                         case Success(other) =>
-                            println(s"[$name] Received other message: ${other.getClass.getSimpleName}")
+                            println(
+                              s"[$name] Received other message: ${other.getClass.getSimpleName}"
+                            )
                         case Failure(e) =>
                             println(s"[$name] Failed to parse message: ${e.getMessage}")
                     }
@@ -170,7 +178,9 @@ object MultiClientTestHelpers {
                         case _: java.util.concurrent.TimeoutException =>
                             attempts += 1
                         case other =>
-                            println(s"[$name] Unexpected error receiving message: ${other.getMessage}")
+                            println(
+                              s"[$name] Unexpected error receiving message: ${other.getMessage}"
+                            )
                             other.printStackTrace()
                             attempts += 1
                     }

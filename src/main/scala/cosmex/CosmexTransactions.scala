@@ -208,8 +208,16 @@ class CosmexTransactions(
         val pubKeyHash = platform.blake2b_224(publicKey)
         val addrKeyHash = AddrKeyHash(pubKeyHash)
         val cosmexAddrKeyHash = AddrKeyHash.fromByteString(exchangeParams.exchangePkh.hash)
-        TxBuilder
-            .withConstMaxBudgetEvaluator(env)
+        println(clientState.latestSnapshot)
+        val txoutRef = LedgerToPlutusTranslation.getTxOutRefV3(clientState.channelRef)
+        println(
+          scalus.builtin.Builtins
+              .serialiseData(
+                (txoutRef, clientState.latestSnapshot.signedSnapshot).toData
+              )
+              .toHex
+        )
+        TxBuilder(env)
             .spend(
               clientUtxo,
               Action.Close(Party.Client, clientState.latestSnapshot),

@@ -19,7 +19,6 @@ import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.testing.kit.MockLedgerApi
 import sttp.tapir.server.netty.sync.NettySyncServerBinding
 
-
 class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
     test("Alice and Bob trade ADA/Token with automatic order matching (Bob mints token)") {
@@ -413,7 +412,13 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         // Open channel and wait for confirmation
                         println(s"[$name] Opening channel...")
                         val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
-                        openChannel(client, openChannelTx, clientSignedSnapshot, isMockProvider, name)
+                        openChannel(
+                          client,
+                          openChannelTx,
+                          clientSignedSnapshot,
+                          isMockProvider,
+                          name
+                        )
 
                         // Create order (use customPair if provided)
                         val orderPair = customPair.getOrElse(orderConfig.getPair())

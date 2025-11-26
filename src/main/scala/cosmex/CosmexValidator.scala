@@ -1,15 +1,14 @@
 package cosmex
-import scalus.*
+import scalus.Compile
+import scalus.builtin.*
 import scalus.builtin.Builtins.*
 import scalus.builtin.Data.toData
-import scalus.builtin.{Builtins, ByteString, Data, FromData, ToData}
 import scalus.ledger.api.v1.IntervalBound
 import scalus.ledger.api.v1.IntervalBoundType.Finite
 import scalus.ledger.api.v2
 import scalus.ledger.api.v2.Value.*
 import scalus.ledger.api.v3.*
 import scalus.prelude.*
-import scalus.uplc.Program
 
 type DiffMilliSeconds = BigInt
 type Signature = ByteString
@@ -274,6 +273,11 @@ object CosmexValidator extends DataParameterizedValidator {
                     verifyEd25519Signature(exchangePubKey, msg, snapshotExchangeSignature)
                 val validClientSig =
                     verifyEd25519Signature(clientPubKey, msg, snapshotClientSignature)
+                log(appendString("msg: ", msg.show))
+                log(appendString("snapshotClientSignature: ", snapshotClientSignature.show))
+                log(appendString("snapshotExchangeSignature: ", snapshotExchangeSignature.show))
+                log(appendString("validExchangeSig: ", validExchangeSig.show))
+                log(appendString("validClientSig: ", validClientSig.show))
                 validClientSig && validExchangeSig
     }
 
@@ -319,6 +323,10 @@ object CosmexValidator extends DataParameterizedValidator {
                           clientPubKey,
                           params.exchangePubKey
                         )
+                        log(appendString("clientSigned: ", clientSigned.show))
+                        log(appendString("exchangeSigned: ", exchangeSigned.show))
+                        log(appendString("balanced: ", balanced.show))
+                        log(appendString("validSnapshot: ", validSnapshot.show))
                         // Graceful close if both parties agreed on the snapshot
                         if validSnapshot && balanced && clientSigned && exchangeSigned then true
                         else {
@@ -1039,18 +1047,5 @@ object CosmexValidator extends DataParameterizedValidator {
           ownRef
         )
         require(result, "Validation failed")
-    }
-}
-
-object CosmexContract {
-    given Compiler.Options = Compiler.Options(
-      targetLoweringBackend = Compiler.TargetLoweringBackend.SumOfProductsLowering
-    )
-    private val compiledValidator = Compiler.compile(CosmexValidator.validate)
-
-    def mkCosmexProgram(params: ExchangeParams): Program = {
-        val program = compiledValidator.toUplcOptimized().plutusV3
-        val uplcProgram = program $ params.toData
-        uplcProgram
     }
 }
