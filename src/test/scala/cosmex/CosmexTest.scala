@@ -741,7 +741,6 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     }
 
     test("Server: graceful close") {
-        pending
         val provider = this.newEmulator()
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
 

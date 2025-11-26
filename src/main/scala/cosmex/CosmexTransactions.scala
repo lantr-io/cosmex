@@ -207,18 +207,20 @@ class CosmexTransactions(
         val publicKey = ByteString.fromArray(clientAccount.paymentKeyPair.publicKeyBytes.take(32))
         val pubKeyHash = platform.blake2b_224(publicKey)
         val addrKeyHash = AddrKeyHash(pubKeyHash)
-        TxBuilder(env)
+        val cosmexAddrKeyHash = AddrKeyHash.fromByteString(exchangeParams.exchangePkh.hash)
+        TxBuilder
+            .withConstMaxBudgetEvaluator(env)
             .spend(
               clientUtxo,
               Action.Close(Party.Client, clientState.latestSnapshot),
               script,
-              Set(addrKeyHash)
+              Set(addrKeyHash, cosmexAddrKeyHash)
             )
             .payTo(payoutAddress, clientState.lockedValue)
             .changeTo(payoutAddress)
             .validFrom(Instant.now())
-            .validTo(Instant.now().plusSeconds(60))
-//            .complete(provider, sponsor = payoutAddress)
+            .validTo(Instant.now().plusSeconds(600))
+            .complete(provider, sponsor = payoutAddress)
             .build()
             .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
             .transaction

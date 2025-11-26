@@ -1,5 +1,5 @@
 val scala3Version = "3.3.7"
-val scalusVersion = "0.13.0+373-483a730f-SNAPSHOT"
+val scalusVersion = "0.13.0+386-8f04dd09-SNAPSHOT"
 ThisBuild / scalaVersion := scala3Version
 autoCompilerPlugins := true
 
