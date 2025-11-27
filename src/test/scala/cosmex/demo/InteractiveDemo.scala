@@ -717,14 +717,17 @@ object InteractiveDemo {
                                     println(s"[Connect] ✓ Channel opened successfully!")
                                     isConnected = true
                                     // Store client state for later use (e.g., close)
-                                    val channelRef = TransactionInput(openChannelTx.id, channelOutputIdx)
-                                    clientState = Some(ClientState(
-                                      latestSnapshot = snapshot,
-                                      channelRef = channelRef,
-                                      lockedValue = depositAmount,
-                                      status = ChannelStatus.Open,
-                                      clientPubKey = clientPubKey
-                                    ))
+                                    val channelRef =
+                                        TransactionInput(openChannelTx.id, channelOutputIdx)
+                                    clientState = Some(
+                                      ClientState(
+                                        latestSnapshot = snapshot,
+                                        channelRef = channelRef,
+                                        lockedValue = depositAmount,
+                                        status = ChannelStatus.Open,
+                                        clientPubKey = clientPubKey
+                                      )
+                                    )
 
                                     // Start background listener for async notifications
                                     fork {
@@ -882,7 +885,9 @@ object InteractiveDemo {
                         case Some(state) =>
                             println(s"\n[Close] Closing channel with exchange...")
                             println(s"[Close] Channel ref: ${state.channelRef}")
-                            println(s"[Close] Locked value: ${state.lockedValue.coin.value / 1_000_000} ADA")
+                            println(
+                              s"[Close] Locked value: ${state.lockedValue.coin.value / 1_000_000} ADA"
+                            )
 
                             Try {
                                 val tx = txbuilder.closeChannel(
@@ -891,13 +896,19 @@ object InteractiveDemo {
                                   clientAddress,
                                   state
                                 )
-                                println(s"[Close] Close transaction built: ${tx.id.toHex.take(16)}...")
-                                client.sendMessage(ClientRequest.CloseChannel(clientId.get, tx, state.latestSnapshot))
+                                println(
+                                  s"[Close] Close transaction built: ${tx.id.toHex.take(16)}..."
+                                )
+                                client.sendMessage(
+                                  ClientRequest.CloseChannel(clientId.get, tx, state.latestSnapshot)
+                                )
                                 println(s"[Close] Close request sent to exchange")
                             } match {
                                 case Success(_) => ()
                                 case Failure(e) =>
-                                    println(s"[Close] ERROR: Failed to build close transaction: ${e.getMessage}")
+                                    println(
+                                      s"[Close] ERROR: Failed to build close transaction: ${e.getMessage}"
+                                    )
                                     e.printStackTrace()
                             }
                     }

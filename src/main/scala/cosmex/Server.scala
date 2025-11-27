@@ -211,7 +211,8 @@ class Server(
 
                 // Validate snapshot matches server's view
                 val serverSnapshot = clientState.latestSnapshot
-                if snapshot.signedSnapshot.snapshotVersion != serverSnapshot.signedSnapshot.snapshotVersion then
+                if snapshot.signedSnapshot.snapshotVersion != serverSnapshot.signedSnapshot.snapshotVersion
+                then
                     return Left(
                       (
                         ErrorCode.InvalidSnapshot,
@@ -274,10 +275,18 @@ class Server(
                 // Submit the transaction (non-blocking)
                 provider.submit(bothSignedTx) match
                     case Left(error) =>
-                        Left((ErrorCode.TransactionFailed, s"Failed to submit close transaction: $error"))
+                        Left(
+                          (
+                            ErrorCode.TransactionFailed,
+                            s"Failed to submit close transaction: $error"
+                          )
+                        )
                     case Right(_) =>
                         // Update channel status to Closing
-                        clientStates.update(clientId, clientState.copy(status = ChannelStatus.Closing))
+                        clientStates.update(
+                          clientId,
+                          clientState.copy(status = ChannelStatus.Closing)
+                        )
                         Right((bothSignedTx, serverSnapshot))
     }
 
