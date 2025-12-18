@@ -9,7 +9,7 @@ import scalus.builtin.ByteString
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
-import scalus.testing.kit.MockLedgerApi
+import scalus.cardano.node.Emulator
 
 /** WebSocket Server that uses provider from test configuration
   *
@@ -108,8 +108,8 @@ object CosmexWebSocketServerFromConfig {
             // Create blockchain provider from configuration (same logic as MultiClientDemoTest)
             val provider = config.blockchain.provider.toLowerCase match {
                 case "mock" =>
-                    println("[Server] Using MockLedgerApi with pre-funded Alice and Bob")
-                    // For MockLedgerApi, we need to initialize with genesis UTxOs
+                    println("[Server] Using Emulator with pre-funded Alice and Bob")
+                    // For Emulator, we need to initialize with genesis UTxOs
                     val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
                     val initialUtxos = Map(
@@ -125,16 +125,16 @@ object CosmexWebSocketServerFromConfig {
                           )
                     )
 
-                    MockLedgerApi(
+                    Emulator(
                       initialUtxos = initialUtxos,
-                      context = Context.testMainnet(slot = 1000),
-                      validators = MockLedgerApi.defaultValidators -
+                      initialContext = Context.testMainnet(slot = 1000),
+                      validators = Emulator.defaultValidators -
                           MissingKeyHashesValidator -
                           ProtocolParamsViewHashesMatchValidator -
                           MissingRequiredDatumsValidator -
                           WrongNetworkValidator -
                           VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
-                      mutators = MockLedgerApi.defaultMutators -
+                      mutators = Emulator.defaultMutators -
                           PlutusScriptsTransactionMutator
                     )
 

@@ -16,8 +16,11 @@ import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.ledger.rules.Context
 import scalus.ledger.api.v3.{TxId, TxOutRef}
-import scalus.testing.kit.MockLedgerApi
+import scalus.cardano.node.Emulator
+import scalus.utils.await
 import sttp.tapir.server.netty.sync.NettySyncServerBinding
+
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
@@ -53,7 +56,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
             // Create blockchain provider from configuration
             val provider = config.blockchain.provider.toLowerCase match {
                 case "mock" =>
-                    // For MockLedgerApi, we need to initialize with genesis UTxOs
+                    // For Emulator, we need to initialize with genesis UTxOs
                     val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
                     val initialUtxos = Map(
@@ -69,16 +72,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           )
                     )
 
-                    MockLedgerApi(
+                    Emulator(
                       initialUtxos = initialUtxos,
-                      context = Context.testMainnet(slot = 1000),
-                      validators = MockLedgerApi.defaultValidators -
+                      initialContext = Context.testMainnet(slot = 1000),
+                      validators = Emulator.defaultValidators -
                           MissingKeyHashesValidator -
                           ProtocolParamsViewHashesMatchValidator -
                           MissingRequiredDatumsValidator -
                           WrongNetworkValidator -
                           VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
-                      mutators = MockLedgerApi.defaultMutators -
+                      mutators = Emulator.defaultMutators -
                           PlutusScriptsTransactionMutator
                     )
 
@@ -146,7 +149,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                 val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
 
-                // Manually add UTxOs (MockLedgerApi doesn't allow runtime additions easily)
+                // Manually add UTxOs (Emulator doesn't allow runtime additions easily)
                 // For testing, we'll use TxBuilder to create genesis transactions
 
                 val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
@@ -211,7 +214,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   datum = None,
                                   minAmount = None,
                                   minRequiredTotalAmount = None
-                                ) match {
+                                ).await() match {
                                     case Right(utxos) =>
                                         println(s"[$name] Found ${utxos.size} UTxOs at address")
                                         utxos.foreach { case (input, output) =>
@@ -236,7 +239,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   datum = None,
                                   minAmount =
                                       Some(Coin(2_000_000L)) // Just need minimum UTxO size (~2 ADA)
-                                ) match {
+                                ).await() match {
                                     case Right(foundUtxo) =>
                                         println(
                                           s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}"
@@ -280,7 +283,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                       datum = None,
                                       minAmount = None,
                                       minRequiredTotalAmount = None
-                                    ) match {
+                                    ).await() match {
                                         case Right(utxos) =>
                                             utxos
                                                 .find { case (_, output) =>
@@ -320,14 +323,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                             // Submit the minting transaction
                             println(s"[$name] Submitting minting transaction...")
-                            provider.submit(signedMintTx) match {
+                            provider.submit(signedMintTx).await() match {
                                 case Right(_) =>
                                     println(
                                       s"[$name] ✓ Minting transaction submitted: ${signedMintTx.id.toHex.take(16)}..."
                                     )
                                 case Left(error) =>
                                     fail(
-                                      s"[$name] Failed to submit minting transaction: ${error.getMessage}"
+                                      s"[$name] Failed to submit minting transaction: ${error.toString}"
                                     )
                             }
 
@@ -345,7 +348,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                               transactionId = Some(signedMintTx.id),
                               datum = None,
                               minAmount = None
-                            ) match {
+                            ).await() match {
                                 case Right(utxo) =>
                                     println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
                                     utxo
@@ -502,7 +505,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   transactionId = None,
                                   datum = None,
                                   minAmount = Some(Coin(10_000_000L)) // Need at least 10 ADA
-                                ) match {
+                                ).await() match {
                                     case Right(utxo) => utxo
                                     case Left(err) =>
                                         fail(
@@ -531,7 +534,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                           datum = None,
                                           minAmount = None,
                                           minRequiredTotalAmount = None
-                                        ) match {
+                                        ).await() match {
                                             case Right(utxos) =>
                                                 utxos
                                                     .find { case (_, output) =>

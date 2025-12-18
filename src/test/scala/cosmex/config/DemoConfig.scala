@@ -437,17 +437,17 @@ case class DemoConfig(config: Config) {
       */
     def createProvider(): scalus.cardano.node.Provider = {
         import cosmex.cardano.{YaciTestcontainerProvider, BlockfrostProvider}
-        import scalus.testing.kit.MockLedgerApi
+        import scalus.cardano.node.Emulator
         import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
 
         blockchain.provider.toLowerCase match {
             case "mock" =>
                 println(s"[Config] Using MockLedgerApi provider (empty initial state)")
-                MockLedgerApi(
+                Emulator(
                   initialUtxos = Map.empty,
-                  context = Context.testMainnet(slot = 1000),
-                  validators = MockLedgerApi.defaultValidators - WrongNetworkValidator,
-                  mutators = MockLedgerApi.defaultMutators
+                  initialContext = Context.testMainnet(slot = 1000),
+                  validators = Emulator.defaultValidators - WrongNetworkValidator,
+                  mutators = Emulator.defaultMutators
                 )
 
             case "yaci-devkit" | "yaci" =>
@@ -501,7 +501,7 @@ case class DemoConfig(config: Config) {
             case "mock" =>
                 // Create MockLedgerApi with initial funding UTxOs
                 println(s"[Config] Using MockLedgerApi provider with initial funding")
-                import scalus.testing.kit.MockLedgerApi
+                import scalus.cardano.node.Emulator
                 import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
                 import scalus.cardano.address.Address
                 import scalus.cardano.ledger.{TransactionInput, TransactionHash, TransactionOutput, Value}
@@ -518,11 +518,11 @@ case class DemoConfig(config: Config) {
                 }.toMap
 
                 println(s"[Config] Created ${initialUtxos.size} initial UTxOs for MockLedgerApi")
-                MockLedgerApi(
+                Emulator(
                   initialUtxos = initialUtxos,
-                  context = Context.testMainnet(slot = 1000),
-                  validators = MockLedgerApi.defaultValidators - WrongNetworkValidator,
-                  mutators = MockLedgerApi.defaultMutators
+                  initialContext = Context.testMainnet(slot = 1000),
+                  validators = Emulator.defaultValidators - WrongNetworkValidator,
+                  mutators = Emulator.defaultMutators
                 )
 
             case "yaci-devkit" | "yaci" =>

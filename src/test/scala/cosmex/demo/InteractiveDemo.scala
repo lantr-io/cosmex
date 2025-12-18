@@ -12,8 +12,10 @@ import scalus.ledger.api.v3.TxOutRef
 import sttp.tapir.server.netty.sync.NettySyncServerBinding
 import upickle.default.*
 
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.StdIn
 import scala.util.{Failure, Success, Try}
+import scalus.utils.await
 
 /** Interactive command-line demo for COSMEX
   *
@@ -146,7 +148,7 @@ object InteractiveDemo {
                 val (provider, cardanoInfo, _, port) = if !externalServer then {
                     val prov = config.blockchain.provider.toLowerCase match {
                         case "mock" =>
-                            import scalus.testing.kit.MockLedgerApi
+                            import scalus.cardano.node.Emulator
                             import scalus.cardano.ledger.rules.*
 
                             val genesisHash =
@@ -159,16 +161,16 @@ object InteractiveDemo {
                                   )
                             )
 
-                            MockLedgerApi(
+                            Emulator(
                               initialUtxos = initialUtxos,
-                              context = Context.testMainnet(slot = 1000),
-                              validators = MockLedgerApi.defaultValidators -
+                              initialContext = Context.testMainnet(slot = 1000),
+                              validators = Emulator.defaultValidators -
                                   MissingKeyHashesValidator -
                                   ProtocolParamsViewHashesMatchValidator -
                                   MissingRequiredDatumsValidator -
                                   WrongNetworkValidator -
                                   VerifiedSignaturesInWitnessesValidator,
-                              mutators = MockLedgerApi.defaultMutators -
+                              mutators = Emulator.defaultMutators -
                                   PlutusScriptsTransactionMutator
                             )
 
@@ -264,13 +266,15 @@ object InteractiveDemo {
 
                             try {
                                 // Query all UTxOs and filter out ones we've already spent
-                                provider.findUtxos(
-                                  address = clientAddress,
-                                  transactionId = txIdFilter,
-                                  datum = None,
-                                  minAmount = None,
-                                  minRequiredTotalAmount = None
-                                ) match {
+                                provider
+                                    .findUtxos(
+                                      address = clientAddress,
+                                      transactionId = txIdFilter,
+                                      datum = None,
+                                      minAmount = None,
+                                      minRequiredTotalAmount = None
+                                    )
+                                    .await() match {
                                     case Right(utxos) =>
                                         // Filter: 1) not spent, 2) has enough ADA
                                         val available = utxos.filter { case (input, output) =>
@@ -398,7 +402,7 @@ object InteractiveDemo {
                               datum = None,
                               minAmount = None,
                               minRequiredTotalAmount = None
-                            ) match {
+                            ).await() match {
                                 case Right(utxos) =>
                                     utxos
                                         .find { case (_, output) =>
@@ -454,7 +458,7 @@ object InteractiveDemo {
                     val signedMintTx = mintTx.copy(witnessSet = witnessSet)
 
                     // Submit
-                    provider.submit(signedMintTx) match {
+                    provider.submit(signedMintTx).await() match {
                         case Right(_) =>
                             println(
                               s"[Mint] ✓ Transaction submitted: ${signedMintTx.id.toHex.take(16)}..."
@@ -468,7 +472,7 @@ object InteractiveDemo {
                             )
                         case Left(error) =>
                             throw new Exception(
-                              s"Failed to submit minting transaction: ${error.getMessage}"
+                              s"Failed to submit minting transaction: ${error.toString}"
                             )
                     }
 

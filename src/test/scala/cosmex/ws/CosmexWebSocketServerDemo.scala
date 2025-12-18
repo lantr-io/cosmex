@@ -8,7 +8,7 @@ import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
-import scalus.testing.kit.MockLedgerApi
+import scalus.cardano.node.Emulator
 
 /** Demo main method that uses MockLedgerApi for testing
   *
@@ -85,14 +85,14 @@ object CosmexWebSocketServerDemo {
             println(s"Network: ${config.network.networkType}")
 
             // Create mock ledger for testing
-            val provider = MockLedgerApi(
+            val provider = Emulator(
               initialUtxos = Map.empty,
-              context = Context.testMainnet(slot = 1000),
-              validators = MockLedgerApi.defaultValidators -
+              initialContext = Context.testMainnet(slot = 1000),
+              validators = Emulator.defaultValidators -
                   MissingKeyHashesValidator -
                   ProtocolParamsViewHashesMatchValidator -
                   MissingRequiredDatumsValidator,
-              mutators = MockLedgerApi.defaultMutators -
+              mutators = Emulator.defaultMutators -
                   PlutusScriptsTransactionMutator
             )
 

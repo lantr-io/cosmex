@@ -1,23 +1,23 @@
 package cosmex
 
 import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+import cosmex.util.JsonCodecs.given
+import cosmex.util.submitAndWait
 import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
-
-import scala.collection.concurrent.TrieMap
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.Eq
+import scalus.utils.await
 import upickle.default.*
 
 import java.time.Instant
-import scala.annotation.unused
-import cosmex.util.JsonCodecs.given
-
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
-import cosmex.util.submitAndWait
+import scala.annotation.unused
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.ExecutionContext.Implicits.global
 
 enum ClientRequest derives ReadWriter:
     case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
@@ -273,7 +273,7 @@ class Server(
                 )
 
                 // Submit the transaction (non-blocking)
-                provider.submit(bothSignedTx) match
+                provider.submit(bothSignedTx).await() match
                     case Left(error) =>
                         Left(
                           (
@@ -662,7 +662,7 @@ class Server(
 
     /** Check if a transaction output exists on-chain (i.e., transaction is confirmed) */
     def isUtxoConfirmed(txOutRef: TransactionInput): Boolean = {
-        provider.findUtxo(txOutRef).isRight
+        provider.findUtxo(txOutRef).await().isRight
     }
 
     /** Check if a client needs rebalancing (on-chain locked value != snapshot balances) */
@@ -711,7 +711,7 @@ class Server(
         // We need to fetch current UTxOs for all affected channels
         val channelUtxos = affectedClients.flatMap { clientId =>
             clientStates.get(clientId).flatMap { clientState =>
-                provider.findUtxo(clientState.channelRef) match
+                provider.findUtxo(clientState.channelRef).await() match
                     case Right(utxo) => Some((clientId, utxo, clientState))
                     case Left(_) =>
                         println(s"[Server] Warning: Could not find UTxO for client $clientId")

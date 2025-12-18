@@ -1,7 +1,10 @@
 package cosmex.util
 
-import scalus.cardano.node.Provider
 import scalus.cardano.ledger.{Transaction, TransactionInput}
+import scalus.cardano.node.Provider
+import scalus.utils.await
+
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /** Extension methods for Provider to add utility functionality */
 extension (provider: Provider)
@@ -25,8 +28,8 @@ extension (provider: Provider)
         delayMs: Int = 500
     ): Either[RuntimeException, Unit] = {
         // Submit the transaction
-        provider.submit(tx) match {
-            case Left(error) => return Left(error)
+        provider.submit(tx).await() match {
+            case Left(error) => return Left(RuntimeException(error.toString))
             case Right(_)    => ()
         }
 
@@ -35,7 +38,7 @@ extension (provider: Provider)
         var attempts = 0
         println(s"[Provider] Polling for UTxO confirmation: ${tx.id.toHex.take(16)}#0")
         while attempts < maxAttempts do {
-            provider.findUtxo(txOutRef) match {
+            provider.findUtxo(txOutRef).await() match {
                 case Right(_) =>
                     println(s"[Provider] UTxO confirmed after ${attempts + 1} attempt(s)")
                     return Right(())

@@ -9,14 +9,16 @@ import scalus.builtin.{Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
+import scalus.cardano.node.Emulator
 import scalus.cardano.txbuilder.Environment
 import scalus.cardano.wallet.BloxbeanAccount
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.{AssocMap, Option as ScalusOption}
-import scalus.testing.kit.MockLedgerApi
+import scalus.utils.await
 
 import java.time.Instant
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.ArbitraryInstances {
     // Environment
@@ -78,13 +80,13 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           )
     )
 
-    private def newEmulator(): MockLedgerApi = {
-        MockLedgerApi(
+    private def newEmulator(): Emulator = {
+        Emulator(
           initialUtxos = initialUtxos,
-          context = Context.testMainnet(slot = 1000),
+          initialContext = Context.testMainnet(slot = 1000),
           validators =
-              MockLedgerApi.defaultValidators - MissingKeyHashesValidator - ProtocolParamsViewHashesMatchValidator - MissingRequiredDatumsValidator,
-          mutators = MockLedgerApi.defaultMutators - PlutusScriptsTransactionMutator
+              Emulator.defaultValidators - MissingKeyHashesValidator - ProtocolParamsViewHashesMatchValidator - MissingRequiredDatumsValidator,
+          mutators = Emulator.defaultMutators - PlutusScriptsTransactionMutator
         )
     }
 
@@ -95,8 +97,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         snapshot: Snapshot
     ): SignedSnapshot = {
         val signedInfo = (clientTxOutRef, snapshot)
-        import scalus.builtin.Data.toData
         import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+        import scalus.builtin.Data.toData
         val msg = Builtins.serialiseData(signedInfo.toData)
 
         // Sign with extended private key (64 bytes for Cardano's BIP32-Ed25519)
@@ -159,6 +161,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(500))
             )
+            .await()
             .toOption
             .get
 
@@ -168,7 +171,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           depositAmount = Value.ada(500L)
         )
 
-        val value = provider.submit(openChannelTx)
+        val value = provider.submit(openChannelTx).await()
 //        pprint.pprintln(openChannelTx)
 //        pprint.pprintln(value)
         assert(value.isRight)
@@ -187,6 +190,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(500))
             )
+            .await()
             .toOption
             .get
 
@@ -242,6 +246,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(500))
             )
+            .await()
             .toOption
             .get
 
@@ -277,6 +282,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(500))
             )
+            .await()
             .toOption
             .get
 
@@ -327,6 +333,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(500))
             )
+            .await()
             .toOption
             .get
 
@@ -362,6 +369,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = clientAddress,
               minAmount = Some(Coin.ada(900))
             )
+            .await()
             .toOption
             .get
 
@@ -407,6 +415,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
               address = bobAddress,
               minAmount = Some(Coin.ada(50))
             )
+            .await()
             .toOption
             .get
 
@@ -531,6 +540,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Alice opens channel with 100 ADA
         val aliceDepositUtxo = provider
             .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(100)))
+            .await()
             .toOption
             .get
 
@@ -583,6 +593,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Bob opens channel with 50 ADA + 10 USDM (small amount of USDM)
         val bobDepositUtxo = provider
             .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .await()
             .toOption
             .get
 
@@ -636,6 +647,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Alice opens channel with 500 ADA
         val aliceDepositUtxo = provider
             .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(500)))
+            .await()
             .toOption
             .get
 
@@ -685,6 +697,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Bob opens channel with 50 ADA + 500 USDM
         val bobDepositUtxo = provider
             .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .await()
             .toOption
             .get
 
@@ -749,6 +762,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Bob opens channel with 50 ADA + 500 USDM
         val bobDepositUtxo = provider
             .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .await()
             .toOption
             .get
 
@@ -796,7 +810,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(server.clientStates.get(bobClientId).get.status == ChannelStatus.Closing)
 
         // Verify the close transaction was actually submitted and channel UTxO is spent
-        val channelUtxo = provider.findUtxo(bobClientState.channelRef)
+        val channelUtxo = provider.findUtxo(bobClientState.channelRef).await()
         assert(channelUtxo.isLeft, "Channel UTxO should be spent after close")
     }
 
@@ -807,6 +821,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Alice opens channel with 900 ADA
         val aliceDepositUtxo = provider
             .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(900)))
+            .await()
             .toOption
             .get
 

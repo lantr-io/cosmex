@@ -6,14 +6,16 @@ import scalus.cardano.ledger.*
 import scalus.cardano.node.Provider
 import scalus.cardano.txbuilder.*
 import scalus.cardano.wallet.Account
+import scalus.utils.await
 import scalus.ledger.api.v2.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 
 import java.time.Instant
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class CosmexTransactions(
     val exchangeParams: ExchangeParams,
-    env: Environment
+    env: CardanoInfo
 ) {
     private val network = env.network
     val protocolVersion = env.protocolParams.protocolVersion.major
@@ -85,8 +87,7 @@ class CosmexTransactions(
                       datum = initialState.toData
                     )
                     .payTo(address = clientInput.output.address, value = remainingValue)
-                    .changeTo(clientInput.output.address) // Sets diff handler for fee calculation
-                    .build()
+                    .build(changeTo = clientInput.output.address)
                     .transaction
             } else {
                 // All value deposited, just need diff handler for fees
@@ -97,8 +98,7 @@ class CosmexTransactions(
                       value = depositAmount,
                       datum = initialState.toData
                     )
-                    .changeTo(clientInput.output.address)
-                    .build()
+                    .build(changeTo = clientInput.output.address)
                     .transaction
             }
         } else {
@@ -106,8 +106,7 @@ class CosmexTransactions(
             TxBuilder(env)
                 .spend(clientInput)
                 .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
-                .changeTo(clientInput.output.address)
-                .build()
+                .build(changeTo = clientInput.output.address)
                 .transaction
         }
     }
@@ -199,6 +198,7 @@ class CosmexTransactions(
     ) = {
         val clientUtxo = provider
             .findUtxo(clientState.channelRef)
+            .await()
             .getOrElse(
               throw new RuntimeException(
                 s"Client UTxO not found for channelRef: ${clientState.channelRef}"
@@ -225,11 +225,10 @@ class CosmexTransactions(
               Set(addrKeyHash, cosmexAddrKeyHash)
             )
             .payTo(payoutAddress, clientState.lockedValue)
-            .changeTo(payoutAddress)
             .validFrom(Instant.now())
             .validTo(Instant.now().plusSeconds(600))
             .complete(provider, sponsor = payoutAddress)
-            .build()
+            .await()
             .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
             .transaction
     }

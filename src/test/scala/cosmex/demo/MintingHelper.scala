@@ -75,14 +75,13 @@ object MintingHelper {
             .spend(utxoToSpend)
             .collaterals(collateralUtxo)
             .mint(
-              redeemer = scalus.builtin.Data.B(ByteString.empty),
+              script = mintingScript,
               assets = Map(assetName -> amount),
-              script = mintingScript
+              redeemer = scalus.builtin.Data.B(ByteString.empty)
             )
             .payTo(recipientAddress, totalTokenValue) // Newly minted + existing tokens + 2 ADA
             .payTo(recipientAddress, Value.lovelace(collateralAda)) // 5 ADA collateral
-            .changeTo(recipientAddress) // All remaining ADA as change
-            .build()
+            .build(recipientAddress) // Build with change going to recipientAddress
             .transaction
 
         // Debug: print outputs

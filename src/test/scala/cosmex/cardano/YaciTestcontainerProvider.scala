@@ -6,7 +6,9 @@ import com.bloxbean.cardano.yaci.test.{Funding, YaciCardanoContainer}
 import cosmex.util.TransactionStatusProvider
 import scalus.cardano.ledger.{AssetName, Coin, DatumOption, ProtocolParams, ScriptHash, Transaction, TransactionHash, TransactionInput, TransactionOutput, Utxo, Utxos, Value}
 import scalus.cardano.address.Address
+import scalus.cardano.node.SubmitError
 
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -33,40 +35,36 @@ class YaciTestcontainerProvider private (
     with TransactionStatusProvider {
 
     /** Submit a transaction to the Yaci testcontainer blockchain */
-    override def submit(tx: Transaction): Either[RuntimeException, Unit] = {
-        Try {
-            println(s"[YaciProvider] Submitting transaction: ${tx.id.toHex.take(16)}...")
+    override def submit(tx: Transaction)(using ExecutionContext): Future[Either[SubmitError, TransactionHash]] = {
+        Future {
+            Try {
+                println(s"[YaciProvider] Submitting transaction: ${tx.id.toHex.take(16)}...")
 
-            // Convert Scalus Transaction to CBOR bytes
-            val txCborBytes = tx.toCbor
+                // Convert Scalus Transaction to CBOR bytes
+                val txCborBytes = tx.toCbor
 
-            // Use BackendService (Blockfrost-compatible API) for better error handling
-            val result = backendService.getTransactionService.submitTransaction(txCborBytes)
+                // Use BackendService (Blockfrost-compatible API) for better error handling
+                val result = backendService.getTransactionService.submitTransaction(txCborBytes)
 
-            println(s"[YaciProvider] Submit result - isSuccessful: ${result.isSuccessful}")
-            println(s"[YaciProvider] Submit result - response: ${result.getResponse}")
+                println(s"[YaciProvider] Submit result - isSuccessful: ${result.isSuccessful}")
+                println(s"[YaciProvider] Submit result - response: ${result.getResponse}")
 
-            if result.getValue != null then {
-                println(s"[YaciProvider] Submit result - value (txHash): ${result.getValue}")
-            }
-
-            if result.isSuccessful then {
-                val txHash = result.getValue
-                if txHash != null && txHash.matches("[0-9a-fA-F]{64}") then {
-                    println(s"[YaciProvider] Transaction accepted: $txHash")
-                    ()
-                } else {
-                    throw new RuntimeException(
-                      s"Submit API returned invalid transaction hash: $txHash"
-                    )
+                if result.getValue != null then {
+                    println(s"[YaciProvider] Submit result - value (txHash): ${result.getValue}")
                 }
-            } else {
-                throw new RuntimeException(s"Transaction submission failed: ${result.getResponse}")
-            }
-        }.toEither.left.map {
-            case e: RuntimeException => e
-            case e: Throwable =>
-                new RuntimeException(s"Transaction submission failed: ${e.getMessage}", e)
+
+                if result.isSuccessful then {
+                    val txHash = result.getValue
+                    if txHash != null && txHash.matches("[0-9a-fA-F]{64}") then {
+                        println(s"[YaciProvider] Transaction accepted: $txHash")
+                        Right(tx.id)
+                    } else {
+                        Left(SubmitError.NodeError(s"Submit API returned invalid transaction hash: $txHash"))
+                    }
+                } else {
+                    Left(SubmitError.NodeError(s"Transaction submission failed: ${result.getResponse}"))
+                }
+            }.toEither.left.map(e => SubmitError.NetworkError(s"Transaction submission failed: ${e.getMessage}", Some(e))).flatten
         }
     }
 
@@ -113,38 +111,47 @@ class YaciTestcontainerProvider private (
         }
     }
 
-    override def findUtxo(input: TransactionInput): Either[RuntimeException, Utxo] = {
-        Try {
-            val txHash = input.transactionId.toHex
-            val outputIndex = input.index
+    override def findUtxo(input: TransactionInput)(using ExecutionContext): Future[Either[RuntimeException, Utxo]] = {
+        Future {
+            Try {
+                val txHash = input.transactionId.toHex
+                val outputIndex = input.index
 
-            // Use getTxOutput (same as QuickTxBuilder.completeAndWait uses)
-            val maybeUtxo = utxoSupplier.getTxOutput(txHash, outputIndex.toInt)
+                // Use getTxOutput (same as QuickTxBuilder.completeAndWait uses)
+                val maybeUtxo = utxoSupplier.getTxOutput(txHash, outputIndex.toInt)
 
-            if maybeUtxo.isPresent then {
-                val bloxbeanUtxo = maybeUtxo.get()
-                convertBloxbeanUtxo(bloxbeanUtxo, txHash, outputIndex)
-            } else {
-                throw new RuntimeException(s"UTxO not found: $txHash#$outputIndex")
+                if maybeUtxo.isPresent then {
+                    val bloxbeanUtxo = maybeUtxo.get()
+                    convertBloxbeanUtxo(bloxbeanUtxo, txHash, outputIndex)
+                } else {
+                    throw new RuntimeException(s"UTxO not found: $txHash#$outputIndex")
+                }
+            }.toEither.left.map {
+                case e: RuntimeException => e
+                case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
             }
-        }.toEither.left.map {
-            case e: RuntimeException => e
-            case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
         }
     }
 
-    override def findUtxos(inputs: Set[TransactionInput]): Either[RuntimeException, Utxos] = {
-        Try {
-            val utxos = inputs.map { input =>
-                findUtxo(input) match {
-                    case Right(utxo) => utxo
-                    case Left(e)     => throw e
+    override def findUtxos(inputs: Set[TransactionInput])(using ExecutionContext): Future[Either[RuntimeException, Utxos]] = {
+        Future {
+            Try {
+                val utxos = inputs.map { input =>
+                    val txHash = input.transactionId.toHex
+                    val outputIndex = input.index
+                    val maybeUtxo = utxoSupplier.getTxOutput(txHash, outputIndex.toInt)
+                    if maybeUtxo.isPresent then {
+                        val bloxbeanUtxo = maybeUtxo.get()
+                        convertBloxbeanUtxo(bloxbeanUtxo, txHash, outputIndex)
+                    } else {
+                        throw new RuntimeException(s"UTxO not found: $txHash#$outputIndex")
+                    }
                 }
+                Map.from(utxos.map(u => u.input -> u.output))
+            }.toEither.left.map {
+                case e: RuntimeException => e
+                case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
             }
-            Map.from(utxos.map(u => u.input -> u.output))
-        }.toEither.left.map {
-            case e: RuntimeException => e
-            case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
         }
     }
 
@@ -154,59 +161,61 @@ class YaciTestcontainerProvider private (
         datum: Option[DatumOption],
         minAmount: Option[Coin],
         minRequiredTotalAmount: Option[Coin]
-    ): Either[RuntimeException, Utxos] = {
+    )(using ExecutionContext): Future[Either[RuntimeException, Utxos]] = {
         import scalus.cardano.address.{ShelleyAddress, StakeAddress}
 
-        Try {
-            // Query all UTxOs for address
-            val addressBech32 = address match {
-                case sa: ShelleyAddress => sa.toBech32.get
-                case sta: StakeAddress  => sta.toBech32.get
-                case other =>
-                    throw new RuntimeException(s"Unsupported address type: ${other.getClass}")
-            }
-
-            println(s"[YaciProvider] Querying UTxOs for address: $addressBech32")
-            val bloxbeanUtxos = utxoSupplier.getAll(addressBech32).asScala.toSeq
-            println(s"[YaciProvider] Found ${bloxbeanUtxos.size} UTxOs at address")
-
-            bloxbeanUtxos.foreach { utxo =>
-                val lovelace = utxo.getAmount.asScala.headOption
-                    .map(amt => BigInt(amt.getQuantity).toLong)
-                    .getOrElse(0L)
-                println(
-                  s"[YaciProvider]   ${utxo.getTxHash.take(16)}#${utxo.getOutputIndex} = $lovelace lovelace"
-                )
-            }
-
-            // Filter by criteria
-            val filtered = bloxbeanUtxos
-                .filter { utxo =>
-                    transactionId.forall(txId => utxo.getTxHash == txId.toHex)
+        Future {
+            Try {
+                // Query all UTxOs for address
+                val addressBech32 = address match {
+                    case sa: ShelleyAddress => sa.toBech32.get
+                    case sta: StakeAddress  => sta.toBech32.get
+                    case other =>
+                        throw new RuntimeException(s"Unsupported address type: ${other.getClass}")
                 }
-                .filter { utxo =>
-                    minAmount.forall(min =>
-                        utxo.getAmount.asScala.headOption.exists(amt =>
-                            BigInt(amt.getQuantity).toLong >= min.value
-                        )
+
+                println(s"[YaciProvider] Querying UTxOs for address: $addressBech32")
+                val bloxbeanUtxos = utxoSupplier.getAll(addressBech32).asScala.toSeq
+                println(s"[YaciProvider] Found ${bloxbeanUtxos.size} UTxOs at address")
+
+                bloxbeanUtxos.foreach { utxo =>
+                    val lovelace = utxo.getAmount.asScala.headOption
+                        .map(amt => BigInt(amt.getQuantity).toLong)
+                        .getOrElse(0L)
+                    println(
+                      s"[YaciProvider]   ${utxo.getTxHash.take(16)}#${utxo.getOutputIndex} = $lovelace lovelace"
                     )
                 }
 
-            println(s"[YaciProvider] After filtering: ${filtered.size} UTxOs match criteria")
+                // Filter by criteria
+                val filtered = bloxbeanUtxos
+                    .filter { utxo =>
+                        transactionId.forall(txId => utxo.getTxHash == txId.toHex)
+                    }
+                    .filter { utxo =>
+                        minAmount.forall(min =>
+                            utxo.getAmount.asScala.headOption.exists(amt =>
+                                BigInt(amt.getQuantity).toLong >= min.value
+                            )
+                        )
+                    }
 
-            // Convert to Scalus UTxOs
-            val utxos = filtered
-                .map { bloxbeanUtxo =>
-                    val txHash = bloxbeanUtxo.getTxHash
-                    val index = bloxbeanUtxo.getOutputIndex.toLong
-                    convertBloxbeanUtxo(bloxbeanUtxo, txHash, index)
-                }
-                .map(u => u.input -> u.output)
-                .toMap
-            utxos
-        }.toEither.left.map {
-            case e: RuntimeException => e
-            case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+                println(s"[YaciProvider] After filtering: ${filtered.size} UTxOs match criteria")
+
+                // Convert to Scalus UTxOs
+                val utxos = filtered
+                    .map { bloxbeanUtxo =>
+                        val txHash = bloxbeanUtxo.getTxHash
+                        val index = bloxbeanUtxo.getOutputIndex.toLong
+                        convertBloxbeanUtxo(bloxbeanUtxo, txHash, index)
+                    }
+                    .map(u => u.input -> u.output)
+                    .toMap
+                utxos
+            }.toEither.left.map {
+                case e: RuntimeException => e
+                case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+            }
         }
     }
 
@@ -216,11 +225,13 @@ class YaciTestcontainerProvider private (
         transactionId: Option[TransactionHash],
         datum: Option[DatumOption],
         minAmount: Option[Coin]
-    ): Either[RuntimeException, Utxo] = {
-        findUtxos(address, transactionId, datum, minAmount, None).flatMap { utxos =>
-            utxos.headOption match {
-                case Some((input, output)) => Right(Utxo(input, output))
-                case None => Left(new RuntimeException(s"No UTxO found at address $address"))
+    )(using ExecutionContext): Future[Either[RuntimeException, Utxo]] = {
+        findUtxos(address, transactionId, datum, minAmount, None).map { result =>
+            result.flatMap { utxos =>
+                utxos.headOption match {
+                    case Some((input, output)) => Right(Utxo(input, output))
+                    case None => Left(new RuntimeException(s"No UTxO found at address $address"))
+                }
             }
         }
     }

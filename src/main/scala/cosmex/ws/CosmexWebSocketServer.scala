@@ -1,12 +1,15 @@
 package cosmex.ws
 
-import scala.util.control.NonFatal
 import cosmex.*
 import ox.*
 import ox.channels.{Channel, ChannelClosedUnion}
+import scalus.utils.await
 import sttp.tapir.*
 import sttp.tapir.server.netty.sync.{NettySyncServer, NettySyncServerBinding, OxStreams}
 import upickle.default.*
+
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.control.NonFatal
 
 /** WebSocket server for COSMEX */
 object CosmexWebSocketServer {
@@ -207,13 +210,13 @@ object CosmexWebSocketServer {
                         server.clientStates.put(clientId, clientState)
 
                         // Submit transaction to blockchain (non-blocking)
-                        server.provider.submit(tx) match {
+                        server.provider.submit(tx).await() match {
                             case Left(submitError) =>
                                 println(s"[Server] Transaction submission failed: $submitError")
                                 return List(
                                   ClientResponse.Error(
                                     ErrorCode.TransactionFailed,
-                                    s"Transaction submission failed: ${submitError.getMessage}"
+                                    s"Transaction submission failed: ${submitError}"
                                   )
                                 )
                             case Right(_) =>
@@ -246,7 +249,7 @@ object CosmexWebSocketServer {
 
                                     var confirmed = false
                                     while attempts < maxAttempts && !confirmed do {
-                                        server.provider.findUtxo(channelRef) match {
+                                        server.provider.findUtxo(channelRef).await() match {
                                             case Right(_) =>
                                                 println(
                                                   s"[Server] Channel confirmed after ${attempts + 1} attempt(s): ${clientId}"
@@ -322,7 +325,7 @@ object CosmexWebSocketServer {
                                     var confirmed = false
                                     while attempts < maxAttempts && !confirmed do {
                                         // Check if the channel UTxO is spent (no longer exists)
-                                        server.provider.findUtxo(channelRef) match {
+                                        server.provider.findUtxo(channelRef).await() match {
                                             case Left(_) =>
                                                 // UTxO not found = channel is closed
                                                 println(
