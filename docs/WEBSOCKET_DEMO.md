@@ -1,8 +1,9 @@
-# WebSocket Demo: Alice Opens Channel and Creates Order
+# WebSocket Demo: Channel Lifecycle
 
 This demo demonstrates the COSMEX WebSocket server and client implementation, showing:
 1. Alice opening a channel with the exchange
 2. Alice creating a limit order
+3. Alice closing the channel and receiving payout
 
 ## Architecture
 
@@ -37,10 +38,13 @@ This demo demonstrates the COSMEX WebSocket server and client implementation, sh
 - Production-ready client
 
 **5. AliceDemo** (`src/test/scala/cosmex/demo/AliceDemo.scala`)
-- Complete demonstration application
+- Interactive demonstration application
 - Hardcoded Alice account (seed=2)
-- Opens channel with 500 ADA
-- Creates BUY limit order: 100 ADA @ 0.50 price units
+- Supports full channel lifecycle:
+  - `connect` - Open channel with deposit
+  - `buy/sell` - Create limit orders
+  - `get-state` - View balance and orders
+  - `close` - Close channel and withdraw funds
 
 **6. Server.scala Updates**
 - Added `clientId` parameter to `ClientRequest` enum variants
@@ -75,35 +79,52 @@ sbtn "Test/runMain cosmex.demo.AliceDemo"
 
 Expected output:
 ```
+================================================================
+       COSMEX Demo - Alice's Interactive Trading Terminal
+================================================================
+
+Available commands:
+  connect                     - Connect to the exchange
+  buy <base> <quote> <amount> <price>   - Create buy order
+  sell <base> <quote> <amount> <price>  - Create sell order
+  get-state                   - Show current balance and orders
+  close                       - Close channel and withdraw funds
+  help                        - Show this help
+  quit                        - Exit the demo
+
+Alice> connect
+[Connect] Opening channel with exchange...
+[Connect] ✓ Channel opened successfully!
+
+Alice> buy ada usdm 100 2
+[Order] ✓ Order request sent to exchange
+[Notification] ✓ Order created! OrderID: 0
+
+Alice> get-state
 ============================================================
-COSMEX Demo: Alice Opens Channel & Creates Order
+Client State
+============================================================
+Channel Status:    Open
+Snapshot Version:  1
+
+Balance:
+  ADA:             500.000000
+
+Orders:
+  #0     BUY        100 @ 2
+
 ============================================================
 
-[1] Creating Alice's account...
-    Alice PubKeyHash: <hex>
-    Exchange PubKeyHash: <hex>
+Alice> close
+[Close] Closing channel with exchange...
+[Close] ✓ Close transaction submitted: abc123...
+[Close] Waiting for confirmation...
+[Close] ✓ Channel closed successfully!
+[Close] Final snapshot version: 1
+[Close] Funds have been returned to your wallet.
 
-[2] Connecting to WebSocket server...
-[Client] Connected to ws://localhost:8080/ws
-
-[3] Opening channel with 500 ADA deposit...
-    Transaction built: <tx-id>...
-    Snapshot v0 created and signed
-    ✓ Channel opened successfully!
-    Snapshot version: 0
-    Exchange signature: <signature>...
-
-[4] Creating BUY order: 100 ADA @ 0.50 USDM/ADA...
-    ✓ Order created successfully!
-    Order ID: 1
-    Amount: 100 ADA
-    Price: 0.50 units
-
-============================================================
-Demo completed successfully!
-============================================================
-
-[5] Disconnected from server
+Alice> quit
+Goodbye!
 ```
 
 ### Server Terminal Output
@@ -111,12 +132,17 @@ Demo completed successfully!
 The server will show:
 ```
 [Server] Received request: OpenChannel
-[Server] Channel opened for client: ClientId(...)
-[Server] Sent response: ChannelOpened
+[Server] Transaction submitted: abc123...
+[Server] Channel pending for client: ClientId(...)
+[Server] Channel confirmed after 3 attempt(s)
 
 [Server] Received request: CreateOrder
-[Server] Order created: 1, trades: 0
+[Server] Order created: 0, trades: 0
 [Server] Sent response: OrderCreated
+
+[Server] Received request: CloseChannel
+[Server] Close pending for client: ClientId(...)
+[Server] Close confirmed after 2 attempt(s)
 ```
 
 ## Message Protocol
@@ -126,24 +152,31 @@ The server will show:
 ```scala
 enum ClientRequest:
   case OpenChannel(tx: Transaction, snapshot: SignedSnapshot)
+  case CloseChannel(clientId: ClientId, tx: Transaction, snapshot: SignedSnapshot)
   case CreateOrder(clientId: ClientId, order: LimitOrder)
   case CancelOrder(clientId: ClientId, orderId: OrderId)
   case Deposit(clientId: ClientId, amount: Value)
   case Withdraw(clientId: ClientId, amount: Value)
   case GetBalance(clientId: ClientId)
   case GetOrders(clientId: ClientId)
+  case GetState(clientId: ClientId)
 ```
 
 ### ClientResponse (Server → Client)
 
 ```scala
 enum ClientResponse:
+  case ChannelPending(txId: String)
   case ChannelOpened(snapshot: SignedSnapshot)
+  case ClosePending(txId: String)
+  case ChannelClosed(snapshot: SignedSnapshot)
   case OrderCreated(orderId: OrderId)
   case OrderCancelled(orderId: OrderId)
+  case OrderExecuted(trade: Trade)
   case Balance(balance: Value)
   case Orders(orders: AssocMap[OrderId, LimitOrder])
-  case Error(message: String)
+  case State(balance, orders, channelStatus, snapshotVersion)
+  case Error(code: String, message: String)
 ```
 
 ## Technical Details
@@ -166,6 +199,24 @@ enum ClientResponse:
    - Server applies trades to balances
    - Server creates snapshot v(n+1)
    - Server returns `OrderCreated(orderId)`
+
+3. **Channel Closing (Graceful Close)**:
+   - Client cancels all open orders first
+   - Client builds close transaction with final snapshot
+   - Client sends `CloseChannel(clientId, tx, snapshot)`
+   - Server validates:
+     - Channel is open
+     - Snapshot version matches server's view
+     - Exchange balance == 0
+     - No open orders
+     - Client balance == locked value
+   - Server signs transaction with exchange key
+   - Server submits transaction to blockchain
+   - Server returns `ClosePending(txId)` immediately
+   - Server updates channel status to `Closing`
+   - Background polling waits for UTxO to be spent
+   - When confirmed, server sends `ChannelClosed(snapshot)` via async channel
+   - Client receives funds back to their wallet
 
 ### Key Design Decisions
 
@@ -204,11 +255,11 @@ To extend the demo:
 
 1. **Add more operations**: Implement Deposit, Withdraw, CancelOrder
 2. **Multiple clients**: Run Bob's demo concurrently with Alice
-3. **Real blockchain**: Replace MockLedgerApi with actual Cardano node connection
-4. **Persistence**: Add database to persist channel states
-5. **Reconnection**: Handle WebSocket disconnects and reconnects
-6. **Authentication**: Add signature verification for client requests
-7. **Order book UI**: Create web frontend showing real-time order book updates
+3. **Persistence**: Add database to persist channel states
+4. **Reconnection**: Handle WebSocket disconnects and reconnects
+5. **Authentication**: Add signature verification for client requests
+6. **Order book UI**: Create web frontend showing real-time order book updates
+7. **Contested close**: Implement unilateral close with contestation period
 
 ## File Locations
 

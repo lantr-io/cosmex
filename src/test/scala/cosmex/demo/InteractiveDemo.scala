@@ -3,7 +3,7 @@ package cosmex.demo
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, Server, SignedSnapshot}
+import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, Server}
 import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
@@ -771,6 +771,37 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
+                                                        case Success(
+                                                              ClientResponse.ClosePending(txId)
+                                                            ) =>
+                                                            println(
+                                                              s"\n[Close] ✓ Close transaction submitted: ${txId.take(16)}..."
+                                                            )
+                                                            println(
+                                                              s"[Close] Waiting for confirmation (this may take up to 3 minutes on preprod)..."
+                                                            )
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
+                                                        case Success(
+                                                              ClientResponse.ChannelClosed(
+                                                                snapshot
+                                                              )
+                                                            ) =>
+                                                            println(
+                                                              s"\n[Close] ✓ Channel closed successfully!"
+                                                            )
+                                                            println(
+                                                              s"[Close] Final snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
+                                                            )
+                                                            println(
+                                                              s"[Close] Funds have been returned to your wallet."
+                                                            )
+                                                            isConnected = false
+                                                            clientState = None
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
                                                         case Success(other) =>
                                                             // Log unexpected messages for debugging
                                                             println(
@@ -908,12 +939,47 @@ object InteractiveDemo {
                                 client.sendMessage(
                                   ClientRequest.CloseChannel(clientId.get, tx, state.latestSnapshot)
                                 )
-                                println(s"[Close] Close request sent to exchange")
+
+                                // Wait for ClosePending response
+                                client.receiveMessage(timeoutSeconds = 10) match {
+                                    case Success(responseJson) =>
+                                        read[ClientResponse](responseJson) match {
+                                            case ClientResponse.ClosePending(txId) =>
+                                                println(
+                                                  s"[Close] ✓ Close transaction submitted: ${txId.take(16)}..."
+                                                )
+                                                println(
+                                                  s"[Close] Waiting for confirmation (this may take up to 3 minutes on preprod)..."
+                                                )
+                                                println(
+                                                  s"[Close] You will be notified when the channel is closed."
+                                                )
+                                            case ClientResponse.ChannelClosed(snapshot) =>
+                                                // Immediate close (e.g., mock provider)
+                                                println(s"[Close] ✓ Channel closed successfully!")
+                                                println(
+                                                  s"[Close] Final snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
+                                                )
+                                                println(
+                                                  s"[Close] Funds have been returned to your wallet."
+                                                )
+                                                isConnected = false
+                                                clientState = None
+                                            case ClientResponse.Error(code, msg) =>
+                                                println(s"[Close] ERROR [$code]: $msg")
+                                            case other =>
+                                                println(s"[Close] Unexpected response: $other")
+                                        }
+                                    case Failure(e) =>
+                                        println(
+                                          s"[Close] ERROR: Failed to receive response: ${e.getMessage}"
+                                        )
+                                }
                             } match {
                                 case Success(_) => ()
                                 case Failure(e) =>
                                     println(
-                                      s"[Close] ERROR: Failed to build close transaction: ${e.getMessage}"
+                                      s"[Close] ERROR: Failed to close channel: ${e.getMessage}"
                                     )
                                     e.printStackTrace()
                             }
