@@ -29,6 +29,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
             // Load configuration
             val config = DemoConfig.load()
 
+            // Skip test if preprod/preview provider is configured but BLOCKFROST_PROJECT_ID is not set
+            config.blockchain.provider.toLowerCase match {
+                case "preprod" | "preview" =>
+                    assume(
+                      sys.env.get("BLOCKFROST_PROJECT_ID").isDefined,
+                      s"Skipping test: BLOCKFROST_PROJECT_ID environment variable not set (required for ${config.blockchain.provider} provider)"
+                    )
+                case _ => // Continue for mock/yaci providers
+            }
+
             // Create exchange
             val exchangeParams = config.exchange.createParams()
             val exchangePrivKey = config.exchange.getPrivateKey()
