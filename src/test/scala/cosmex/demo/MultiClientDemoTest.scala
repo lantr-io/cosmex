@@ -91,8 +91,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           MissingRequiredDatumsValidator -
                           WrongNetworkValidator -
                           VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
-                      mutators = Emulator.defaultMutators -
-                          PlutusScriptsTransactionMutator
+                      // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state
+                      mutators = Emulator.defaultMutators
                     )
 
                 case "yaci-devkit" | "yaci" =>
@@ -189,8 +189,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                         // Get UTxO for the client
                         val depositUtxo = config.blockchain.provider.toLowerCase match {
-                            case "mock" =>
-                                // For MockLedgerApi, use the pre-created genesis UTxO
+                            case "mock" if txIdFilter.isEmpty =>
+                                // For MockLedgerApi without prior tx, use the pre-created genesis UTxO
                                 val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
                                 Utxo(
                                   input = genesisInput,
@@ -200,7 +200,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                   )
                                 )
 
-                            case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
+                            case "mock" | "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                                 // For Yaci DevKit / Blockfrost, query the provider for funded UTxOs
                                 import scalus.cardano.address.ShelleyAddress
                                 val addressBech32 =
@@ -496,14 +496,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           .MintingConfig(enabled = false, tokenName = "BOBTOKEN", amount = 1000000L)
                     )
                     .copy(enabled =
-                        if isMockProvider then false
-                        else if isYaciDevkit then true // Force minting on yaci-devkit
+                        // Enable minting for all providers that need it
+                        if isYaciDevkit then true // Force minting on yaci-devkit
                         else config.bob.minting.map(_.enabled).getOrElse(false)
                     )
-
-                if isMockProvider && config.bob.minting.exists(_.enabled) then {
-                    println("[Test] Skipping token minting for mock provider (CI mode)")
-                }
                 if isYaciDevkit then {
                     println(
                       "[Test] Forcing token minting for yaci-devkit (no pre-funded native assets)"
@@ -613,7 +609,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                     import cosmex.util.submitAndWait
 
-                    provider.submitAndWait(signedMintTx, maxAttempts = 60, delayMs = 1000) match {
+                    provider.submitAndWait(signedMintTx, maxAttempts = 180, delayMs = 1000) match {
                         case Right(_) =>
                             println(
                               s"[Bob - Preliminary] ✓ Minting transaction confirmed: ${signedMintTx.id.toHex.take(16)}..."

@@ -20,7 +20,8 @@ class CosmexTransactions(
     private val network = env.network
     val protocolVersion = env.protocolParams.protocolVersion.major
     // Enable error traces for debugging script failures
-    private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams, generateErrorTraces = true)
+    private val cosmexValidator =
+        CosmexContract.mkCosmexProgram(exchangeParams, generateErrorTraces = true)
     val script = Script.PlutusV3(cosmexValidator.cborByteString) // Public for debugging
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
@@ -286,7 +287,9 @@ class CosmexTransactions(
         val validityEndInstant = contestStartTime.plusSeconds(1)
         val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
         val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
-        println(s"[contestedClose] Round-trip: ${validityEndInstant.toEpochMilli} -> slot $validityEndSlot -> $validityEnd")
+        println(
+          s"[contestedClose] Round-trip: ${validityEndInstant.toEpochMilli} -> slot $validityEndSlot -> $validityEnd"
+        )
         val newChannelState = OnChainChannelState.SnapshotContestState(
           contestSnapshot = clientState.latestSnapshot.signedSnapshot,
           contestSnapshotStart = validityEnd,
@@ -308,7 +311,9 @@ class CosmexTransactions(
         println(s"[contestedClose] addrKeyHash for signing: $addrKeyHash")
         println(s"[contestedClose] Spending UTxO ref: ${clientState.channelRef}")
         println(s"[contestedClose] Snapshot clientTxOutRef: ${currentOnChainState.clientTxOutRef}")
-        println(s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}")
+        println(
+          s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}"
+        )
         println(s"[contestedClose] Validity: $contestStartTime to $validityEndInstant")
         println(s"[contestedClose] contestSnapshotStart in datum: $validityEnd")
         println(s"[contestedClose] Script address: $scriptAddress")
@@ -411,9 +416,11 @@ class CosmexTransactions(
                 throw new RuntimeException(s"Rebalance transaction build failed: $error")
     }
 
-    /** Builds a timeout transaction that transitions a channel from SnapshotContestState to the next state.
+    /** Builds a timeout transaction that transitions a channel from SnapshotContestState to the
+      * next state.
       *
-      * After the contestation period expires, anyone can submit this transaction to advance the state:
+      * After the contestation period expires, anyone can submit this transaction to advance the
+      * state:
       *   - If no orders: SnapshotContestState → PayoutState
       *   - If orders exist: SnapshotContestState → TradesContestState
       *
@@ -448,7 +455,8 @@ class CosmexTransactions(
         val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
 
         // Get client address for fee sponsorship (scripts can't sponsor transactions)
-        val clientAddress = Address(network, Credential.KeyHash(AddrKeyHash(currentState.clientPkh.hash)))
+        val clientAddress =
+            Address(network, Credential.KeyHash(AddrKeyHash(currentState.clientPkh.hash)))
 
         // Round-trip through slot conversion to match validator computation
         // The validator uses validRange(range)._2 for TradesContestState
@@ -470,10 +478,12 @@ class CosmexTransactions(
                       tradingState.tsExchangeBalance
                     )
                 else
-                    println(s"[timeout] going to TradesContestState with tradeContestStart=$validityEnd")
+                    println(
+                      s"[timeout] going to TradesContestState with tradeContestStart=$validityEnd"
+                    )
                     OnChainChannelState.TradesContestState(
                       tradingState,
-                      validityEnd  // Use round-tripped validity end to match validator
+                      validityEnd // Use round-tripped validity end to match validator
                     )
             case OnChainChannelState.TradesContestState(tradingState, _) =>
                 println(s"[timeout] going from TradesContestState to PayoutState")
@@ -606,8 +616,8 @@ class CosmexTransactions(
                 .transaction
     }
 
-    /** Compute element-wise minimum of two Values.
-      * For each asset in `a`, takes the minimum of its amount and the corresponding amount in `b`.
+    /** Compute element-wise minimum of two Values. For each asset in `a`, takes the minimum of its
+      * amount and the corresponding amount in `b`.
       */
     private def minValue(
         a: scalus.ledger.api.v3.Value,

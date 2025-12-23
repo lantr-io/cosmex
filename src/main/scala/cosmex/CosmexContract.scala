@@ -11,7 +11,8 @@ object CosmexContract {
     private val compiledValidator = Compiler.compile(CosmexValidator.validate)
 
     def mkCosmexProgram(params: ExchangeParams, generateErrorTraces: Boolean = false): Program = {
-        val program = compiledValidator.toUplcOptimized(generateErrorTraces = generateErrorTraces).plutusV3
+        val program =
+            compiledValidator.toUplcOptimized(generateErrorTraces = generateErrorTraces).plutusV3
         val uplcProgram = program $ params.toData
         uplcProgram
     }

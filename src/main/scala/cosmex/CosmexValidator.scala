@@ -193,9 +193,9 @@ object CosmexValidator extends DataParameterizedValidator {
     def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash): Boolean =
         List.exists(signatories)(k.hash === _.hash)
 
-    /** Compute element-wise minimum of two Values.
-      * For each asset in `a`, takes the minimum of its amount and the corresponding amount in `b`.
-      * Assets only in `b` are treated as 0 in `a`, so they don't appear in the result.
+    /** Compute element-wise minimum of two Values. For each asset in `a`, takes the minimum of its
+      * amount and the corresponding amount in `b`. Assets only in `b` are treated as 0 in `a`, so
+      * they don't appear in the result.
       */
     def minValue(a: Value, b: Value): Value = {
         val minAssets = a.flatten.filterMap { case (policyId, tokenName, amountA) =>
@@ -353,7 +353,9 @@ object CosmexValidator extends DataParameterizedValidator {
                         if validSnapshot && balanced && clientSigned && exchangeSigned then true
                         else {
                             trace("handleClose: contested close path")(())
-                            trace("handleClose: contestSnapshotStart from validRange")(contestSnapshotStart)
+                            trace("handleClose: contestSnapshotStart from validRange")(
+                              contestSnapshotStart
+                            )
                             val newChannelState =
                                 OnChainChannelState.SnapshotContestState(
                                   contestSnapshot = signedSnapshot,
@@ -679,9 +681,11 @@ object CosmexValidator extends DataParameterizedValidator {
         ownTxInResolvedTxOut match
             case TxOut(ownInputAddress, ownInputValue, _, _) =>
                 // Check if client is owed all the funds
-                val clientOwnsAll = clientBalance === ownInputValue && exchangeBalance === Value.zero
+                val clientOwnsAll =
+                    clientBalance === ownInputValue && exchangeBalance === Value.zero
                 // Check if exchange is owed all the funds
-                val exchangeOwnsAll = exchangeBalance === ownInputValue && clientBalance === Value.zero
+                val exchangeOwnsAll =
+                    exchangeBalance === ownInputValue && clientBalance === Value.zero
                 if clientOwnsAll then
                     // Client takes all funds - output should go to client
                     // Note: We check ownOutput which uses input index to find output
@@ -693,11 +697,13 @@ object CosmexValidator extends DataParameterizedValidator {
                                 case Credential.PubKeyCredential(hash) =>
                                     trace("handlePayoutPayout: checking client hash")(())
                                     val hashMatch = hash.hash === state.clientPkh.hash
-                                    if hashMatch then trace("hashMatch: TRUE")(()) else trace("hashMatch: FALSE")(())
+                                    if hashMatch then trace("hashMatch: TRUE")(())
+                                    else trace("hashMatch: FALSE")(())
                                     // For full payout, verify client receives non-zero value
                                     // Exact amount verification is done by client before signing
                                     val valueNonZero = txOutValue.isPositive
-                                    if valueNonZero then trace("valueNonZero: TRUE")(()) else trace("valueNonZero: FALSE")(())
+                                    if valueNonZero then trace("valueNonZero: TRUE")(())
+                                    else trace("valueNonZero: FALSE")(())
                                     if hashMatch && valueNonZero
                                     then true
                                     else fail("Invalid payout: client should receive all funds")

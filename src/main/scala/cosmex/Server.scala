@@ -479,20 +479,24 @@ class Server(
 
                 // Calculate the value locked by this order
                 val LimitOrder((base, quote), orderAmount, orderPrice) = order
-                val lockedValue = if orderAmount < 0 then
-                    // Sell order: lock base asset (absolute value)
-                    CosmexValidator.assetClassValue(base, -orderAmount)
-                else
-                    // Buy order: lock quote asset (amount * price / PRICE_SCALE)
-                    CosmexValidator.assetClassValue(quote, orderAmount * orderPrice / CosmexValidator.PRICE_SCALE)
+                val lockedValue =
+                    if orderAmount < 0 then
+                        // Sell order: lock base asset (absolute value)
+                        CosmexValidator.assetClassValue(base, -orderAmount)
+                    else
+                        // Buy order: lock quote asset (amount * price / PRICE_SCALE)
+                        CosmexValidator.assetClassValue(
+                          quote,
+                          orderAmount * orderPrice / CosmexValidator.PRICE_SCALE
+                        )
 
                 // Reduce client's free balance by the locked amount
                 val newClientBalance = currentTradingState.tsClientBalance - lockedValue
 
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
                 val tradingStateWithOrder = currentTradingState.copy(
-                    tsClientBalance = newClientBalance,
-                    tsOrders = newOrders
+                  tsClientBalance = newClientBalance,
+                  tsOrders = newOrders
                 )
 
                 // Register order owner BEFORE matching so notifications can be sent
@@ -603,20 +607,24 @@ class Server(
                 val LimitOrder((base, quote), orderAmount, orderPrice) = order
 
                 // Calculate the value that was locked by this order (to restore it)
-                val lockedValue = if orderAmount < 0 then
-                    // Sell order: base asset was locked (absolute value)
-                    CosmexValidator.assetClassValue(base, -orderAmount)
-                else
-                    // Buy order: quote asset was locked
-                    CosmexValidator.assetClassValue(quote, orderAmount * orderPrice / CosmexValidator.PRICE_SCALE)
+                val lockedValue =
+                    if orderAmount < 0 then
+                        // Sell order: base asset was locked (absolute value)
+                        CosmexValidator.assetClassValue(base, -orderAmount)
+                    else
+                        // Buy order: quote asset was locked
+                        CosmexValidator.assetClassValue(
+                          quote,
+                          orderAmount * orderPrice / CosmexValidator.PRICE_SCALE
+                        )
 
                 // Restore client's free balance
                 val newClientBalance = currentTradingState.tsClientBalance + lockedValue
 
                 val newOrders = AssocMap.delete(currentTradingState.tsOrders)(orderId)
                 val newTradingState = currentTradingState.copy(
-                    tsClientBalance = newClientBalance,
-                    tsOrders = newOrders
+                  tsClientBalance = newClientBalance,
+                  tsOrders = newOrders
                 )
 
                 var orderBookUpdated = false
