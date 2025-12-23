@@ -3,7 +3,7 @@ package cosmex.demo
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
-import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, Server}
+import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, OnChainChannelState, OnChainState, Server}
 import ox.*
 import scalus.builtin.ByteString
 import scalus.cardano.address.Address
@@ -16,6 +16,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.StdIn
 import scala.util.{Failure, Success, Try}
 import scalus.utils.await
+import scalus.cardano.ledger.DatumOption
+import java.time.Instant
 
 /** Interactive command-line demo for COSMEX
   *
@@ -986,6 +988,300 @@ object InteractiveDemo {
                     }
                 }
 
+                // ============================================================
+                // Contested Close Path (unilateral, client submits directly)
+                // Flow: contested-close -> timeout -> payout
+                // ============================================================
+
+                def contestedClose(): Unit = {
+                    if !isConnected then {
+                        println("[ContestedClose] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    clientState match {
+                        case None =>
+                            println("[ContestedClose] ERROR: No client state available!")
+                            return
+                        case Some(state) =>
+                            println(s"\n[ContestedClose] Initiating contested close...")
+                            println(s"[ContestedClose] Channel ref: ${state.channelRef}")
+                            println(
+                              s"[ContestedClose] This will start the contestation period."
+                            )
+
+                            Try {
+                                val tx = txbuilder.contestedClose(
+                                  provider,
+                                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
+                                  state,
+                                  Instant.now()
+                                )
+                                println(
+                                  s"[ContestedClose] Transaction built: ${tx.id.toHex.take(16)}..."
+                                )
+
+                                // Submit directly to blockchain (unilateral action)
+                                provider.submit(tx).await() match {
+                                    case Right(txHash) =>
+                                        println(
+                                          s"[ContestedClose] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                        )
+                                        println(
+                                          s"[ContestedClose] Channel is now in SnapshotContestState."
+                                        )
+                                        println(
+                                          s"[ContestedClose] After the contest period, use 'timeout' to advance."
+                                        )
+
+                                        // Update channel ref to the new UTxO
+                                        val newChannelRef = TransactionInput(txHash, 0)
+                                        clientState = Some(state.copy(channelRef = newChannelRef))
+                                    case Left(error) =>
+                                        println(
+                                          s"[ContestedClose] ERROR: Transaction submission failed: $error"
+                                        )
+                                }
+                            } match {
+                                case Success(_) => ()
+                                case Failure(e) =>
+                                    println(
+                                      s"[ContestedClose] ERROR: ${e.getMessage}"
+                                    )
+                                    e.printStackTrace()
+                            }
+                    }
+                }
+
+                def timeout(): Unit = {
+                    if !isConnected then {
+                        println("[Timeout] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    clientState match {
+                        case None =>
+                            println("[Timeout] ERROR: No client state available!")
+                            return
+                        case Some(state) =>
+                            println(s"\n[Timeout] Advancing channel state after contest period...")
+                            println(s"[Timeout] Channel ref: ${state.channelRef}")
+
+                            Try {
+                                // Fetch the channel UTxO and extract on-chain state
+                                val channelUtxo = provider
+                                    .findUtxo(state.channelRef)
+                                    .await()
+                                    .getOrElse(
+                                      throw new RuntimeException(
+                                        s"Channel UTxO not found: ${state.channelRef}"
+                                      )
+                                    )
+
+                                val onChainState = channelUtxo.output.datumOption match {
+                                    case Some(DatumOption.Inline(data)) =>
+                                        data.to[OnChainState]
+                                    case _ =>
+                                        throw new RuntimeException(
+                                          "Expected inline datum on channel UTxO"
+                                        )
+                                }
+
+                                // Check current state
+                                onChainState.channelState match {
+                                    case OnChainChannelState.SnapshotContestState(_, _, _, _) =>
+                                        println(
+                                          s"[Timeout] Channel is in SnapshotContestState, advancing..."
+                                        )
+                                    case OnChainChannelState.TradesContestState(_, _) =>
+                                        println(
+                                          s"[Timeout] Channel is in TradesContestState, advancing..."
+                                        )
+                                    case OnChainChannelState.PayoutState(_, _) =>
+                                        println(
+                                          s"[Timeout] Channel is already in PayoutState. Use 'payout' command."
+                                        )
+                                        return
+                                    case OnChainChannelState.OpenState =>
+                                        println(
+                                          s"[Timeout] Channel is still open. Use 'contested-close' first."
+                                        )
+                                        return
+                                }
+
+                                val tx = txbuilder.timeout(
+                                  provider,
+                                  state.channelRef,
+                                  onChainState,
+                                  Instant.now()
+                                )
+                                println(
+                                  s"[Timeout] Transaction built: ${tx.id.toHex.take(16)}..."
+                                )
+
+                                provider.submit(tx).await() match {
+                                    case Right(txHash) =>
+                                        println(
+                                          s"[Timeout] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                        )
+
+                                        // Update channel ref
+                                        val newChannelRef = TransactionInput(txHash, 0)
+                                        clientState = Some(state.copy(channelRef = newChannelRef))
+
+                                        // Fetch and display new state
+                                        val newUtxo = provider.findUtxo(newChannelRef).await()
+                                        newUtxo.foreach { utxo =>
+                                            utxo.output.datumOption match {
+                                                case Some(DatumOption.Inline(data)) =>
+                                                    val newState = data.to[OnChainState]
+                                                    newState.channelState match {
+                                                        case OnChainChannelState.PayoutState(cb, _) =>
+                                                            val adaBalance = cb.quantityOf(
+                                                              scalus.builtin.ByteString.empty,
+                                                              scalus.builtin.ByteString.empty
+                                                            ).toLong
+                                                            println(
+                                                              s"[Timeout] Channel is now in PayoutState."
+                                                            )
+                                                            println(
+                                                              s"[Timeout] Client balance: ${adaBalance / 1_000_000} ADA"
+                                                            )
+                                                            println(
+                                                              s"[Timeout] Use 'payout' to withdraw your funds."
+                                                            )
+                                                        case OnChainChannelState.TradesContestState(_, _) =>
+                                                            println(
+                                                              s"[Timeout] Channel is now in TradesContestState."
+                                                            )
+                                                            println(
+                                                              s"[Timeout] Run 'timeout' again after contest period."
+                                                            )
+                                                        case _ =>
+                                                            println(
+                                                              s"[Timeout] New state: ${newState.channelState}"
+                                                            )
+                                                    }
+                                                case _ => ()
+                                            }
+                                        }
+                                    case Left(error) =>
+                                        println(
+                                          s"[Timeout] ERROR: Transaction submission failed: $error"
+                                        )
+                                }
+                            } match {
+                                case Success(_) => ()
+                                case Failure(e) =>
+                                    println(s"[Timeout] ERROR: ${e.getMessage}")
+                                    e.printStackTrace()
+                            }
+                    }
+                }
+
+                def payout(): Unit = {
+                    if !isConnected then {
+                        println("[Payout] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    clientState match {
+                        case None =>
+                            println("[Payout] ERROR: No client state available!")
+                            return
+                        case Some(state) =>
+                            println(s"\n[Payout] Withdrawing funds from channel...")
+                            println(s"[Payout] Channel ref: ${state.channelRef}")
+
+                            Try {
+                                // Fetch the channel UTxO and extract on-chain state
+                                val channelUtxo = provider
+                                    .findUtxo(state.channelRef)
+                                    .await()
+                                    .getOrElse(
+                                      throw new RuntimeException(
+                                        s"Channel UTxO not found: ${state.channelRef}"
+                                      )
+                                    )
+
+                                val onChainState = channelUtxo.output.datumOption match {
+                                    case Some(DatumOption.Inline(data)) =>
+                                        data.to[OnChainState]
+                                    case _ =>
+                                        throw new RuntimeException(
+                                          "Expected inline datum on channel UTxO"
+                                        )
+                                }
+
+                                // Check we're in PayoutState
+                                onChainState.channelState match {
+                                    case OnChainChannelState.PayoutState(clientBalance, _) =>
+                                        val adaBalance = clientBalance.quantityOf(
+                                          scalus.builtin.ByteString.empty,
+                                          scalus.builtin.ByteString.empty
+                                        ).toLong
+                                        println(
+                                          s"[Payout] Client balance to withdraw: ${adaBalance / 1_000_000} ADA"
+                                        )
+                                    case OnChainChannelState.SnapshotContestState(_, _, _, _) =>
+                                        println(
+                                          s"[Payout] ERROR: Channel is in SnapshotContestState."
+                                        )
+                                        println(
+                                          s"[Payout] Use 'timeout' to advance to PayoutState first."
+                                        )
+                                        return
+                                    case OnChainChannelState.TradesContestState(_, _) =>
+                                        println(
+                                          s"[Payout] ERROR: Channel is in TradesContestState."
+                                        )
+                                        println(
+                                          s"[Payout] Use 'timeout' to advance to PayoutState first."
+                                        )
+                                        return
+                                    case OnChainChannelState.OpenState =>
+                                        println(s"[Payout] ERROR: Channel is still open.")
+                                        println(
+                                          s"[Payout] Use 'close' for graceful close or 'contested-close' for unilateral close."
+                                        )
+                                        return
+                                }
+
+                                val tx = txbuilder.payout(
+                                  provider,
+                                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
+                                  clientAddress,
+                                  state.channelRef,
+                                  onChainState
+                                )
+                                println(
+                                  s"[Payout] Transaction built: ${tx.id.toHex.take(16)}..."
+                                )
+
+                                provider.submit(tx).await() match {
+                                    case Right(txHash) =>
+                                        println(
+                                          s"[Payout] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                        )
+                                        println(s"[Payout] ✓ Funds have been returned to your wallet!")
+
+                                        // Channel is now closed
+                                        isConnected = false
+                                        clientState = None
+                                    case Left(error) =>
+                                        println(
+                                          s"[Payout] ERROR: Transaction submission failed: $error"
+                                        )
+                                }
+                            } match {
+                                case Success(_) => ()
+                                case Failure(e) =>
+                                    println(s"[Payout] ERROR: ${e.getMessage}")
+                                    e.printStackTrace()
+                            }
+                    }
+                }
+
                 // Main command loop
                 println(s"\n${"=" * 60}")
                 println(s"$partyName's Trading Terminal")
@@ -1002,7 +1298,10 @@ object InteractiveDemo {
                 println("  assets                      - Show available assets for trading")
                 println("  buy <base> <quote> <quantity> <price>   - Buy base for quote")
                 println("  sell <base> <quote> <quantity> <price>  - Sell base for quote")
-                println("  close                       - Close the channel and withdraw funds")
+                println("  close                       - Close the channel (graceful, cooperative)")
+                println("  contested-close             - Initiate unilateral close (starts contest)")
+                println("  timeout                     - Advance state after contest period")
+                println("  payout                      - Withdraw funds (after contested close)")
                 println("  help                        - Show this help")
                 println("  quit                        - Exit the demo")
                 println()
@@ -1410,6 +1709,15 @@ object InteractiveDemo {
                             case Some("close") =>
                                 closeChannel()
 
+                            case Some("contested-close") =>
+                                contestedClose()
+
+                            case Some("timeout") =>
+                                timeout()
+
+                            case Some("payout") =>
+                                payout()
+
                             case Some("help") =>
                                 println("\nAvailable commands:")
                                 println(
@@ -1437,7 +1745,16 @@ object InteractiveDemo {
                                   "  sell <base> <quote> <quantity> <price>           - Sell base for quote"
                                 )
                                 println(
-                                  "  close                                             - Close channel and withdraw funds"
+                                  "  close                                             - Close channel (graceful, cooperative)"
+                                )
+                                println(
+                                  "  contested-close                                   - Initiate unilateral close (starts contest)"
+                                )
+                                println(
+                                  "  timeout                                           - Advance state after contest period"
+                                )
+                                println(
+                                  "  payout                                            - Withdraw funds (after contested close)"
                                 )
                                 println(
                                   "  help                                              - Show this help"
