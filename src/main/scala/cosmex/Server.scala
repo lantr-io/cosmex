@@ -136,7 +136,7 @@ class Server(
     val provider: Provider, // Made public for WebSocket server
     exchangePrivKey: ByteString
 ) {
-    val program = CosmexContract.mkCosmexProgram(exchangeParams)
+    val program = CosmexContract.mkCosmexProgram(exchangeParams, generateErrorTraces = true)
     val script = Script.PlutusV3(program.cborByteString)
     val CosmexScriptAddress = Address(env.network, Credential.ScriptHash(script.scriptHash))
     val CosmexSignKey = exchangePrivKey
@@ -476,8 +476,24 @@ class Server(
                 val orderId = BigInt(longOrderId)
 
                 import scalus.prelude.AssocMap
+
+                // Calculate the value locked by this order
+                val LimitOrder((base, quote), orderAmount, orderPrice) = order
+                val lockedValue = if orderAmount < 0 then
+                    // Sell order: lock base asset (absolute value)
+                    CosmexValidator.assetClassValue(base, -orderAmount)
+                else
+                    // Buy order: lock quote asset (amount * price / PRICE_SCALE)
+                    CosmexValidator.assetClassValue(quote, orderAmount * orderPrice / CosmexValidator.PRICE_SCALE)
+
+                // Reduce client's free balance by the locked amount
+                val newClientBalance = currentTradingState.tsClientBalance - lockedValue
+
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
-                val tradingStateWithOrder = currentTradingState.copy(tsOrders = newOrders)
+                val tradingStateWithOrder = currentTradingState.copy(
+                    tsClientBalance = newClientBalance,
+                    tsOrders = newOrders
+                )
 
                 // Register order owner BEFORE matching so notifications can be sent
                 orderOwners.put(orderId, clientId)
@@ -577,8 +593,31 @@ class Server(
                 val currentTradingState = currentSnapshot.snapshotTradingState
 
                 import scalus.prelude.AssocMap
+
+                // Find the order to calculate the locked value to restore
+                val orderOpt = currentTradingState.tsOrders.get(orderId)
+                if orderOpt.isEmpty then
+                    return Left((ErrorCode.OrderNotFound, s"Order $orderId not found"))
+
+                val order = orderOpt.get
+                val LimitOrder((base, quote), orderAmount, orderPrice) = order
+
+                // Calculate the value that was locked by this order (to restore it)
+                val lockedValue = if orderAmount < 0 then
+                    // Sell order: base asset was locked (absolute value)
+                    CosmexValidator.assetClassValue(base, -orderAmount)
+                else
+                    // Buy order: quote asset was locked
+                    CosmexValidator.assetClassValue(quote, orderAmount * orderPrice / CosmexValidator.PRICE_SCALE)
+
+                // Restore client's free balance
+                val newClientBalance = currentTradingState.tsClientBalance + lockedValue
+
                 val newOrders = AssocMap.delete(currentTradingState.tsOrders)(orderId)
-                val newTradingState = currentTradingState.copy(tsOrders = newOrders)
+                val newTradingState = currentTradingState.copy(
+                    tsClientBalance = newClientBalance,
+                    tsOrders = newOrders
+                )
 
                 var orderBookUpdated = false
                 while !orderBookUpdated do {

@@ -19,7 +19,8 @@ class CosmexTransactions(
 ) {
     private val network = env.network
     val protocolVersion = env.protocolParams.protocolVersion.major
-    private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams)
+    // Enable error traces for debugging script failures
+    private val cosmexValidator = CosmexContract.mkCosmexProgram(exchangeParams, generateErrorTraces = true)
     val script = Script.PlutusV3(cosmexValidator.cborByteString) // Public for debugging
 
     /** Opens a new channel by depositing funds to the Cosmex script address.
@@ -233,6 +234,102 @@ class CosmexTransactions(
             .transaction
     }
 
+    /** Builds a contested close transaction that initiates the contestation period.
+      *
+      * Unlike graceful close which requires both parties and distributes funds immediately,
+      * contested close only requires the initiating party's signature and transitions to
+      * SnapshotContestState for the contestation period.
+      *
+      * @param provider
+      *   Provider for UTxO lookup
+      * @param clientAccount
+      *   Client account for signing
+      * @param clientState
+      *   Current client state
+      * @param contestStartTime
+      *   When the contestation starts (for validity window and state datum)
+      * @return
+      *   Transaction that transitions channel to SnapshotContestState
+      */
+    def contestedClose(
+        provider: Provider,
+        clientAccount: Account,
+        clientState: ClientState,
+        contestStartTime: Instant
+    ): Transaction = {
+        val channelUtxo = provider
+            .findUtxo(clientState.channelRef)
+            .await()
+            .getOrElse(
+              throw new RuntimeException(
+                s"Channel UTxO not found for channelRef: ${clientState.channelRef}"
+              )
+            )
+
+        // Extract the on-chain state from datum to get the correct clientPkh
+        val currentOnChainState = channelUtxo.output.datumOption match {
+            case Some(DatumOption.Inline(data)) =>
+                data.to[OnChainState]
+            case _ =>
+                throw new RuntimeException("Expected inline datum on channel UTxO")
+        }
+
+        // Use the client's key hash from the on-chain state for consistency
+        val addrKeyHash = AddrKeyHash(currentOnChainState.clientPkh.hash)
+
+        val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+        val spendingTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(clientState.channelRef)
+
+        // Build the new state with SnapshotContestState
+        // Note: contestSnapshotStart must match validRange(range)._2 (end of validity range)
+        // We use a short validity window (1 second) so timeout tests can run quickly
+        val validityEndInstant = contestStartTime.plusSeconds(1)
+        val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
+        val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
+        println(s"[contestedClose] Round-trip: ${validityEndInstant.toEpochMilli} -> slot $validityEndSlot -> $validityEnd")
+        val newChannelState = OnChainChannelState.SnapshotContestState(
+          contestSnapshot = clientState.latestSnapshot.signedSnapshot,
+          contestSnapshotStart = validityEnd,
+          contestInitiator = Party.Client,
+          contestChannelTxOutRef = spendingTxOutRef
+        )
+
+        val newState = OnChainState(
+          currentOnChainState.clientPkh,
+          currentOnChainState.clientPubKey,
+          currentOnChainState.clientTxOutRef,
+          newChannelState
+        )
+
+        // Get client's address for fee sponsorship
+        val clientAddress = Address(network, Credential.KeyHash(addrKeyHash))
+
+        println(s"[contestedClose] On-chain clientPkh: ${currentOnChainState.clientPkh}")
+        println(s"[contestedClose] addrKeyHash for signing: $addrKeyHash")
+        println(s"[contestedClose] Spending UTxO ref: ${clientState.channelRef}")
+        println(s"[contestedClose] Snapshot clientTxOutRef: ${currentOnChainState.clientTxOutRef}")
+        println(s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}")
+        println(s"[contestedClose] Validity: $contestStartTime to $validityEndInstant")
+        println(s"[contestedClose] contestSnapshotStart in datum: $validityEnd")
+        println(s"[contestedClose] Script address: $scriptAddress")
+        println(s"[contestedClose] newState channelState: ${newState.channelState}")
+
+        TxBuilder(env)
+            .spend(
+              channelUtxo,
+              Action.Close(Party.Client, clientState.latestSnapshot),
+              script,
+              Set(addrKeyHash) // Only client signs - NOT exchange
+            )
+            .payTo(scriptAddress, channelUtxo.output.value, newState.toData)
+            .validFrom(contestStartTime)
+            .validTo(validityEndInstant)
+            .complete(provider, sponsor = clientAddress)
+            .await()
+            .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
+            .transaction
+    }
+
     /** Build a rebalance transaction that updates multiple channels to match their snapshot states.
       *
       * This transaction:
@@ -350,23 +447,40 @@ class CosmexTransactions(
 
         val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
 
+        // Get client address for fee sponsorship (scripts can't sponsor transactions)
+        val clientAddress = Address(network, Credential.KeyHash(AddrKeyHash(currentState.clientPkh.hash)))
+
+        // Round-trip through slot conversion to match validator computation
+        // The validator uses validRange(range)._2 for TradesContestState
+        val validityEndInstant = validityStart.plusSeconds(600)
+        val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
+        val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
+
+        println(s"[timeout] validityStart: ${validityStart.toEpochMilli}")
+        println(s"[timeout] validityEnd (round-tripped): $validityEnd")
+
         // Compute the new state based on current state
         val newChannelState = currentState.channelState match {
             case OnChainChannelState.SnapshotContestState(contestSnapshot, _, _, _) =>
                 val tradingState = contestSnapshot.snapshotTradingState
                 if scalus.prelude.List.isEmpty(tradingState.tsOrders.toList) then
+                    println(s"[timeout] going to PayoutState")
                     OnChainChannelState.PayoutState(
                       tradingState.tsClientBalance,
                       tradingState.tsExchangeBalance
                     )
                 else
+                    println(s"[timeout] going to TradesContestState with tradeContestStart=$validityEnd")
                     OnChainChannelState.TradesContestState(
                       tradingState,
-                      validityStart.toEpochMilli
+                      validityEnd  // Use round-tripped validity end to match validator
                     )
             case OnChainChannelState.TradesContestState(tradingState, _) =>
+                println(s"[timeout] going from TradesContestState to PayoutState")
+                // When orders expire, locked value returns to balances
+                val lockedValue = CosmexValidator.lockedInOrders(tradingState.tsOrders)
                 OnChainChannelState.PayoutState(
-                  tradingState.tsClientBalance,
+                  tradingState.tsClientBalance + lockedValue,
                   tradingState.tsExchangeBalance
                 )
             case _ =>
@@ -382,12 +496,14 @@ class CosmexTransactions(
           newChannelState
         )
 
+        println(s"[timeout] newState: $newState")
+
         TxBuilder(env)
             .spend(channelUtxo, Action.Timeout, script, Set.empty)
             .payTo(scriptAddress, channelUtxo.output.value, newState.toData)
             .validFrom(validityStart)
-            .validTo(validityStart.plusSeconds(600))
-            .complete(provider, sponsor = scriptAddress)
+            .validTo(validityEndInstant)
+            .complete(provider, sponsor = clientAddress)
             .await()
             .transaction
     }
@@ -442,9 +558,11 @@ class CosmexTransactions(
             exchangeBalance == scalus.ledger.api.v3.Value.zero
 
         if isFilled then
-            // Full payout - all funds go to exchange address (per validator logic when filled)
-            // This means exchange owns the remaining funds after client balance is 0
-            TxBuilder(env)
+            // Full payout - client takes all funds, channel closes completely
+            println(s"[payout] Full payout - channelUtxo.output.value: ${channelUtxo.output.value}")
+            println(s"[payout] payoutAddress: $payoutAddress")
+
+            val tx = TxBuilder(env)
                 .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
                 .payTo(payoutAddress, channelUtxo.output.value)
                 .validFrom(Instant.now())
@@ -453,6 +571,14 @@ class CosmexTransactions(
                 .await()
                 .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
                 .transaction
+
+            println(s"[payout] Transaction inputs: ${tx.body.value.inputs.toSeq}")
+            println(s"[payout] Transaction outputs:")
+            tx.body.value.outputs.zipWithIndex.foreach { case (out, idx) =>
+                println(s"  [$idx] address: ${out.value.address}, value: ${out.value.value}")
+            }
+
+            tx
         else
             // Partial payout - compute available for payment
             val availableForPayment = minValue(clientBalance, ownInputValue)

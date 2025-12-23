@@ -959,4 +959,473 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println("Graceful close test passed - payout functionality works via graceful close path")
     }
 
+    // Helper to extract OnChainState from UTxO datum
+    private def extractDatum(utxo: Utxo): OnChainState = {
+        utxo.output.datumOption match {
+            case Some(DatumOption.Inline(data)) =>
+                data.to[OnChainState]
+            case _ =>
+                throw new RuntimeException("Expected inline datum on channel UTxO")
+        }
+    }
+
+    test("Contested close: Open -> SnapshotContest -> Timeout -> Payout") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+        import scalus.builtin.Data.toData
+        import scalus.cardano.wallet.BloxbeanAccount
+
+        // === STEP 1: OPEN CHANNEL ===
+        val depositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(500)))
+            .await()
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(500L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = depositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount
+        )
+        val openResult = provider.submit(openChannelTx).await()
+        assert(openResult.isRight, s"Open channel failed: $openResult")
+
+        // Get the channel UTxO
+        val channelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(openChannelTx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val channelRef = channelUtxo.input
+        val actualDeposit = channelUtxo.output.value
+
+        // Create snapshot and have both parties sign
+        val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(depositUtxo.input)
+        val initialSnapshot = mkInitialSnapshot(actualDeposit)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+        val bothSignedSnapshot = server.signSnapshot(clientTxOutRef, clientSignedSnapshot)
+
+        val clientState = ClientState(
+          latestSnapshot = bothSignedSnapshot,
+          channelRef = channelRef,
+          lockedValue = actualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
+        )
+
+        // Verify initial state is OpenState
+        val initialDatum = extractDatum(channelUtxo)
+        assert(
+          initialDatum.channelState == OnChainChannelState.OpenState,
+          s"Expected OpenState, got ${initialDatum.channelState}"
+        )
+        println("Step 1: Channel opened successfully in OpenState")
+
+        // === STEP 2: CONTESTED CLOSE ===
+        val contestStart = Instant.now()
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(contestStart.toEpochMilli))
+
+        println(s"Debug: clientTxOutRef used in snapshot signing: $clientTxOutRef")
+        println(s"Debug: snapshot version: ${bothSignedSnapshot.signedSnapshot.snapshotVersion}")
+        println(s"Debug: client signature length: ${bothSignedSnapshot.snapshotClientSignature.bytes.length}")
+        println(s"Debug: exchange signature length: ${bothSignedSnapshot.snapshotExchangeSignature.bytes.length}")
+
+        val contestedCloseTx = try {
+            txbuilder.contestedClose(
+              provider,
+              new BloxbeanAccount(clientAccount),
+              clientState,
+              contestStart
+            )
+        } catch {
+            case e: scalus.cardano.txbuilder.TxBuilderException =>
+                println(s"TxBuilder exception: ${e.getMessage}")
+                var cause = e.getCause
+                while (cause != null) {
+                    println(s"Cause: ${cause.getClass.getName}")
+                    // Look for logs field
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if (logs != null && logs.nonEmpty) {
+                            println(s"  LOGS:")
+                            logs.foreach(log => println(s"    $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException =>
+                    }
+                    cause = cause.getCause
+                }
+                throw e
+        }
+
+        println(s"Debug: Transaction inputs: ${contestedCloseTx.body.value.inputs.toSeq}")
+        println(s"Debug: Transaction outputs: ${contestedCloseTx.body.value.outputs.map(_.value.address)}")
+
+        val closeResult = provider.submit(contestedCloseTx).await()
+        assert(closeResult.isRight, s"Contested close failed: $closeResult")
+
+        // Verify SnapshotContestState
+        val contestUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(contestedCloseTx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val contestDatum = extractDatum(contestUtxo)
+        assert(
+          contestDatum.channelState.isInstanceOf[OnChainChannelState.SnapshotContestState],
+          s"Expected SnapshotContestState, got ${contestDatum.channelState}"
+        )
+        println("Step 2: Channel transitioned to SnapshotContestState")
+
+        // === STEP 3: TIMEOUT -> PayoutState (no orders) ===
+        // Must wait > contestSnapshotStart + contestPeriod (5000ms)
+        // contestSnapshotStart = round-trip(contestStart + 1s), so we need:
+        // validityStart_roundtrip > round-trip(contestStart + 1s) + 5000ms
+        // Using 7000ms to ensure strict inequality after slot truncation
+        val timeAfterContest = contestStart.plusMillis(7000)
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(timeAfterContest.toEpochMilli))
+
+        println(s"Debug: Contest datum state: ${contestDatum.channelState}")
+        println(s"Debug: timeAfterContest: ${timeAfterContest.toEpochMilli}")
+        println(s"Debug: contestStart was: ${contestStart.toEpochMilli}")
+
+        val timeoutTx = try {
+            txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+        } catch {
+            case e: scalus.cardano.txbuilder.TxBuilderException =>
+                println(s"TxBuilder exception during timeout: ${e.getMessage}")
+                var cause = e.getCause
+                while (cause != null) {
+                    println(s"Cause: ${cause.getClass.getName}")
+                    // Look for logs field
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if (logs != null && logs.nonEmpty) {
+                            println(s"  LOGS:")
+                            logs.foreach(log => println(s"    $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException =>
+                    }
+                    cause = cause.getCause
+                }
+                throw e
+        }
+        val timeoutResult = provider.submit(timeoutTx).await()
+        assert(timeoutResult.isRight, s"Timeout failed: $timeoutResult")
+
+        // Verify PayoutState (skips TradesContestState because no orders)
+        val payoutUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(timeoutTx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val payoutDatum = extractDatum(payoutUtxo)
+        assert(
+          payoutDatum.channelState.isInstanceOf[OnChainChannelState.PayoutState],
+          s"Expected PayoutState, got ${payoutDatum.channelState}"
+        )
+        println("Step 3: Channel transitioned to PayoutState (skipped TradesContestState)")
+
+        // === STEP 4: PAYOUT ===
+        println(s"Debug: payoutDatum: $payoutDatum")
+        println(s"Debug: payoutUtxo value: ${payoutUtxo.output.value}")
+
+        val payoutTx = try {
+            txbuilder.payout(
+              provider,
+              new BloxbeanAccount(clientAccount),
+              clientAddress,
+              payoutUtxo.input,
+              payoutDatum
+            )
+        } catch {
+            case e: scalus.cardano.txbuilder.TxBuilderException =>
+                println(s"TxBuilder exception during payout: ${e.getMessage}")
+                var cause = e.getCause
+                while (cause != null) {
+                    println(s"Cause: ${cause.getClass.getName}")
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if (logs != null && logs.nonEmpty) {
+                            println(s"  LOGS:")
+                            logs.foreach(log => println(s"    $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException =>
+                    }
+                    cause = cause.getCause
+                }
+                throw e
+        }
+        val payoutResult = provider.submit(payoutTx).await()
+        assert(payoutResult.isRight, s"Payout failed: $payoutResult")
+
+        // Verify channel closed (UTxO spent)
+        val finalChannelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(payoutTx.id)
+            )
+            .await()
+        assert(finalChannelUtxo.isLeft, "Channel UTxO should be spent after payout")
+
+        println("Step 4: Payout completed - channel closed successfully")
+        println("Full contested close path (no orders) completed: Open -> SnapshotContest -> Timeout -> Payout")
+    }
+
+    test("Contested close with orders: Open -> Order -> SnapshotContest -> TradesContest -> Payout") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+        import scalus.builtin.Data.toData
+        import scalus.cardano.wallet.BloxbeanAccount
+
+        // === STEP 1: OPEN CHANNEL ===
+        val depositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(900)))
+            .await()
+            .toOption
+            .get
+
+        val depositAmount = Value.ada(900L)
+        val openChannelTx = txbuilder.openChannel(
+          clientInput = depositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = depositAmount
+        )
+        val openResult = provider.submit(openChannelTx).await()
+        assert(openResult.isRight, s"Open channel failed: $openResult")
+
+        val channelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(openChannelTx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val channelRef = channelUtxo.input
+        val actualDeposit = channelUtxo.output.value
+
+        val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(depositUtxo.input)
+        val initialSnapshot = mkInitialSnapshot(actualDeposit)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+        val bothSignedSnapshot = server.signSnapshot(clientTxOutRef, clientSignedSnapshot)
+
+        val clientId = ClientId(channelRef)
+        val clientState = ClientState(
+          latestSnapshot = bothSignedSnapshot,
+          channelRef = channelRef,
+          lockedValue = actualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
+        )
+        server.clientStates.put(clientId, clientState)
+        println("Step 1: Channel opened successfully")
+
+        // === STEP 2: CREATE ORDER (adds open order to snapshot) ===
+        val sellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000, // 100 ADA
+          price = 500_000 // 0.50 USDM/ADA
+        )
+        val orderResult = server.handleCreateOrder(clientId, sellOrder)
+        assert(orderResult.isRight, s"Order creation failed: $orderResult")
+
+        // handleCreateOrder returns unsigned snapshot - we need to sign it properly
+        val (_, unsignedSnapshot, _) = orderResult.toOption.get
+        val clientSignedOrderSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, unsignedSnapshot.signedSnapshot)
+        val bothSignedOrderSnapshot = server.signSnapshot(clientTxOutRef, clientSignedOrderSnapshot)
+
+        // Update client state with properly signed snapshot
+        val clientStateWithOrder = server.clientStates.get(clientId).get.copy(
+          latestSnapshot = bothSignedOrderSnapshot
+        )
+        server.clientStates.put(clientId, clientStateWithOrder)
+
+        assert(
+          scalus.prelude.List
+              .nonEmpty(clientStateWithOrder.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders.toList),
+          "Snapshot should contain the order"
+        )
+        println("Step 2: Order created and snapshot signed - contains open order")
+
+        // === STEP 3: CONTESTED CLOSE ===
+        val contestStart = Instant.now()
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(contestStart.toEpochMilli))
+
+        val contestedCloseTx = try {
+            txbuilder.contestedClose(
+              provider,
+              new BloxbeanAccount(clientAccount),
+              clientStateWithOrder,
+              contestStart
+            )
+        } catch {
+            case e: scalus.cardano.txbuilder.TxBuilderException =>
+                println(s"TxBuilder exception during contestedClose: ${e.getMessage}")
+                var cause = e.getCause
+                while (cause != null) {
+                    println(s"Cause: ${cause.getClass.getName}")
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if (logs != null && logs.nonEmpty) {
+                            println(s"  LOGS:")
+                            logs.foreach(log => println(s"    $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException =>
+                    }
+                    cause = cause.getCause
+                }
+                throw e
+        }
+        val closeResult = provider.submit(contestedCloseTx).await()
+        assert(closeResult.isRight, s"Contested close failed: $closeResult")
+
+        val contestUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(contestedCloseTx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val contestDatum = extractDatum(contestUtxo)
+        assert(
+          contestDatum.channelState.isInstanceOf[OnChainChannelState.SnapshotContestState],
+          s"Expected SnapshotContestState, got ${contestDatum.channelState}"
+        )
+        println("Step 3: Channel transitioned to SnapshotContestState")
+
+        // === STEP 4: FIRST TIMEOUT -> TradesContestState (because orders exist) ===
+        // Use 7000ms to ensure timeout condition is met after slot rounding
+        val timeAfterContest = contestStart.plusMillis(7000)
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(timeAfterContest.toEpochMilli))
+
+        val timeout1Tx = try {
+            txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+        } catch {
+            case e: scalus.cardano.txbuilder.TxBuilderException =>
+                println(s"TxBuilder exception during timeout: ${e.getMessage}")
+                var cause = e.getCause
+                while (cause != null) {
+                    println(s"Cause: ${cause.getClass.getName}")
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if (logs != null && logs.nonEmpty) {
+                            println(s"  LOGS:")
+                            logs.foreach(log => println(s"    $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException =>
+                    }
+                    cause = cause.getCause
+                }
+                throw e
+        }
+        val timeout1Result = provider.submit(timeout1Tx).await()
+        assert(timeout1Result.isRight, s"First timeout failed: $timeout1Result")
+
+        val tradesContestUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(timeout1Tx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val tradesContestDatum = extractDatum(tradesContestUtxo)
+        assert(
+          tradesContestDatum.channelState.isInstanceOf[OnChainChannelState.TradesContestState],
+          s"Expected TradesContestState, got ${tradesContestDatum.channelState}"
+        )
+        println("Step 4: Channel transitioned to TradesContestState (because orders exist)")
+
+        // === STEP 5: SECOND TIMEOUT -> PayoutState ===
+        // Get the tradeContestStart from the datum to compute correct timeout time
+        val tradeContestStart = tradesContestDatum.channelState match {
+            case OnChainChannelState.TradesContestState(_, tcs) => tcs
+            case _ => throw new RuntimeException("Expected TradesContestState")
+        }
+        // contestationPeriod = 5000ms, add 2000ms buffer
+        val timeAfterTradesContest = Instant.ofEpochMilli((tradeContestStart + 7000).toLong)
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(timeAfterTradesContest.toEpochMilli))
+
+        val timeout2Tx = txbuilder.timeout(
+          provider,
+          tradesContestUtxo.input,
+          tradesContestDatum,
+          timeAfterTradesContest
+        )
+        val timeout2Result = provider.submit(timeout2Tx).await()
+        assert(timeout2Result.isRight, s"Second timeout failed: $timeout2Result")
+
+        val payoutUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(timeout2Tx.id)
+            )
+            .await()
+            .toOption
+            .get
+        val payoutDatum = extractDatum(payoutUtxo)
+        assert(
+          payoutDatum.channelState.isInstanceOf[OnChainChannelState.PayoutState],
+          s"Expected PayoutState, got ${payoutDatum.channelState}"
+        )
+        println("Step 5: Channel transitioned to PayoutState")
+
+        // === STEP 6: PAYOUT ===
+        // Reset slot to current time for payout transaction
+        val payoutTime = Instant.now()
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(payoutTime.toEpochMilli))
+
+        val payoutTx = txbuilder.payout(
+          provider,
+          new BloxbeanAccount(clientAccount),
+          clientAddress,
+          payoutUtxo.input,
+          payoutDatum
+        )
+        val payoutResult = provider.submit(payoutTx).await()
+        assert(payoutResult.isRight, s"Payout failed: $payoutResult")
+
+        val finalChannelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(payoutTx.id)
+            )
+            .await()
+        assert(finalChannelUtxo.isLeft, "Channel UTxO should be spent after payout")
+
+        println("Step 6: Payout completed - channel closed successfully")
+        println(
+          "Full contested close path (with orders) completed: Open -> Order -> SnapshotContest -> TradesContest -> Payout"
+        )
+    }
+
 }

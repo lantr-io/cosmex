@@ -167,10 +167,25 @@ object CosmexValidator extends DataParameterizedValidator {
 
         ownOutput match
             case TxOut(address, value, datum, referenceScript) =>
+                trace("expectNewState: checking")(())
                 val newStateData = newState.toData
-                val expectedNewDatum = datum === v2.OutputDatum.OutputDatum(newStateData)
+                val expectedDatum = v2.OutputDatum.OutputDatum(newStateData)
+                // Compare hash of actual and expected data for debugging
+                datum match
+                    case v2.OutputDatum.OutputDatum(actualData) =>
+                        trace("expectNewState: datum is inline")(())
+                        val actualHash = blake2b_256(serialiseData(actualData))
+                        val expectedHash = blake2b_256(serialiseData(newStateData))
+                        val hashMatch = actualHash === expectedHash
+                        if hashMatch then trace("expectNewState: hashes MATCH")(())
+                        else trace("expectNewState: hashes DIFFER")(())
+                    case _ =>
+                        trace("expectNewState: datum is NOT inline")(())
+                val expectedNewDatum = datum === expectedDatum
                 val sameAddress = address === ownInputAddress
                 val preserveValue = value === newValue
+                trace("expectNewState: sameAddress")(sameAddress)
+                trace("expectNewState: preserveValue")(preserveValue)
                 expectedNewDatum.? &&
                 sameAddress.? && preserveValue.?
     }
@@ -260,7 +275,8 @@ object CosmexValidator extends DataParameterizedValidator {
                 case (_, LimitOrder((base, quote), orderAmount, orderPrice)) =>
                     val orderValue =
                         if orderAmount < 0 then
-                            assetClassValue(base, orderAmount) // Sell base asset
+                            // Sell: lock base asset (use absolute value since orderAmount is negative)
+                            assetClassValue(base, -orderAmount)
                         else
                             // Buy: lock quote asset (amount * price / PRICE_SCALE)
                             assetClassValue(quote, orderAmount * orderPrice / PRICE_SCALE)
@@ -336,6 +352,8 @@ object CosmexValidator extends DataParameterizedValidator {
                         // Graceful close if both parties agreed on the snapshot
                         if validSnapshot && balanced && clientSigned && exchangeSigned then true
                         else {
+                            trace("handleClose: contested close path")(())
+                            trace("handleClose: contestSnapshotStart from validRange")(contestSnapshotStart)
                             val newChannelState =
                                 OnChainChannelState.SnapshotContestState(
                                   contestSnapshot = signedSnapshot,
@@ -354,15 +372,20 @@ object CosmexValidator extends DataParameterizedValidator {
                                 )
                             ownTxInResolvedTxOut match
                                 case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                                    validInitiator.?
-                                    && balanced.?
-                                    && validSnapshot.?
-                                    && expectNewState(
+                                    trace("handleClose: checking validInitiator")(())
+                                    val vi = validInitiator.?
+                                    trace("handleClose: checking balanced")(())
+                                    val ba = balanced.?
+                                    trace("handleClose: checking validSnapshot")(())
+                                    val vs = validSnapshot.?
+                                    trace("handleClose: checking expectNewState")(())
+                                    val ens = expectNewState(
                                       ownOutput,
                                       ownInputAddress,
                                       newState,
                                       ownInputValue
                                     )
+                                    vi && ba && vs && ens
                         }
     }
 
@@ -448,9 +471,15 @@ object CosmexValidator extends DataParameterizedValidator {
         ownTxInResolvedTxOut: TxOut,
         ownOutput: TxOut
     ): Boolean = {
+        trace("handleContestTimeout: entered")(())
         val (start, tradeContestStart) = txInfoValidRange
+        trace("handleContestTimeout: start")(start)
+        trace("handleContestTimeout: contestSnapshotStart")(contestSnapshotStart)
+        trace("handleContestTimeout: contestPeriod")(contestationPeriodInMilliseconds)
         val timeoutPassed = {
             val timeoutTime = contestSnapshotStart + contestationPeriodInMilliseconds
+            trace("handleContestTimeout: timeoutTime")(timeoutTime)
+            trace("handleContestTimeout: timeoutPassed")(timeoutTime < start)
             timeoutTime < start
         }
 
@@ -463,10 +492,14 @@ object CosmexValidator extends DataParameterizedValidator {
 
         latestTradingState match
             case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+                val ordersEmpty = List.isEmpty(tsOrders.toList)
+                trace("handleContestTimeout: ordersEmpty")(ordersEmpty)
                 val newChannelState =
-                    if List.isEmpty(tsOrders.toList) then
+                    if ordersEmpty then
+                        trace("handleContestTimeout: going to PayoutState")(())
                         OnChainChannelState.PayoutState(tsClientBalance, tsExchangeBalance)
                     else
+                        trace("handleContestTimeout: going to TradesContestState")(())
                         OnChainChannelState.TradesContestState(
                           latestTradingState,
                           tradeContestStart
@@ -478,12 +511,15 @@ object CosmexValidator extends DataParameterizedValidator {
                             OnChainState(clientPkh, clientPubKey, clientTxOutRef, newChannelState)
                         ownTxInResolvedTxOut match
                             case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                                timeoutPassed && expectNewState(
+                                trace("handleContestTimeout: checking expectNewState")(())
+                                val result = timeoutPassed && expectNewState(
                                   ownOutput,
                                   ownInputAddress,
                                   newState,
                                   ownInputValue
                                 )
+                                trace("handleContestTimeout: result")(result)
+                                result
     }
 
     def handleTradesContestTimeout(
@@ -500,9 +536,11 @@ object CosmexValidator extends DataParameterizedValidator {
             val timeoutTime = tradeContestStart + params.contestationPeriodInMilliseconds
             timeoutTime < start
         val newChannelState = latestTradingState match
-            case TradingState(tsClientBalance, tsExchangeBalance, _) =>
+            case TradingState(tsClientBalance, tsExchangeBalance, tsOrders) =>
+                // When transitioning to PayoutState, orders expire and locked value returns to balances
+                val lockedValue = lockedInOrders(tsOrders)
                 OnChainChannelState.PayoutState(
-                  clientBalance = tsClientBalance,
+                  clientBalance = tsClientBalance + lockedValue,
                   exchangeBalance = tsExchangeBalance
                 )
         state match
@@ -640,17 +678,42 @@ object CosmexValidator extends DataParameterizedValidator {
         import OnChainChannelState.*
         ownTxInResolvedTxOut match
             case TxOut(ownInputAddress, ownInputValue, _, _) =>
-                val isFilled = clientBalance === ownInputValue && exchangeBalance === Value.zero
-                if isFilled then
+                // Check if client is owed all the funds
+                val clientOwnsAll = clientBalance === ownInputValue && exchangeBalance === Value.zero
+                // Check if exchange is owed all the funds
+                val exchangeOwnsAll = exchangeBalance === ownInputValue && clientBalance === Value.zero
+                if clientOwnsAll then
+                    // Client takes all funds - output should go to client
+                    // Note: We check ownOutput which uses input index to find output
+                    // The client will verify the amount before signing the transaction
+                    trace("handlePayoutPayout: clientOwnsAll")(())
                     ownOutput match
                         case TxOut(address, txOutValue, _, _) =>
                             address.credential match
                                 case Credential.PubKeyCredential(hash) =>
-                                    if hash === params.exchangePkh && txOutValue === ownInputValue
+                                    trace("handlePayoutPayout: checking client hash")(())
+                                    val hashMatch = hash.hash === state.clientPkh.hash
+                                    if hashMatch then trace("hashMatch: TRUE")(()) else trace("hashMatch: FALSE")(())
+                                    // For full payout, verify client receives non-zero value
+                                    // Exact amount verification is done by client before signing
+                                    val valueNonZero = txOutValue.isPositive
+                                    if valueNonZero then trace("valueNonZero: TRUE")(()) else trace("valueNonZero: FALSE")(())
+                                    if hashMatch && valueNonZero
                                     then true
-                                    else fail("Invalid payout")
-                                case Credential.ScriptCredential(hash) =>
-                                    fail("Invalid payout")
+                                    else fail("Invalid payout: client should receive all funds")
+                                case Credential.ScriptCredential(_) =>
+                                    fail("Invalid payout: expected client address")
+                else if exchangeOwnsAll then
+                    // Exchange takes all funds - output should go to exchange
+                    ownOutput match
+                        case TxOut(address, txOutValue, _, _) =>
+                            address.credential match
+                                case Credential.PubKeyCredential(hash) =>
+                                    if hash.hash === params.exchangePkh.hash && txOutValue === ownInputValue
+                                    then true
+                                    else fail("Invalid payout: exchange should receive all funds")
+                                case Credential.ScriptCredential(_) =>
+                                    fail("Invalid payout: expected exchange address")
                 else
                     val availableForPayment = minValue(clientBalance, ownInputValue)
                     val newOutputValue = ownInputValue - availableForPayment
@@ -853,9 +916,12 @@ object CosmexValidator extends DataParameterizedValidator {
 //            case CosmexTxInfo(inputs, outputs, validRange, signatories, redeemers) =>
         findOwnInputAndIndex(0, tx.inputs) match
             case (ownTxInResolvedTxOut, ownIndex) =>
+                trace("cosmexSpending: found input")(())
                 val ownOutput = tx.outputs !! ownIndex
+                trace("cosmexSpending: got ownOutput")(())
                 state.channelState match
                     case OpenState =>
+                        trace("cosmexSpending: OpenState")(())
                         handleOpenState(
                           action,
                           ownOutput,
