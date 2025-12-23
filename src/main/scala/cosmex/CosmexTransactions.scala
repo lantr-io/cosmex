@@ -313,4 +313,189 @@ class CosmexTransactions(
             case Left(error) =>
                 throw new RuntimeException(s"Rebalance transaction build failed: $error")
     }
+
+    /** Builds a timeout transaction that transitions a channel from SnapshotContestState to the next state.
+      *
+      * After the contestation period expires, anyone can submit this transaction to advance the state:
+      *   - If no orders: SnapshotContestState → PayoutState
+      *   - If orders exist: SnapshotContestState → TradesContestState
+      *
+      * This is a permissionless action - no signatures required after the timeout period.
+      *
+      * @param provider
+      *   The Provider to use for fetching UTxOs
+      * @param channelRef
+      *   The TransactionInput pointing to the channel UTxO
+      * @param currentState
+      *   The current OnChainState (must be in SnapshotContestState)
+      * @param validityStart
+      *   The validity start time (must be after contestation deadline)
+      * @return
+      *   An unsigned Transaction that transitions the channel state
+      */
+    def timeout(
+        provider: Provider,
+        channelRef: TransactionInput,
+        currentState: OnChainState,
+        validityStart: Instant
+    ): Transaction = {
+        val channelUtxo = provider
+            .findUtxo(channelRef)
+            .await()
+            .getOrElse(
+              throw new RuntimeException(
+                s"Channel UTxO not found for channelRef: $channelRef"
+              )
+            )
+
+        val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+
+        // Compute the new state based on current state
+        val newChannelState = currentState.channelState match {
+            case OnChainChannelState.SnapshotContestState(contestSnapshot, _, _, _) =>
+                val tradingState = contestSnapshot.snapshotTradingState
+                if scalus.prelude.List.isEmpty(tradingState.tsOrders.toList) then
+                    OnChainChannelState.PayoutState(
+                      tradingState.tsClientBalance,
+                      tradingState.tsExchangeBalance
+                    )
+                else
+                    OnChainChannelState.TradesContestState(
+                      tradingState,
+                      validityStart.toEpochMilli
+                    )
+            case OnChainChannelState.TradesContestState(tradingState, _) =>
+                OnChainChannelState.PayoutState(
+                  tradingState.tsClientBalance,
+                  tradingState.tsExchangeBalance
+                )
+            case _ =>
+                throw new RuntimeException(
+                  s"Cannot timeout from state: ${currentState.channelState}"
+                )
+        }
+
+        val newState = OnChainState(
+          currentState.clientPkh,
+          currentState.clientPubKey,
+          currentState.clientTxOutRef,
+          newChannelState
+        )
+
+        TxBuilder(env)
+            .spend(channelUtxo, Action.Timeout, script, Set.empty)
+            .payTo(scriptAddress, channelUtxo.output.value, newState.toData)
+            .validFrom(validityStart)
+            .validTo(validityStart.plusSeconds(600))
+            .complete(provider, sponsor = scriptAddress)
+            .await()
+            .transaction
+    }
+
+    /** Builds a payout transaction that allows a client to withdraw their funds from PayoutState.
+      *
+      * @param provider
+      *   The Provider to use for fetching UTxOs
+      * @param clientAccount
+      *   The client's account for signing
+      * @param payoutAddress
+      *   The address to send the client's funds to
+      * @param channelRef
+      *   The TransactionInput pointing to the channel UTxO
+      * @param currentState
+      *   The current OnChainState (must be in PayoutState)
+      * @return
+      *   A signed Transaction that pays out the client's balance
+      */
+    def payout(
+        provider: Provider,
+        clientAccount: Account,
+        payoutAddress: Address,
+        channelRef: TransactionInput,
+        currentState: OnChainState
+    ): Transaction = {
+        val channelUtxo = provider
+            .findUtxo(channelRef)
+            .await()
+            .getOrElse(
+              throw new RuntimeException(
+                s"Channel UTxO not found for channelRef: $channelRef"
+              )
+            )
+
+        val (clientBalance, exchangeBalance) = currentState.channelState match {
+            case OnChainChannelState.PayoutState(cb, eb) => (cb, eb)
+            case _ =>
+                throw new RuntimeException(
+                  s"Cannot payout from state: ${currentState.channelState}"
+                )
+        }
+
+        val publicKey = ByteString.fromArray(clientAccount.paymentKeyPair.publicKeyBytes.take(32))
+        val pubKeyHash = platform.blake2b_224(publicKey)
+        val addrKeyHash = AddrKeyHash(pubKeyHash)
+
+        val ownInputValue = LedgerToPlutusTranslation.getValue(channelUtxo.output.value)
+
+        // Check if this is a full payout (client gets all, exchange balance is zero)
+        val isFilled = clientBalance == ownInputValue &&
+            exchangeBalance == scalus.ledger.api.v3.Value.zero
+
+        if isFilled then
+            // Full payout - all funds go to exchange address (per validator logic when filled)
+            // This means exchange owns the remaining funds after client balance is 0
+            TxBuilder(env)
+                .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
+                .payTo(payoutAddress, channelUtxo.output.value)
+                .validFrom(Instant.now())
+                .validTo(Instant.now().plusSeconds(600))
+                .complete(provider, sponsor = payoutAddress)
+                .await()
+                .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
+                .transaction
+        else
+            // Partial payout - compute available for payment
+            val availableForPayment = minValue(clientBalance, ownInputValue)
+            val availableForPaymentLedger = availableForPayment.toLedgerValue
+            val newOutputValue = channelUtxo.output.value - availableForPaymentLedger
+            val newClientBalance = clientBalance - availableForPayment
+
+            val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
+            val newState = OnChainState(
+              currentState.clientPkh,
+              currentState.clientPubKey,
+              currentState.clientTxOutRef,
+              OnChainChannelState.PayoutState(newClientBalance, exchangeBalance)
+            )
+
+            TxBuilder(env)
+                .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
+                .payTo(payoutAddress, availableForPaymentLedger)
+                .payTo(scriptAddress, newOutputValue, newState.toData)
+                .validFrom(Instant.now())
+                .validTo(Instant.now().plusSeconds(600))
+                .complete(provider, sponsor = payoutAddress)
+                .await()
+                .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
+                .transaction
+    }
+
+    /** Compute element-wise minimum of two Values.
+      * For each asset in `a`, takes the minimum of its amount and the corresponding amount in `b`.
+      */
+    private def minValue(
+        a: scalus.ledger.api.v3.Value,
+        b: scalus.ledger.api.v3.Value
+    ): scalus.ledger.api.v3.Value = {
+        import scalus.ledger.api.v3.Value
+        import scalus.prelude.{List, Option}
+        val minAssets = a.flatten.filterMap { case (policyId, tokenName, amountA) =>
+            val amountB = b.quantityOf(policyId, tokenName)
+            val minAmount = if amountA < amountB then amountA else amountB
+            if minAmount != BigInt(0) then
+                Option.Some((policyId, List.Cons((tokenName, minAmount), List.Nil)))
+            else Option.None
+        }
+        Value.fromList(minAssets)
+    }
 }

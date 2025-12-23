@@ -178,6 +178,21 @@ object CosmexValidator extends DataParameterizedValidator {
     def txSignedBy(signatories: List[PubKeyHash], k: PubKeyHash): Boolean =
         List.exists(signatories)(k.hash === _.hash)
 
+    /** Compute element-wise minimum of two Values.
+      * For each asset in `a`, takes the minimum of its amount and the corresponding amount in `b`.
+      * Assets only in `b` are treated as 0 in `a`, so they don't appear in the result.
+      */
+    def minValue(a: Value, b: Value): Value = {
+        val minAssets = a.flatten.filterMap { case (policyId, tokenName, amountA) =>
+            val amountB = b.quantityOf(policyId, tokenName)
+            val minAmount = if amountA < amountB then amountA else amountB
+            if minAmount !== BigInt(0) then
+                Option.Some((policyId, List.Cons((tokenName, minAmount), List.Nil)))
+            else Option.None
+        }
+        Value.fromList(minAssets)
+    }
+
     def handleUpdate(
         ownInputAddress: Address,
         ownOutput: TxOut,
@@ -637,8 +652,7 @@ object CosmexValidator extends DataParameterizedValidator {
                                 case Credential.ScriptCredential(hash) =>
                                     fail("Invalid payout")
                 else
-                    val availableForPayment =
-                        Value.zero // FIXME: Value.unionWith((a: BigInt, b: BigInt) => if a < b then a else b)(clientBalance, ownInputValue)
+                    val availableForPayment = minValue(clientBalance, ownInputValue)
                     val newOutputValue = ownInputValue - availableForPayment
                     val newClientBalance = clientBalance - availableForPayment
                     state match
