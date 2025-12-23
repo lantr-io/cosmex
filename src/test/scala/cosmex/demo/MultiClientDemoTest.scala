@@ -208,13 +208,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                 }
 
                                 // First try to find all UTxOs at the address for debugging
-                                provider.findUtxos(
-                                  address = address,
-                                  transactionId = txIdFilter,
-                                  datum = None,
-                                  minAmount = None,
-                                  minRequiredTotalAmount = None
-                                ).await() match {
+                                provider
+                                    .findUtxos(
+                                      address = address,
+                                      transactionId = txIdFilter,
+                                      datum = None,
+                                      minAmount = None,
+                                      minRequiredTotalAmount = None
+                                    )
+                                    .await() match {
                                     case Right(utxos) =>
                                         println(s"[$name] Found ${utxos.size} UTxOs at address")
                                         utxos.foreach { case (input, output) =>
@@ -233,13 +235,16 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                 }
 
                                 // Find UTxO - filter by txId if provided
-                                provider.findUtxo(
-                                  address = address,
-                                  transactionId = txIdFilter,
-                                  datum = None,
-                                  minAmount =
-                                      Some(Coin(2_000_000L)) // Just need minimum UTxO size (~2 ADA)
-                                ).await() match {
+                                provider
+                                    .findUtxo(
+                                      address = address,
+                                      transactionId = txIdFilter,
+                                      datum = None,
+                                      minAmount = Some(
+                                        Coin(2_000_000L)
+                                      ) // Just need minimum UTxO size (~2 ADA)
+                                    )
+                                    .await() match {
                                     case Right(foundUtxo) =>
                                         println(
                                           s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}"
@@ -277,13 +282,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                     println(
                                       s"[$name] Spend UTxO contains tokens, looking for ADA-only collateral..."
                                     )
-                                    provider.findUtxos(
-                                      address = address,
-                                      transactionId = None,
-                                      datum = None,
-                                      minAmount = None,
-                                      minRequiredTotalAmount = None
-                                    ).await() match {
+                                    provider
+                                        .findUtxos(
+                                          address = address,
+                                          transactionId = None,
+                                          datum = None,
+                                          minAmount = None,
+                                          minRequiredTotalAmount = None
+                                        )
+                                        .await() match {
                                         case Right(utxos) =>
                                             utxos
                                                 .find { case (_, output) =>
@@ -343,12 +350,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
 
                             // Find the newly minted tokens
                             println(s"[$name] Looking for minted tokens...")
-                            val mintedUtxo = provider.findUtxo(
-                              address = address,
-                              transactionId = Some(signedMintTx.id),
-                              datum = None,
-                              minAmount = None
-                            ).await() match {
+                            val mintedUtxo = provider
+                                .findUtxo(
+                                  address = address,
+                                  transactionId = Some(signedMintTx.id),
+                                  datum = None,
+                                  minAmount = None
+                                )
+                                .await() match {
                                 case Right(utxo) =>
                                     println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
                                     utxo
@@ -500,12 +509,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         config.blockchain.provider.toLowerCase match {
                             case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                                 // Find any UTxO for spending (can have tokens)
-                                val spendUtxo = provider.findUtxo(
-                                  address = bobAddress,
-                                  transactionId = None,
-                                  datum = None,
-                                  minAmount = Some(Coin(10_000_000L)) // Need at least 10 ADA
-                                ).await() match {
+                                val spendUtxo = provider
+                                    .findUtxo(
+                                      address = bobAddress,
+                                      transactionId = None,
+                                      datum = None,
+                                      minAmount = Some(Coin(10_000_000L)) // Need at least 10 ADA
+                                    )
+                                    .await() match {
                                     case Right(utxo) => utxo
                                     case Left(err) =>
                                         fail(
@@ -528,13 +539,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                           "[Bob - Preliminary] Spend UTxO contains tokens, looking for ADA-only collateral..."
                                         )
                                         // Query all UTxOs and filter for ADA-only
-                                        provider.findUtxos(
-                                          address = bobAddress,
-                                          transactionId = None,
-                                          datum = None,
-                                          minAmount = None,
-                                          minRequiredTotalAmount = None
-                                        ).await() match {
+                                        provider
+                                            .findUtxos(
+                                              address = bobAddress,
+                                              transactionId = None,
+                                              datum = None,
+                                              minAmount = None,
+                                              minRequiredTotalAmount = None
+                                            )
+                                            .await() match {
                                             case Right(utxos) =>
                                                 utxos
                                                     .find { case (_, output) =>

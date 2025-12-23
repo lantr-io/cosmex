@@ -396,13 +396,15 @@ object InteractiveDemo {
                             println(
                               s"[Mint] Spend UTxO contains tokens, looking for ADA-only collateral..."
                             )
-                            provider.findUtxos(
-                              address = clientAddress,
-                              transactionId = None,
-                              datum = None,
-                              minAmount = None,
-                              minRequiredTotalAmount = None
-                            ).await() match {
+                            provider
+                                .findUtxos(
+                                  address = clientAddress,
+                                  transactionId = None,
+                                  datum = None,
+                                  minAmount = None,
+                                  minRequiredTotalAmount = None
+                                )
+                                .await() match {
                                 case Right(utxos) =>
                                     utxos
                                         .find { case (_, output) =>

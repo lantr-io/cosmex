@@ -38,7 +38,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
     private val mapper = new ObjectMapper()
 
     /** Submit a transaction to the blockchain */
-    override def submit(tx: Transaction)(using ExecutionContext): Future[Either[SubmitError, TransactionHash]] = {
+    override def submit(
+        tx: Transaction
+    )(using ExecutionContext): Future[Either[SubmitError, TransactionHash]] = {
         Future {
             val url = s"$baseUrl/tx/submit"
             val txCbor = tx.toCbor
@@ -50,10 +52,14 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                   headers = Map("project_id" -> apiKey, "Content-Type" -> "application/cbor")
                 )
                 if response.is2xx then {
-                    println(s"[BlockfrostProvider] Transaction submitted: ${tx.id.toHex.take(16)}...")
+                    println(
+                      s"[BlockfrostProvider] Transaction submitted: ${tx.id.toHex.take(16)}..."
+                    )
                     Right(tx.id)
                 } else {
-                    Left(SubmitError.NodeError(s"Transaction submission failed: ${response.text()}"))
+                    Left(
+                      SubmitError.NodeError(s"Transaction submission failed: ${response.text()}")
+                    )
                 }
             }.toEither.left.map(e => SubmitError.NetworkError(e.getMessage, Some(e))).flatten
         }
@@ -70,7 +76,8 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
         Future {
             val bech32 = address match {
                 case sh @ ShelleyAddress(network, payment, delegation) => sh.toBech32.get
-                case _ => return Future.successful(Left(new RuntimeException("Shelley addresses only")))
+                case _ =>
+                    return Future.successful(Left(new RuntimeException("Shelley addresses only")))
             }
 
             println(s"[BlockfrostProvider] Querying UTxOs for address: $bech32")
@@ -84,11 +91,14 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 // Apply filters
                 val filtered = utxos.filter { case (input, output) =>
                     val txIdMatch = transactionId.forall(txId => input.transactionId == txId)
-                    val minAmountMatch = minAmount.forall(min => output.value.coin.value >= min.value)
+                    val minAmountMatch =
+                        minAmount.forall(min => output.value.coin.value >= min.value)
                     txIdMatch && minAmountMatch
                 }
 
-                println(s"[BlockfrostProvider] After filtering: ${filtered.size} UTxOs match criteria")
+                println(
+                  s"[BlockfrostProvider] After filtering: ${filtered.size} UTxOs match criteria"
+                )
                 Right(filtered)
             } else {
                 Left(
@@ -163,7 +173,10 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
 
                     // Parse datum if present
                     val datumOption: Option[DatumOption] =
-                        (outputJson.obj.get("data_hash"), outputJson.obj.get("inline_datum")) match {
+                        (
+                          outputJson.obj.get("data_hash"),
+                          outputJson.obj.get("inline_datum")
+                        ) match {
                             case (_, Some(inlineDatum)) =>
                                 Some(DatumOption.Inline(Data.fromCbor(hexToBytes(inlineDatum.str))))
                             case (Some(dataHash), None) =>
@@ -186,13 +199,16 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 }
             }.toEither.left.map {
                 case e: RuntimeException => e
-                case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
+                case e: Throwable =>
+                    new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
             }.flatten
         }
     }
 
     /** Find multiple UTxOs by transaction inputs */
-    override def findUtxos(inputs: Set[TransactionInput])(using ExecutionContext): Future[Either[RuntimeException, Utxos]] =
+    override def findUtxos(inputs: Set[TransactionInput])(using
+        ExecutionContext
+    ): Future[Either[RuntimeException, Utxos]] =
         Future.successful(Left(new RuntimeException("Unimplemented, use `findUtxos(address)`")))
 
     /** Find a single UTxO at an address */

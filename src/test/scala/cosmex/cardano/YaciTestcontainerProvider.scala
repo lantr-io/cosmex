@@ -35,7 +35,9 @@ class YaciTestcontainerProvider private (
     with TransactionStatusProvider {
 
     /** Submit a transaction to the Yaci testcontainer blockchain */
-    override def submit(tx: Transaction)(using ExecutionContext): Future[Either[SubmitError, TransactionHash]] = {
+    override def submit(
+        tx: Transaction
+    )(using ExecutionContext): Future[Either[SubmitError, TransactionHash]] = {
         Future {
             Try {
                 println(s"[YaciProvider] Submitting transaction: ${tx.id.toHex.take(16)}...")
@@ -59,12 +61,23 @@ class YaciTestcontainerProvider private (
                         println(s"[YaciProvider] Transaction accepted: $txHash")
                         Right(tx.id)
                     } else {
-                        Left(SubmitError.NodeError(s"Submit API returned invalid transaction hash: $txHash"))
+                        Left(
+                          SubmitError.NodeError(
+                            s"Submit API returned invalid transaction hash: $txHash"
+                          )
+                        )
                     }
                 } else {
-                    Left(SubmitError.NodeError(s"Transaction submission failed: ${result.getResponse}"))
+                    Left(
+                      SubmitError.NodeError(s"Transaction submission failed: ${result.getResponse}")
+                    )
                 }
-            }.toEither.left.map(e => SubmitError.NetworkError(s"Transaction submission failed: ${e.getMessage}", Some(e))).flatten
+            }.toEither.left
+                .map(e =>
+                    SubmitError
+                        .NetworkError(s"Transaction submission failed: ${e.getMessage}", Some(e))
+                )
+                .flatten
         }
     }
 
@@ -111,7 +124,9 @@ class YaciTestcontainerProvider private (
         }
     }
 
-    override def findUtxo(input: TransactionInput)(using ExecutionContext): Future[Either[RuntimeException, Utxo]] = {
+    override def findUtxo(
+        input: TransactionInput
+    )(using ExecutionContext): Future[Either[RuntimeException, Utxo]] = {
         Future {
             Try {
                 val txHash = input.transactionId.toHex
@@ -128,12 +143,15 @@ class YaciTestcontainerProvider private (
                 }
             }.toEither.left.map {
                 case e: RuntimeException => e
-                case e: Throwable => new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
+                case e: Throwable =>
+                    new RuntimeException(s"Failed to find UTxO: ${e.getMessage}", e)
             }
         }
     }
 
-    override def findUtxos(inputs: Set[TransactionInput])(using ExecutionContext): Future[Either[RuntimeException, Utxos]] = {
+    override def findUtxos(
+        inputs: Set[TransactionInput]
+    )(using ExecutionContext): Future[Either[RuntimeException, Utxos]] = {
         Future {
             Try {
                 val utxos = inputs.map { input =>
@@ -150,7 +168,8 @@ class YaciTestcontainerProvider private (
                 Map.from(utxos.map(u => u.input -> u.output))
             }.toEither.left.map {
                 case e: RuntimeException => e
-                case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+                case e: Throwable =>
+                    new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
             }
         }
     }
@@ -214,7 +233,8 @@ class YaciTestcontainerProvider private (
                 utxos
             }.toEither.left.map {
                 case e: RuntimeException => e
-                case e: Throwable => new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
+                case e: Throwable =>
+                    new RuntimeException(s"Failed to find UTxOs: ${e.getMessage}", e)
             }
         }
     }
