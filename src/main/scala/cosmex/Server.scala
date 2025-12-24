@@ -848,9 +848,19 @@ class Server(
             (utxo, onChainState, state.latestSnapshot.signedSnapshot.snapshotTradingState)
         }
 
+        // Create exchange address for collateral sponsorship
+        val exchangeAddress = scalus.cardano.address.Address(
+          env.network,
+          scalus.cardano.ledger.Credential.KeyHash(
+            scalus.cardano.ledger.AddrKeyHash(exchangeParams.exchangePkh.hash)
+          )
+        )
+
         val rebalanceTx = txBuilder.rebalance(
+          provider,
           channelDataWithOnChainState,
-          exchangeParams.exchangePkh
+          exchangeParams.exchangePkh,
+          sponsor = exchangeAddress
         )
 
         // Set rebalancing state
