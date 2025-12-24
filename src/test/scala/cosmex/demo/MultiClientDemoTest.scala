@@ -82,13 +82,15 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                           )
                     )
 
+                    // Create testnet context from mainnet template
+                    val mainnetCtx = Context.testMainnet(slot = 1000)
+                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                    val testnetContext = new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
+
                     Emulator(
                       initialUtxos = initialUtxos,
-                      initialContext = Context.testMainnet(slot = 1000),
-                      validators = Emulator.defaultValidators -
-                          MissingKeyHashesValidator -
-                          WrongNetworkValidator -
-                          VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
+                      initialContext = testnetContext,
+                      validators = Emulator.defaultValidators,
                       // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state
                       mutators = Emulator.defaultMutators
                     )

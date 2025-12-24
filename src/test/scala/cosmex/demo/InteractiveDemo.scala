@@ -163,15 +163,22 @@ object InteractiveDemo {
                                   )
                             )
 
+                            // Create context matching the configured network
+                            val mainnetCtx = Context.testMainnet(slot = 1000)
+                            val context = config.network.scalusNetwork match {
+                                case scalus.cardano.address.Network.Mainnet => mainnetCtx
+                                case scalus.cardano.address.Network.Testnet =>
+                                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                                    new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
+                                case other =>
+                                    throw new IllegalArgumentException(s"Unsupported network: $other")
+                            }
+
                             Emulator(
                               initialUtxos = initialUtxos,
-                              initialContext = Context.testMainnet(slot = 1000),
-                              validators = Emulator.defaultValidators -
-                                  MissingKeyHashesValidator -
-                                  WrongNetworkValidator -
-                                  VerifiedSignaturesInWitnessesValidator,
-                              mutators = Emulator.defaultMutators -
-                                  PlutusScriptsTransactionMutator
+                              initialContext = context,
+                              validators = Emulator.defaultValidators,
+                              mutators = Emulator.defaultMutators
                             )
 
                         case "yaci-devkit" | "yaci" =>

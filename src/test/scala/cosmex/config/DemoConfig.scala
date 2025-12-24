@@ -438,15 +438,28 @@ case class DemoConfig(config: Config) {
     def createProvider(): scalus.cardano.node.Provider = {
         import cosmex.cardano.{YaciTestcontainerProvider, BlockfrostProvider}
         import scalus.cardano.node.Emulator
-        import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
+        import scalus.cardano.ledger.rules.Context
+
+        // Create context matching the configured network
+        def createContext(): Context = {
+            val mainnetCtx = Context.testMainnet(slot = 1000)
+            network.scalusNetwork match {
+                case scalus.cardano.address.Network.Mainnet => mainnetCtx
+                case scalus.cardano.address.Network.Testnet =>
+                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                    new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
+                case other =>
+                    throw new IllegalArgumentException(s"Unsupported network: $other")
+            }
+        }
 
         blockchain.provider.toLowerCase match {
             case "mock" =>
                 println(s"[Config] Using MockLedgerApi provider (empty initial state)")
                 Emulator(
                   initialUtxos = Map.empty,
-                  initialContext = Context.testMainnet(slot = 1000),
-                  validators = Emulator.defaultValidators - WrongNetworkValidator,
+                  initialContext = createContext(),
+                  validators = Emulator.defaultValidators,
                   mutators = Emulator.defaultMutators
                 )
 
@@ -502,9 +515,22 @@ case class DemoConfig(config: Config) {
                 // Create MockLedgerApi with initial funding UTxOs
                 println(s"[Config] Using MockLedgerApi provider with initial funding")
                 import scalus.cardano.node.Emulator
-                import scalus.cardano.ledger.rules.{Context, WrongNetworkValidator}
+                import scalus.cardano.ledger.rules.Context
                 import scalus.cardano.address.Address
                 import scalus.cardano.ledger.{TransactionInput, TransactionHash, TransactionOutput, Value}
+
+                // Create context matching the configured network
+                def createContext(): Context = {
+                    val mainnetCtx = Context.testMainnet(slot = 1000)
+                    network.scalusNetwork match {
+                        case scalus.cardano.address.Network.Mainnet => mainnetCtx
+                        case scalus.cardano.address.Network.Testnet =>
+                            val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                            new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
+                        case other =>
+                            throw new IllegalArgumentException(s"Unsupported network: $other")
+                    }
+                }
 
                 // Convert funding addresses to initial UTxOs
                 val initialUtxos = initialFunding.zipWithIndex.map { case ((bech32, amount), idx) =>
@@ -520,8 +546,8 @@ case class DemoConfig(config: Config) {
                 println(s"[Config] Created ${initialUtxos.size} initial UTxOs for MockLedgerApi")
                 Emulator(
                   initialUtxos = initialUtxos,
-                  initialContext = Context.testMainnet(slot = 1000),
-                  validators = Emulator.defaultValidators - WrongNetworkValidator,
+                  initialContext = createContext(),
+                  validators = Emulator.defaultValidators,
                   mutators = Emulator.defaultMutators
                 )
 
