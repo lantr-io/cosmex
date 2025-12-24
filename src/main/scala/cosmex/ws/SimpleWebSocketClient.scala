@@ -35,13 +35,20 @@ class SimpleWebSocketClient(serverUrl: String) {
                 receiverReady.countDown()
 
                 // Process messages in this thread (blocking call)
+                // Accumulate fragments for large messages
+                val fragmentBuffer = new StringBuilder()
                 try {
                     boundary {
                         while true do {
                             val frame = ws.receive()
                             frame match {
-                                case WebSocketFrame.Text(payload, _, _) =>
-                                    responseQueue.put(payload)
+                                case WebSocketFrame.Text(payload, finalFragment, _) =>
+                                    fragmentBuffer.append(payload)
+                                    if finalFragment then {
+                                        val completeMessage = fragmentBuffer.toString()
+                                        fragmentBuffer.clear()
+                                        responseQueue.put(completeMessage)
+                                    }
                                 case WebSocketFrame.Close(_, _) =>
                                     break()
                                 case _ => // Ignore other frame types

@@ -3,6 +3,7 @@ package cosmex.demo
 import cosmex.config.DemoConfig
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
+import cosmex.util.JsonCodecs.given
 import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, OnChainChannelState, OnChainState, Server}
 import ox.*
 import scalus.builtin.ByteString
@@ -970,6 +971,55 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
+                                                        case Success(ClientResponse.RebalanceStarted) =>
+                                                            println(s"\n[Rebalance] Rebalancing started by server")
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
+                                                        case Success(ClientResponse.RebalanceRequired(tx)) =>
+                                                            println(s"\n[Rebalance] Received transaction to sign")
+                                                            println(s"[Rebalance] TX ID: ${tx.id.toHex.take(16)}...")
+                                                            // Sign and send the transaction
+                                                            clientId match {
+                                                                case Some(cId) =>
+                                                                    import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                                                                    import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                                                                    import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                                                                    val hdKeyPair = clientAccount.hdKeyPair()
+                                                                    val txBytes = TransactionBytes(tx.toCbor)
+                                                                    val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+                                                                    val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                                                                    val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+
+                                                                    val witness = VKeyWitness(
+                                                                      signature = ByteString.fromArray(signature),
+                                                                      vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                                                                    )
+                                                                    val witnessSet = tx.witnessSet.copy(
+                                                                      vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                                                                    )
+                                                                    val signedTx = tx.copy(witnessSet = witnessSet)
+
+                                                                    println(s"[Rebalance] Sending signed transaction...")
+                                                                    client.sendMessage(ClientRequest.SignRebalance(cId, signedTx))
+                                                                case None =>
+                                                                    println(s"[Rebalance] ERROR: No client ID for signing")
+                                                            }
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
+                                                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                                                            println(s"\n[Rebalance] ✓ Rebalancing complete!")
+                                                            println(s"[Rebalance] New snapshot version: ${snapshot.signedSnapshot.snapshotVersion}")
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
+                                                        case Success(ClientResponse.RebalanceAborted(reason)) =>
+                                                            println(s"\n[Rebalance] Aborted: $reason")
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
                                                         case Success(other) =>
                                                             // Log unexpected messages for debugging
                                                             println(
@@ -978,9 +1028,12 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Failure(_) =>
-                                                            // Ignore malformed messages
-                                                            ()
+                                                        case Failure(e) =>
+                                                            // Log parse failures with details
+                                                            println(s"\n[Notification] Parse failure: ${e.getMessage}")
+                                                            println(s"[Notification] Message length was: ${msgJson.length} bytes")
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
                                                     }
                                                 case Failure(_) =>
                                                     // Timeout or connection error - continue polling
@@ -1496,44 +1549,17 @@ object InteractiveDemo {
                     clientId match {
                         case None =>
                             println("[Rebalance] ERROR: No client ID available!")
-                            return
                         case Some(cId) =>
                             println(s"\n[Rebalance] Initiating rebalancing...")
-                            println(
-                              s"[Rebalance] This will sync on-chain locked values with snapshot balances."
-                            )
+                            println(s"[Rebalance] This will sync on-chain locked values with snapshot balances.")
+                            println(s"[Rebalance] Sending FixBalance request...")
 
-                            Try {
-                                // Step 1: Send FixBalance request
-                                println(s"[Rebalance] Sending FixBalance request...")
-                                client.sendMessage(ClientRequest.FixBalance(cId))
-
-                                // Step 2: Wait for RebalanceStarted or error
-                                client.receiveMessage(timeoutSeconds = 10) match {
-                                    case Success(responseJson) =>
-                                        read[ClientResponse](responseJson) match {
-                                            case ClientResponse.RebalanceStarted =>
-                                                println(s"[Rebalance] ✓ Rebalancing started!")
-                                                waitForRebalanceCompletion(cId)
-
-                                            case ClientResponse.Error(code, msg) =>
-                                                println(s"[Rebalance] [$code]: $msg")
-
-                                            case other =>
-                                                println(
-                                                  s"[Rebalance] Unexpected response: ${other.getClass.getSimpleName}"
-                                                )
-                                        }
-                                    case Failure(e) =>
-                                        println(
-                                          s"[Rebalance] ERROR: Failed to receive response: ${e.getMessage}"
-                                        )
-                                }
-                            } match {
-                                case Success(_) => ()
+                            client.sendMessage(ClientRequest.FixBalance(cId)) match {
+                                case Success(_) =>
+                                    println(s"[Rebalance] Request sent. The background listener will handle signing.")
+                                    println(s"[Rebalance] Watch for [Rebalance] messages...")
                                 case Failure(e) =>
-                                    println(s"[Rebalance] ERROR: ${e.getMessage}")
-                                    e.printStackTrace()
+                                    println(s"[Rebalance] ERROR: Failed to send request: ${e.getMessage}")
                             }
                     }
                 }
@@ -1547,6 +1573,9 @@ object InteractiveDemo {
                     while attempts < maxAttempts && !rebalanceComplete do {
                         client.receiveMessage(timeoutSeconds = 2) match {
                             case Success(msgJson) =>
+                                println(s"[Rebalance] Raw message length: ${msgJson.length} bytes")
+                                println(s"[Rebalance] Raw message (first 300 chars): ${msgJson.take(300)}")
+                                println(s"[Rebalance] Raw message (last 100 chars): ${msgJson.takeRight(100)}")
                                 Try(read[ClientResponse](msgJson)) match {
                                     case Success(ClientResponse.RebalanceRequired(tx)) =>
                                         println(

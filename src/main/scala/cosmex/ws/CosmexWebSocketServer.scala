@@ -1,6 +1,7 @@
 package cosmex.ws
 
 import cosmex.*
+import cosmex.util.JsonCodecs.given
 import ox.*
 import ox.channels.{Channel, ChannelClosedUnion}
 import scalus.utils.await
@@ -69,6 +70,12 @@ object CosmexWebSocketServer {
                             )
                         case ClientResponse.ChannelOpened(_) =>
                             println(s"[Server] Sent async ChannelOpened")
+                        case ClientResponse.RebalanceRequired(tx) =>
+                            println(s"[Server] Sending RebalanceRequired:")
+                            println(s"[Server]   TX ID: ${tx.id.toHex.take(16)}...")
+                            println(s"[Server]   TX CBOR size: ${tx.toCbor.length} bytes")
+                            println(s"[Server]   JSON size: ${responseJson.length} bytes")
+                            println(s"[Server]   JSON (first 500 chars): ${responseJson.take(500)}")
                         case other =>
                             println(
                               s"[Server] Sent async response: ${other.getClass.getSimpleName}"
