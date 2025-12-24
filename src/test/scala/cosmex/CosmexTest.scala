@@ -83,16 +83,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           )
     )
 
-    private def newEmulator(): Emulator = {
-        Emulator(
-          initialUtxos = initialUtxos,
-          initialContext = Context.testMainnet(slot = 1000),
-          validators =
-              Emulator.defaultValidators,
-          // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state
-          mutators = Emulator.defaultMutators
-        )
-    }
+    private def newEmulator(): Emulator =
+        Emulator(initialUtxos = initialUtxos, initialContext = Context.testMainnet(slot = 1000))
 
     // Helper: Sign a transaction using Bloxbean's extended Ed25519 signing
     private def signTransaction(account: Account, tx: Transaction): Transaction = {
@@ -810,10 +802,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .get
 
         // Find UTxO using address-based search
-        val bobChannelUtxo = provider.findUtxo(
-          address = server.CosmexScriptAddress,
-          transactionId = Some(bobOpenChannelTx.id)
-        ).await().toOption.get
+        val bobChannelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(bobOpenChannelTx.id)
+            )
+            .await()
+            .toOption
+            .get
         val bobChannelRef = bobChannelUtxo.input
 
         val bobActualDeposit = bobChannelTxOut._1.value.value
@@ -943,17 +939,22 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(openResult.await().isRight, s"Open channel failed: $openResult")
 
         // Get the channel UTxO
-        val channelUtxo = provider.findUtxo(
-          address = server.CosmexScriptAddress,
-          transactionId = Some(openChannelTx.id)
-        ).await().toOption.get
+        val channelUtxo = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(openChannelTx.id)
+            )
+            .await()
+            .toOption
+            .get
         val channelRef = channelUtxo.input
         val actualDeposit = channelUtxo.output.value
         val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(depositUtxo.input)
 
         // Create snapshot for graceful close
         val initialSnapshot = mkInitialSnapshot(actualDeposit)
-        val clientSignedSnapshot = mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
+        val clientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
         val bothSignedSnapshot = server.signSnapshot(clientTxOutRef, clientSignedSnapshot)
 
         // 2. Use graceful close (which works) - this closes the channel completely
@@ -979,10 +980,12 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(closeResult.isRight, s"Graceful close failed: $closeResult")
 
         // Verify channel is closed (funds returned to client)
-        val channelUtxoAfterClose = provider.findUtxo(
-          address = server.CosmexScriptAddress,
-          transactionId = Some(channelRef.transactionId)
-        ).await()
+        val channelUtxoAfterClose = provider
+            .findUtxo(
+              address = server.CosmexScriptAddress,
+              transactionId = Some(channelRef.transactionId)
+            )
+            .await()
         assert(channelUtxoAfterClose.isLeft, "Channel UTxO should be spent after graceful close")
 
         println("Graceful close test passed - payout functionality works via graceful close path")
@@ -1062,41 +1065,48 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         println(s"Debug: clientTxOutRef used in snapshot signing: $clientTxOutRef")
         println(s"Debug: snapshot version: ${bothSignedSnapshot.signedSnapshot.snapshotVersion}")
-        println(s"Debug: client signature length: ${bothSignedSnapshot.snapshotClientSignature.bytes.length}")
-        println(s"Debug: exchange signature length: ${bothSignedSnapshot.snapshotExchangeSignature.bytes.length}")
+        println(
+          s"Debug: client signature length: ${bothSignedSnapshot.snapshotClientSignature.bytes.length}"
+        )
+        println(
+          s"Debug: exchange signature length: ${bothSignedSnapshot.snapshotExchangeSignature.bytes.length}"
+        )
 
-        val contestedCloseTx = try {
-            txbuilder.contestedClose(
-              provider,
-              new BloxbeanAccount(clientAccount),
-              clientState,
-              contestStart
-            )
-        } catch {
-            case e: scalus.cardano.txbuilder.TxBuilderException =>
-                println(s"TxBuilder exception: ${e.getMessage}")
-                var cause = e.getCause
-                while (cause != null) {
-                    println(s"Cause: ${cause.getClass.getName}")
-                    // Look for logs field
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if (logs != null && logs.nonEmpty) {
-                            println(s"  LOGS:")
-                            logs.foreach(log => println(s"    $log"))
+        val contestedCloseTx =
+            try {
+                txbuilder.contestedClose(
+                  provider,
+                  new BloxbeanAccount(clientAccount),
+                  clientState,
+                  contestStart
+                )
+            } catch {
+                case e: scalus.cardano.txbuilder.TxBuilderException =>
+                    println(s"TxBuilder exception: ${e.getMessage}")
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"Cause: ${cause.getClass.getName}")
+                        // Look for logs field
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"  LOGS:")
+                                logs.foreach(log => println(s"    $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException =>
                         }
-                    } catch {
-                        case _: NoSuchFieldException =>
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                throw e
-        }
+                    throw e
+            }
 
         println(s"Debug: Transaction inputs: ${contestedCloseTx.body.value.inputs.toSeq}")
-        println(s"Debug: Transaction outputs: ${contestedCloseTx.body.value.outputs.map(_.value.address)}")
+        println(
+          s"Debug: Transaction outputs: ${contestedCloseTx.body.value.outputs.map(_.value.address)}"
+        )
 
         val closeResult = provider.submit(contestedCloseTx).await()
         assert(closeResult.isRight, s"Contested close failed: $closeResult")
@@ -1129,30 +1139,31 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println(s"Debug: timeAfterContest: ${timeAfterContest.toEpochMilli}")
         println(s"Debug: contestStart was: ${contestStart.toEpochMilli}")
 
-        val timeoutTx = try {
-            txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
-        } catch {
-            case e: scalus.cardano.txbuilder.TxBuilderException =>
-                println(s"TxBuilder exception during timeout: ${e.getMessage}")
-                var cause = e.getCause
-                while (cause != null) {
-                    println(s"Cause: ${cause.getClass.getName}")
-                    // Look for logs field
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if (logs != null && logs.nonEmpty) {
-                            println(s"  LOGS:")
-                            logs.foreach(log => println(s"    $log"))
+        val timeoutTx =
+            try {
+                txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+            } catch {
+                case e: scalus.cardano.txbuilder.TxBuilderException =>
+                    println(s"TxBuilder exception during timeout: ${e.getMessage}")
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"Cause: ${cause.getClass.getName}")
+                        // Look for logs field
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"  LOGS:")
+                                logs.foreach(log => println(s"    $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException =>
                         }
-                    } catch {
-                        case _: NoSuchFieldException =>
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                throw e
-        }
+                    throw e
+            }
         val signedTimeoutTx = signTransaction(clientAccount, timeoutTx)
         val timeoutResult = provider.submit(signedTimeoutTx).await()
         assert(timeoutResult.isRight, s"Timeout failed: $timeoutResult")
@@ -1177,35 +1188,36 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println(s"Debug: payoutDatum: $payoutDatum")
         println(s"Debug: payoutUtxo value: ${payoutUtxo.output.value}")
 
-        val payoutTx = try {
-            txbuilder.payout(
-              provider,
-              new BloxbeanAccount(clientAccount),
-              clientAddress,
-              payoutUtxo.input,
-              payoutDatum
-            )
-        } catch {
-            case e: scalus.cardano.txbuilder.TxBuilderException =>
-                println(s"TxBuilder exception during payout: ${e.getMessage}")
-                var cause = e.getCause
-                while (cause != null) {
-                    println(s"Cause: ${cause.getClass.getName}")
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if (logs != null && logs.nonEmpty) {
-                            println(s"  LOGS:")
-                            logs.foreach(log => println(s"    $log"))
+        val payoutTx =
+            try {
+                txbuilder.payout(
+                  provider,
+                  new BloxbeanAccount(clientAccount),
+                  clientAddress,
+                  payoutUtxo.input,
+                  payoutDatum
+                )
+            } catch {
+                case e: scalus.cardano.txbuilder.TxBuilderException =>
+                    println(s"TxBuilder exception during payout: ${e.getMessage}")
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"Cause: ${cause.getClass.getName}")
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"  LOGS:")
+                                logs.foreach(log => println(s"    $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException =>
                         }
-                    } catch {
-                        case _: NoSuchFieldException =>
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                throw e
-        }
+                    throw e
+            }
         val payoutResult = provider.submit(payoutTx).await()
         assert(payoutResult.isRight, s"Payout failed: $payoutResult")
 
@@ -1219,10 +1231,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         assert(finalChannelUtxo.isLeft, "Channel UTxO should be spent after payout")
 
         println("Step 4: Payout completed - channel closed successfully")
-        println("Full contested close path (no orders) completed: Open -> SnapshotContest -> Timeout -> Payout")
+        println(
+          "Full contested close path (no orders) completed: Open -> SnapshotContest -> Timeout -> Payout"
+        )
     }
 
-    test("Contested close with orders: Open -> Order -> SnapshotContest -> TradesContest -> Payout") {
+    test(
+      "Contested close with orders: Open -> Order -> SnapshotContest -> TradesContest -> Payout"
+    ) {
         val provider = this.newEmulator()
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
         import scalus.builtin.Data.toData
@@ -1289,14 +1305,19 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bothSignedOrderSnapshot = server.signSnapshot(clientTxOutRef, clientSignedOrderSnapshot)
 
         // Update client state with properly signed snapshot
-        val clientStateWithOrder = server.clientStates.get(clientId).get.copy(
-          latestSnapshot = bothSignedOrderSnapshot
-        )
+        val clientStateWithOrder = server.clientStates
+            .get(clientId)
+            .get
+            .copy(
+              latestSnapshot = bothSignedOrderSnapshot
+            )
         server.clientStates.put(clientId, clientStateWithOrder)
 
         assert(
           scalus.prelude.List
-              .nonEmpty(clientStateWithOrder.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders.toList),
+              .nonEmpty(
+                clientStateWithOrder.latestSnapshot.signedSnapshot.snapshotTradingState.tsOrders.toList
+              ),
           "Snapshot should contain the order"
         )
         println("Step 2: Order created and snapshot signed - contains open order")
@@ -1305,34 +1326,35 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val contestStart = Instant.now()
         provider.setSlot(SlotConfig.Mainnet.timeToSlot(contestStart.toEpochMilli))
 
-        val contestedCloseTx = try {
-            txbuilder.contestedClose(
-              provider,
-              new BloxbeanAccount(clientAccount),
-              clientStateWithOrder,
-              contestStart
-            )
-        } catch {
-            case e: scalus.cardano.txbuilder.TxBuilderException =>
-                println(s"TxBuilder exception during contestedClose: ${e.getMessage}")
-                var cause = e.getCause
-                while (cause != null) {
-                    println(s"Cause: ${cause.getClass.getName}")
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if (logs != null && logs.nonEmpty) {
-                            println(s"  LOGS:")
-                            logs.foreach(log => println(s"    $log"))
+        val contestedCloseTx =
+            try {
+                txbuilder.contestedClose(
+                  provider,
+                  new BloxbeanAccount(clientAccount),
+                  clientStateWithOrder,
+                  contestStart
+                )
+            } catch {
+                case e: scalus.cardano.txbuilder.TxBuilderException =>
+                    println(s"TxBuilder exception during contestedClose: ${e.getMessage}")
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"Cause: ${cause.getClass.getName}")
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"  LOGS:")
+                                logs.foreach(log => println(s"    $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException =>
                         }
-                    } catch {
-                        case _: NoSuchFieldException =>
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                throw e
-        }
+                    throw e
+            }
         val closeResult = provider.submit(contestedCloseTx).await()
         assert(closeResult.isRight, s"Contested close failed: $closeResult")
 
@@ -1356,29 +1378,30 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val timeAfterContest = contestStart.plusMillis(7000)
         provider.setSlot(SlotConfig.Mainnet.timeToSlot(timeAfterContest.toEpochMilli))
 
-        val timeout1Tx = try {
-            txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
-        } catch {
-            case e: scalus.cardano.txbuilder.TxBuilderException =>
-                println(s"TxBuilder exception during timeout: ${e.getMessage}")
-                var cause = e.getCause
-                while (cause != null) {
-                    println(s"Cause: ${cause.getClass.getName}")
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if (logs != null && logs.nonEmpty) {
-                            println(s"  LOGS:")
-                            logs.foreach(log => println(s"    $log"))
+        val timeout1Tx =
+            try {
+                txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+            } catch {
+                case e: scalus.cardano.txbuilder.TxBuilderException =>
+                    println(s"TxBuilder exception during timeout: ${e.getMessage}")
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"Cause: ${cause.getClass.getName}")
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"  LOGS:")
+                                logs.foreach(log => println(s"    $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException =>
                         }
-                    } catch {
-                        case _: NoSuchFieldException =>
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                throw e
-        }
+                    throw e
+            }
         val signedTimeout1Tx = signTransaction(clientAccount, timeout1Tx)
         val timeout1Result = provider.submit(signedTimeout1Tx).await()
         assert(timeout1Result.isRight, s"First timeout failed: $timeout1Result")

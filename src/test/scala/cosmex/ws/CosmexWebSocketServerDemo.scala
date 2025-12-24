@@ -89,19 +89,15 @@ object CosmexWebSocketServerDemo {
             val context = config.network.scalusNetwork match {
                 case scalus.cardano.address.Network.Mainnet => mainnetCtx
                 case scalus.cardano.address.Network.Testnet =>
-                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                    val testnetEnv =
+                        mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
                     new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
                 case other =>
                     throw new IllegalArgumentException(s"Unsupported network: $other")
             }
 
             // Create mock ledger for testing
-            val provider = Emulator(
-              initialUtxos = Map.empty,
-              initialContext = context,
-              validators = Emulator.defaultValidators,
-              mutators = Emulator.defaultMutators
-            )
+            val provider = Emulator(initialContext = context)
 
             // Create server instance
             val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)

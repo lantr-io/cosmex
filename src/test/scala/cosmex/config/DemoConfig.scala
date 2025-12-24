@@ -446,7 +446,8 @@ case class DemoConfig(config: Config) {
             network.scalusNetwork match {
                 case scalus.cardano.address.Network.Mainnet => mainnetCtx
                 case scalus.cardano.address.Network.Testnet =>
-                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                    val testnetEnv =
+                        mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
                     new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
                 case other =>
                     throw new IllegalArgumentException(s"Unsupported network: $other")
@@ -456,12 +457,7 @@ case class DemoConfig(config: Config) {
         blockchain.provider.toLowerCase match {
             case "mock" =>
                 println(s"[Config] Using MockLedgerApi provider (empty initial state)")
-                Emulator(
-                  initialUtxos = Map.empty,
-                  initialContext = createContext(),
-                  validators = Emulator.defaultValidators,
-                  mutators = Emulator.defaultMutators
-                )
+                Emulator(initialContext = createContext())
 
             case "yaci-devkit" | "yaci" =>
                 println(s"[Config] Using Yaci DevKit provider (without initial funding)")
@@ -525,7 +521,9 @@ case class DemoConfig(config: Config) {
                     network.scalusNetwork match {
                         case scalus.cardano.address.Network.Mainnet => mainnetCtx
                         case scalus.cardano.address.Network.Testnet =>
-                            val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                            val testnetEnv = mainnetCtx.env.copy(network =
+                                scalus.cardano.address.Network.Testnet
+                            )
                             new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
                         case other =>
                             throw new IllegalArgumentException(s"Unsupported network: $other")
@@ -544,12 +542,7 @@ case class DemoConfig(config: Config) {
                 }.toMap
 
                 println(s"[Config] Created ${initialUtxos.size} initial UTxOs for MockLedgerApi")
-                Emulator(
-                  initialUtxos = initialUtxos,
-                  initialContext = createContext(),
-                  validators = Emulator.defaultValidators,
-                  mutators = Emulator.defaultMutators
-                )
+                Emulator(initialUtxos = initialUtxos, initialContext = createContext())
 
             case "yaci-devkit" | "yaci" =>
                 println(s"[Config] Using Yaci DevKit provider with initial funding")

@@ -130,18 +130,15 @@ object CosmexWebSocketServerFromConfig {
                     val context = config.network.scalusNetwork match {
                         case scalus.cardano.address.Network.Mainnet => mainnetCtx
                         case scalus.cardano.address.Network.Testnet =>
-                            val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                            val testnetEnv = mainnetCtx.env.copy(network =
+                                scalus.cardano.address.Network.Testnet
+                            )
                             new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
                         case other =>
                             throw new IllegalArgumentException(s"Unsupported network: $other")
                     }
 
-                    Emulator(
-                      initialUtxos = initialUtxos,
-                      initialContext = context,
-                      validators = Emulator.defaultValidators,
-                      mutators = Emulator.defaultMutators
-                    )
+                    Emulator(initialUtxos = initialUtxos, initialContext = context)
 
                 case "yaci-devkit" | "yaci" =>
                     println("[Server] Using Yaci DevKit with auto-funding")

@@ -168,18 +168,17 @@ object InteractiveDemo {
                             val context = config.network.scalusNetwork match {
                                 case scalus.cardano.address.Network.Mainnet => mainnetCtx
                                 case scalus.cardano.address.Network.Testnet =>
-                                    val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
+                                    val testnetEnv = mainnetCtx.env.copy(network =
+                                        scalus.cardano.address.Network.Testnet
+                                    )
                                     new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
                                 case other =>
-                                    throw new IllegalArgumentException(s"Unsupported network: $other")
+                                    throw new IllegalArgumentException(
+                                      s"Unsupported network: $other"
+                                    )
                             }
 
-                            Emulator(
-                              initialUtxos = initialUtxos,
-                              initialContext = context,
-                              validators = Emulator.defaultValidators,
-                              mutators = Emulator.defaultMutators
-                            )
+                            Emulator(initialUtxos = initialUtxos, initialContext = context)
 
                         case "yaci-devkit" | "yaci" =>
                             import scalus.cardano.address.ShelleyAddress
@@ -1141,11 +1140,16 @@ object InteractiveDemo {
                                                 case Some(DatumOption.Inline(data)) =>
                                                     val newState = data.to[OnChainState]
                                                     newState.channelState match {
-                                                        case OnChainChannelState.PayoutState(cb, _) =>
-                                                            val adaBalance = cb.quantityOf(
-                                                              scalus.builtin.ByteString.empty,
-                                                              scalus.builtin.ByteString.empty
-                                                            ).toLong
+                                                        case OnChainChannelState.PayoutState(
+                                                              cb,
+                                                              _
+                                                            ) =>
+                                                            val adaBalance = cb
+                                                                .quantityOf(
+                                                                  scalus.builtin.ByteString.empty,
+                                                                  scalus.builtin.ByteString.empty
+                                                                )
+                                                                .toLong
                                                             println(
                                                               s"[Timeout] Channel is now in PayoutState."
                                                             )
@@ -1155,7 +1159,10 @@ object InteractiveDemo {
                                                             println(
                                                               s"[Timeout] Use 'payout' to withdraw your funds."
                                                             )
-                                                        case OnChainChannelState.TradesContestState(_, _) =>
+                                                        case OnChainChannelState.TradesContestState(
+                                                              _,
+                                                              _
+                                                            ) =>
                                                             println(
                                                               s"[Timeout] Channel is now in TradesContestState."
                                                             )
@@ -1221,10 +1228,12 @@ object InteractiveDemo {
                                 // Check we're in PayoutState
                                 onChainState.channelState match {
                                     case OnChainChannelState.PayoutState(clientBalance, _) =>
-                                        val adaBalance = clientBalance.quantityOf(
-                                          scalus.builtin.ByteString.empty,
-                                          scalus.builtin.ByteString.empty
-                                        ).toLong
+                                        val adaBalance = clientBalance
+                                            .quantityOf(
+                                              scalus.builtin.ByteString.empty,
+                                              scalus.builtin.ByteString.empty
+                                            )
+                                            .toLong
                                         println(
                                           s"[Payout] Client balance to withdraw: ${adaBalance / 1_000_000} ADA"
                                         )
@@ -1268,7 +1277,9 @@ object InteractiveDemo {
                                         println(
                                           s"[Payout] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
                                         )
-                                        println(s"[Payout] ✓ Funds have been returned to your wallet!")
+                                        println(
+                                          s"[Payout] ✓ Funds have been returned to your wallet!"
+                                        )
 
                                         // Channel is now closed
                                         isConnected = false
@@ -1304,7 +1315,9 @@ object InteractiveDemo {
                 println("  buy <base> <quote> <quantity> <price>   - Buy base for quote")
                 println("  sell <base> <quote> <quantity> <price>  - Sell base for quote")
                 println("  close                       - Close the channel (graceful, cooperative)")
-                println("  contested-close             - Initiate unilateral close (starts contest)")
+                println(
+                  "  contested-close             - Initiate unilateral close (starts contest)"
+                )
                 println("  timeout                     - Advance state after contest period")
                 println("  payout                      - Withdraw funds (after contested close)")
                 println("  help                        - Show this help")
