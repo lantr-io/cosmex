@@ -130,8 +130,6 @@ object CosmexWebSocketServerFromConfig {
                       initialContext = Context.testMainnet(slot = 1000),
                       validators = Emulator.defaultValidators -
                           MissingKeyHashesValidator -
-                          ProtocolParamsViewHashesMatchValidator -
-                          MissingRequiredDatumsValidator -
                           WrongNetworkValidator -
                           VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
                       mutators = Emulator.defaultMutators -

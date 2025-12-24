@@ -168,8 +168,6 @@ object InteractiveDemo {
                               initialContext = Context.testMainnet(slot = 1000),
                               validators = Emulator.defaultValidators -
                                   MissingKeyHashesValidator -
-                                  ProtocolParamsViewHashesMatchValidator -
-                                  MissingRequiredDatumsValidator -
                                   WrongNetworkValidator -
                                   VerifiedSignaturesInWitnessesValidator,
                               mutators = Emulator.defaultMutators -

@@ -85,7 +85,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           initialUtxos = initialUtxos,
           initialContext = Context.testMainnet(slot = 1000),
           validators =
-              Emulator.defaultValidators - MissingKeyHashesValidator - ProtocolParamsViewHashesMatchValidator - MissingRequiredDatumsValidator,
+              Emulator.defaultValidators - MissingKeyHashesValidator,
           // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state
           mutators = Emulator.defaultMutators
         )

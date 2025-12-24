@@ -87,8 +87,6 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                       initialContext = Context.testMainnet(slot = 1000),
                       validators = Emulator.defaultValidators -
                           MissingKeyHashesValidator -
-                          ProtocolParamsViewHashesMatchValidator -
-                          MissingRequiredDatumsValidator -
                           WrongNetworkValidator -
                           VerifiedSignaturesInWitnessesValidator, // Disable signature validation for testing
                       // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state

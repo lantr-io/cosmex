@@ -89,9 +89,7 @@ object CosmexWebSocketServerDemo {
               initialUtxos = Map.empty,
               initialContext = Context.testMainnet(slot = 1000),
               validators = Emulator.defaultValidators -
-                  MissingKeyHashesValidator -
-                  ProtocolParamsViewHashesMatchValidator -
-                  MissingRequiredDatumsValidator,
+                  MissingKeyHashesValidator,
               mutators = Emulator.defaultMutators -
                   PlutusScriptsTransactionMutator
             )
