@@ -2,6 +2,25 @@
 
 An interactive command-line demo that allows you to experience the COSMEX decentralized exchange as either Alice or Bob.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Running the Demo](#running-the-demo)
+- [Available Commands](#available-commands)
+- [Example Trading Session](#example-trading-session)
+- [Configuration](#configuration)
+- [Tips](#tips)
+- [Two-Party Trading Example](#two-party-trading-example)
+- [Troubleshooting](#troubleshooting)
+
+### Scenarios
+
+| Scenario | Description |
+|----------|-------------|
+| [Example Trading Session](#example-trading-session) | Single-party demo: mint tokens, connect, and create sell order as Bob |
+| [Two-Party Trading Example](#two-party-trading-example) | Basic two-party trading: Alice and Bob create matching orders |
+| [Trading, Rebalance, and Payout](#scenario-trading-rebalance-and-payout) | Full lifecycle: trade, rebalance on-chain values, and exit via contested close with payout |
+
 ## Overview
 
 The interactive demo provides a hands-on way to:
@@ -250,6 +269,271 @@ When Bob's sell order matches Alice's buy order, both terminals will show:
 - Only ADA and USDM are pre-configured
 - To trade other tokens, mint them first using the `mint` command
 - Custom tokens are automatically recognized after minting
+
+## Scenario: Trading, Rebalance, and Payout
+
+This advanced scenario demonstrates the full lifecycle of a trading channel, including:
+- Trading between parties
+- Rebalancing on-chain values after trades
+- Contested (unilateral) channel close with payout
+
+### Prerequisites
+
+Run three terminals:
+
+**Terminal 1 (Server):**
+```bash
+sbt "Test/runMain cosmex.ws.CosmexWebSocketServerFromConfig"
+```
+Wait for the server to start:
+```
+============================================================
+Starting WebSocket server on port 8080...
+WebSocket endpoint: ws://localhost:8080/ws/{txId}/{txIdx}
+============================================================
+```
+
+**Terminal 2 (Alice):**
+```bash
+sbt "Test/runMain cosmex.demo.AliceDemo"
+```
+
+**Terminal 3 (Bob):**
+```bash
+sbt "Test/runMain cosmex.demo.BobDemo"
+```
+
+Both `AliceDemo` and `BobDemo` connect to the server started in Terminal 1.
+
+### Part 1: Setup and Trading
+
+**Terminal 2 (Alice):**
+```
+Alice> connect ada 100
+[Connect] Opening channel with exchange...
+[Connect] Depositing: 100 ADA
+[Connect] ✓ Channel pending, txId: 8e9f0a1b...
+[Connect] ✓ Channel opened successfully!
+
+Alice> get-state
+============================================================
+Client State
+============================================================
+Channel Status:    Open
+Snapshot Version:  1
+
+Balance:
+  ADA:             100.000000
+============================================================
+```
+
+**Terminal 3 (Bob):**
+```
+Bob> connect ada 100
+[Connect] Opening channel with exchange...
+[Connect] Depositing: 100 ADA
+[Connect] ✓ Channel opened successfully!
+
+Bob> get-state
+============================================================
+Client State
+============================================================
+Channel Status:    Open
+Snapshot Version:  1
+
+Balance:
+  ADA:             100.000000
+============================================================
+```
+
+Now both parties have channels. Let's trade using the built-in USDM stablecoin:
+
+**Terminal 3 (Bob) - Creates a sell order:**
+```
+Bob> sell ada usdm 50 2
+[Order] Creating SELL order: 50 ADA/USDM @ 2
+[Order] ✓ Order request sent to exchange
+
+[Notification] ✓ Order created! OrderID: 1
+```
+
+**Terminal 2 (Alice) - Creates a matching buy order:**
+```
+Alice> buy ada usdm 50 2
+[Order] Creating BUY order: 50 ADA/USDM @ 2
+[Order] ✓ Order request sent to exchange
+
+[Notification] ✓ Order created! OrderID: 2
+[Notification] ✓✓ Order executed! Trade amount: 50, price: 2
+```
+
+Both parties should now see the trade execution notification:
+```
+[Notification] ✓✓ Order executed! Trade amount: 50, price: 2
+```
+
+### Part 2: Verify Balances Changed
+
+**Terminal 2 (Alice):**
+```
+Alice> get-state
+============================================================
+Client State
+============================================================
+Channel Status:    Open
+Snapshot Version:  3
+
+Balance:
+  ADA:             150.000000    <- Alice now has 50 more ADA
+============================================================
+```
+
+**Terminal 3 (Bob):**
+```
+Bob> get-state
+============================================================
+Client State
+============================================================
+Channel Status:    Open
+Snapshot Version:  3
+
+Balance:
+  ADA:             50.000000     <- Bob now has 50 less ADA
+============================================================
+```
+
+### Part 3: Rebalance
+
+After trading, the on-chain locked values no longer match the off-chain balances:
+- Alice's on-chain channel still holds 100 ADA (original deposit)
+- But her off-chain balance is now 150 ADA
+
+Rebalancing syncs the on-chain values with the current snapshot:
+
+**Terminal 2 (Alice):**
+```
+Alice> rebalance
+[Rebalance] Initiating rebalancing...
+[Rebalance] This will sync on-chain locked values with snapshot balances.
+[Rebalance] Sending FixBalance request...
+[Rebalance] ✓ Rebalancing started!
+[Rebalance] Waiting for RebalanceRequired...
+[Rebalance] ✓ Received RebalanceRequired, signing transaction...
+[Rebalance] Sending SignRebalance...
+[Rebalance] ✓ SignRebalance sent
+[Rebalance] ✓ Rebalancing complete! Snapshot version: 4
+```
+
+What happened:
+1. Client requests rebalance via `FixBalance`
+2. Server calculates the difference between on-chain and off-chain values
+3. Server creates a multi-party swap transaction
+4. Client signs their portion of the transaction
+5. Server submits the transaction and updates the snapshot
+
+After rebalance, Alice's on-chain channel now holds 150 ADA.
+
+### Part 4: Contested Close with Payout
+
+If Alice wants to exit without server cooperation (e.g., server is unresponsive), she can use the contested close path:
+
+**Terminal 2 (Alice):**
+```
+Alice> contested-close
+[ContestedClose] Initiating contested close...
+[ContestedClose] Channel ref: 3f7a2b1c#0
+[ContestedClose] This will start the contestation period.
+[ContestedClose] Transaction built: a1b2c3d4...
+[ContestedClose] ✓ Transaction submitted: a1b2c3d4...
+[ContestedClose] Channel is now in SnapshotContestState.
+[ContestedClose] After the contest period, use 'timeout' to advance.
+```
+
+Now Alice must wait for the contest period (configured in the exchange parameters, typically a few minutes on testnet).
+
+After the contest period expires:
+```
+Alice> timeout
+[Timeout] Advancing channel state after contest period...
+[Timeout] Channel is in SnapshotContestState, advancing...
+[Timeout] Transaction built: b2c3d4e5...
+[Timeout] ✓ Transaction submitted: b2c3d4e5...
+[Timeout] Channel is now in TradesContestState.
+[Timeout] Run 'timeout' again after contest period.
+```
+
+After the second contest period:
+```
+Alice> timeout
+[Timeout] Advancing channel state after contest period...
+[Timeout] Channel is in TradesContestState, advancing...
+[Timeout] Transaction built: c3d4e5f6...
+[Timeout] ✓ Transaction submitted: c3d4e5f6...
+[Timeout] Channel is now in PayoutState.
+[Timeout] Client balance: 150 ADA
+[Timeout] Use 'payout' to withdraw your funds.
+```
+
+Finally, withdraw funds:
+```
+Alice> payout
+[Payout] Withdrawing funds from channel...
+[Payout] Client balance to withdraw: 150 ADA
+[Payout] Transaction built: d4e5f6g7...
+[Payout] ✓ Transaction submitted: d4e5f6g7...
+[Payout] ✓ Funds have been returned to your wallet!
+```
+
+### State Machine Summary
+
+The contested close follows this state machine:
+
+```
+OpenState
+    │
+    │ contested-close (submits snapshot to chain)
+    ▼
+SnapshotContestState
+    │
+    │ timeout (after contest period)
+    ▼
+TradesContestState
+    │
+    │ timeout (after contest period)
+    ▼
+PayoutState
+    │
+    │ payout (withdraws funds)
+    ▼
+(Channel Closed)
+```
+
+### Why Use Rebalance Before Contested Close?
+
+If you trade and then immediately use contested-close WITHOUT rebalancing:
+- Your on-chain locked value is your original deposit (e.g., 100 ADA)
+- But your off-chain balance is different (e.g., 150 ADA after winning trades)
+- The payout will use the on-chain value, not your actual balance!
+
+By rebalancing first:
+- On-chain value is updated to match your current balance
+- Contested close will use the correct (rebalanced) amount
+- You receive your full balance after payout
+
+### Graceful Close Alternative
+
+If the exchange is responsive, use `close` instead of `contested-close`:
+
+```
+Alice> close
+[Close] Closing channel with exchange...
+[Close] ✓ Close transaction submitted: e5f6g7h8...
+[Close] ✓ Channel closed successfully!
+[Close] Final snapshot version: 4
+[Close] Funds have been returned to your wallet.
+```
+
+Graceful close is instant and doesn't require waiting for contest periods.
 
 ## Next Steps
 

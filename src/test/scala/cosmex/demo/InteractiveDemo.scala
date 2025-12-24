@@ -192,6 +192,11 @@ object InteractiveDemo {
 
                             config.createProviderWithFunding(Seq((clientBech32, clientFunding)))
 
+                        case "preprod" | "preview" =>
+                            println(s"\n[Setup] Using ${config.blockchain.provider} network")
+                            println(s"[Setup] Make sure your wallet is funded via faucet")
+                            config.createProvider()
+
                         case other =>
                             throw new IllegalArgumentException(
                               s"Unsupported provider for demo: $other"
@@ -680,8 +685,12 @@ object InteractiveDemo {
                     clientId = Some(cId)
 
                     // Create and sign initial snapshot
-                    val clientTxOutRef =
-                        TxOutRef(scalus.ledger.api.v3.TxId(openChannelTx.id), channelOutputIdx)
+                    // Note: clientTxOutRef must be the INPUT being spent (not the output)
+                    // The server uses the first input as the channel identifier
+                    val clientTxOutRef = TxOutRef(
+                      scalus.ledger.api.v3.TxId(depositUtxo.input.transactionId),
+                      depositUtxo.input.index
+                    )
                     val initialSnapshot = mkInitialSnapshot(depositAmount)
                     val clientSignedSnapshot =
                         mkClientSignedSnapshot(clientAccount, clientTxOutRef, initialSnapshot)
@@ -1298,6 +1307,145 @@ object InteractiveDemo {
                     }
                 }
 
+                def rebalance(): Unit = {
+                    if !isConnected then {
+                        println("[Rebalance] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    clientId match {
+                        case None =>
+                            println("[Rebalance] ERROR: No client ID available!")
+                            return
+                        case Some(cId) =>
+                            println(s"\n[Rebalance] Initiating rebalancing...")
+                            println(
+                              s"[Rebalance] This will sync on-chain locked values with snapshot balances."
+                            )
+
+                            Try {
+                                // Step 1: Send FixBalance request
+                                println(s"[Rebalance] Sending FixBalance request...")
+                                client.sendMessage(ClientRequest.FixBalance(cId))
+
+                                // Step 2: Wait for RebalanceStarted or error
+                                client.receiveMessage(timeoutSeconds = 10) match {
+                                    case Success(responseJson) =>
+                                        read[ClientResponse](responseJson) match {
+                                            case ClientResponse.RebalanceStarted =>
+                                                println(s"[Rebalance] ✓ Rebalancing started!")
+                                                waitForRebalanceCompletion(cId)
+
+                                            case ClientResponse.Error(code, msg) =>
+                                                println(s"[Rebalance] [$code]: $msg")
+
+                                            case other =>
+                                                println(
+                                                  s"[Rebalance] Unexpected response: ${other.getClass.getSimpleName}"
+                                                )
+                                        }
+                                    case Failure(e) =>
+                                        println(
+                                          s"[Rebalance] ERROR: Failed to receive response: ${e.getMessage}"
+                                        )
+                                }
+                            } match {
+                                case Success(_) => ()
+                                case Failure(e) =>
+                                    println(s"[Rebalance] ERROR: ${e.getMessage}")
+                                    e.printStackTrace()
+                            }
+                    }
+                }
+
+                def waitForRebalanceCompletion(cId: ClientId): Unit = {
+                    println(s"[Rebalance] Waiting for RebalanceRequired...")
+                    val maxAttempts = 30
+                    var attempts = 0
+                    var rebalanceComplete = false
+
+                    while attempts < maxAttempts && !rebalanceComplete do {
+                        client.receiveMessage(timeoutSeconds = 2) match {
+                            case Success(msgJson) =>
+                                Try(read[ClientResponse](msgJson)) match {
+                                    case Success(ClientResponse.RebalanceRequired(tx)) =>
+                                        println(
+                                          s"[Rebalance] ✓ Received RebalanceRequired, signing transaction..."
+                                        )
+                                        signAndSendRebalance(cId, tx)
+
+                                    case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                                        println(
+                                          s"[Rebalance] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
+                                        )
+                                        rebalanceComplete = true
+
+                                    case Success(ClientResponse.RebalanceAborted(reason)) =>
+                                        println(s"[Rebalance] Rebalancing aborted: $reason")
+                                        rebalanceComplete = true
+
+                                    case Success(ClientResponse.RebalanceStarted) =>
+                                        println(s"[Rebalance] Received RebalanceStarted")
+
+                                    case Success(ClientResponse.Error(code, msg)) =>
+                                        println(s"[Rebalance] Error [$code]: $msg")
+                                        rebalanceComplete = true
+
+                                    case Success(other) =>
+                                        println(
+                                          s"[Rebalance] Received: ${other.getClass.getSimpleName}"
+                                        )
+
+                                    case Failure(e) =>
+                                        println(
+                                          s"[Rebalance] Failed to parse message: ${e.getMessage}"
+                                        )
+                                }
+
+                            case Failure(e) =>
+                                e match {
+                                    case _: java.util.concurrent.TimeoutException =>
+                                        attempts += 1
+                                    case other =>
+                                        println(s"[Rebalance] Error: ${other.getMessage}")
+                                        attempts += 1
+                                }
+                        }
+                    }
+
+                    if !rebalanceComplete then {
+                        println(
+                          s"[Rebalance] Rebalancing did not complete within timeout (this may be expected if no rebalancing needed)"
+                        )
+                    }
+                }
+
+                def signAndSendRebalance(cId: ClientId, tx: Transaction): Unit = {
+                    import com.bloxbean.cardano.client.crypto.Blake2bUtil
+                    import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+                    import com.bloxbean.cardano.client.transaction.util.TransactionBytes
+
+                    val hdKeyPair = clientAccount.hdKeyPair()
+                    val txBytes = TransactionBytes(tx.toCbor)
+                    val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+                    val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+                    val signature =
+                        signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+
+                    val witness = VKeyWitness(
+                      signature = ByteString.fromArray(signature),
+                      vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                    )
+                    val witnessSet = tx.witnessSet.copy(
+                      vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
+                    )
+                    val signedTx = tx.copy(witnessSet = witnessSet)
+
+                    println(s"[Rebalance] Sending SignRebalance...")
+                    client.sendMessage(ClientRequest.SignRebalance(cId, signedTx))
+                    println(s"[Rebalance] ✓ SignRebalance sent")
+                }
+
                 // Main command loop
                 println(s"\n${"=" * 60}")
                 println(s"$partyName's Trading Terminal")
@@ -1320,6 +1468,7 @@ object InteractiveDemo {
                 )
                 println("  timeout                     - Advance state after contest period")
                 println("  payout                      - Withdraw funds (after contested close)")
+                println("  rebalance                   - Sync on-chain values with snapshot balances")
                 println("  help                        - Show this help")
                 println("  quit                        - Exit the demo")
                 println()
@@ -1736,6 +1885,9 @@ object InteractiveDemo {
                             case Some("payout") =>
                                 payout()
 
+                            case Some("rebalance") =>
+                                rebalance()
+
                             case Some("help") =>
                                 println("\nAvailable commands:")
                                 println(
@@ -1773,6 +1925,9 @@ object InteractiveDemo {
                                 )
                                 println(
                                   "  payout                                            - Withdraw funds (after contested close)"
+                                )
+                                println(
+                                  "  rebalance                                         - Sync on-chain values with snapshot balances"
                                 )
                                 println(
                                   "  help                                              - Show this help"
