@@ -2,6 +2,9 @@ package cosmex
 
 import com.bloxbean.cardano.client.account.Account
 import com.bloxbean.cardano.client.common.model.{Network, Networks}
+import com.bloxbean.cardano.client.crypto.Blake2bUtil
+import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
+import com.bloxbean.cardano.client.transaction.util.TransactionBytes
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalus.builtin.ByteString.hex
@@ -10,7 +13,7 @@ import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
 import scalus.cardano.ledger.rules.*
 import scalus.cardano.node.Emulator
-import scalus.cardano.txbuilder.{Environment, TransactionSigner}
+import scalus.cardano.txbuilder.Environment
 import scalus.cardano.wallet.BloxbeanAccount
 import scalus.ledger.api.v1.PubKeyHash
 import scalus.ledger.api.v3.{TxId, TxOutRef}
@@ -85,10 +88,33 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           initialUtxos = initialUtxos,
           initialContext = Context.testMainnet(slot = 1000),
           validators =
-              Emulator.defaultValidators - MissingKeyHashesValidator,
+              Emulator.defaultValidators,
           // Keep PlutusScriptsTransactionMutator - it's responsible for updating UTxO state
           mutators = Emulator.defaultMutators
         )
+    }
+
+    // Helper: Sign a transaction using Bloxbean's extended Ed25519 signing
+    private def signTransaction(account: Account, tx: Transaction): Transaction = {
+        val hdKeyPair = account.hdKeyPair()
+        val txBytes = TransactionBytes(tx.toCbor)
+        val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
+
+        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+        val signature = signingProvider.signExtended(
+          txBodyHash,
+          hdKeyPair.getPrivateKey.getKeyData
+        )
+
+        val witness = VKeyWitness(
+          signature = ByteString.fromArray(signature),
+          vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+        )
+
+        val witnessSet = tx.witnessSet.copy(
+          vkeyWitnesses = TaggedSortedSet.from(Seq(witness))
+        )
+        tx.copy(witnessSet = witnessSet)
     }
 
     // Helper: Create a snapshot and sign it with client key
@@ -172,7 +198,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           depositAmount = Value.ada(500L)
         )
 
-        val value = provider.submit(openChannelTx).await()
+        val signedTx = signTransaction(clientAccount, openChannelTx)
+        val value = provider.submit(signedTx).await()
 //        pprint.pprintln(openChannelTx)
 //        pprint.pprintln(value)
         assert(value.isRight)
@@ -775,7 +802,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           clientPubKey = bobPubKey,
           depositAmount = bobDepositAmount
         )
-        val submitResult = provider.submit(bobOpenChannelTx).await()
+        val signedBobOpenTx = signTransaction(bobAccount, bobOpenChannelTx)
+        val submitResult = provider.submit(signedBobOpenTx).await()
         assert(submitResult.isRight, s"Open channel failed: $submitResult")
         val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
             .find(_._1.value.address == server.CosmexScriptAddress)
@@ -910,7 +938,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           clientPubKey = clientPubKey,
           depositAmount = depositAmount
         )
-        val openResult = provider.submit(openChannelTx)
+        val signedOpenTx = signTransaction(clientAccount, openChannelTx)
+        val openResult = provider.submit(signedOpenTx)
         assert(openResult.await().isRight, s"Open channel failed: $openResult")
 
         // Get the channel UTxO
@@ -988,14 +1017,15 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           clientPubKey = clientPubKey,
           depositAmount = depositAmount
         )
-        val openResult = provider.submit(openChannelTx).await()
+        val signedOpenTx = signTransaction(clientAccount, openChannelTx)
+        val openResult = provider.submit(signedOpenTx).await()
         assert(openResult.isRight, s"Open channel failed: $openResult")
 
         // Get the channel UTxO
         val channelUtxo = provider
             .findUtxo(
               address = server.CosmexScriptAddress,
-              transactionId = Some(openChannelTx.id)
+              transactionId = Some(signedOpenTx.id)
             )
             .await()
             .toOption
@@ -1123,14 +1153,15 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
                 }
                 throw e
         }
-        val timeoutResult = provider.submit(timeoutTx).await()
+        val signedTimeoutTx = signTransaction(clientAccount, timeoutTx)
+        val timeoutResult = provider.submit(signedTimeoutTx).await()
         assert(timeoutResult.isRight, s"Timeout failed: $timeoutResult")
 
         // Verify PayoutState (skips TradesContestState because no orders)
         val payoutUtxo = provider
             .findUtxo(
               address = server.CosmexScriptAddress,
-              transactionId = Some(timeoutTx.id)
+              transactionId = Some(signedTimeoutTx.id)
             )
             .await()
             .toOption
@@ -1210,13 +1241,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           clientPubKey = clientPubKey,
           depositAmount = depositAmount
         )
-        val openResult = provider.submit(openChannelTx).await()
+        val signedOpenTx = signTransaction(clientAccount, openChannelTx)
+        val openResult = provider.submit(signedOpenTx).await()
         assert(openResult.isRight, s"Open channel failed: $openResult")
 
         val channelUtxo = provider
             .findUtxo(
               address = server.CosmexScriptAddress,
-              transactionId = Some(openChannelTx.id)
+              transactionId = Some(signedOpenTx.id)
             )
             .await()
             .toOption
@@ -1347,13 +1379,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
                 }
                 throw e
         }
-        val timeout1Result = provider.submit(timeout1Tx).await()
+        val signedTimeout1Tx = signTransaction(clientAccount, timeout1Tx)
+        val timeout1Result = provider.submit(signedTimeout1Tx).await()
         assert(timeout1Result.isRight, s"First timeout failed: $timeout1Result")
 
         val tradesContestUtxo = provider
             .findUtxo(
               address = server.CosmexScriptAddress,
-              transactionId = Some(timeout1Tx.id)
+              transactionId = Some(signedTimeout1Tx.id)
             )
             .await()
             .toOption
@@ -1381,13 +1414,14 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           tradesContestDatum,
           timeAfterTradesContest
         )
-        val timeout2Result = provider.submit(timeout2Tx).await()
+        val signedTimeout2Tx = signTransaction(clientAccount, timeout2Tx)
+        val timeout2Result = provider.submit(signedTimeout2Tx).await()
         assert(timeout2Result.isRight, s"Second timeout failed: $timeout2Result")
 
         val payoutUtxo = provider
             .findUtxo(
               address = server.CosmexScriptAddress,
-              transactionId = Some(timeout2Tx.id)
+              transactionId = Some(signedTimeout2Tx.id)
             )
             .await()
             .toOption
