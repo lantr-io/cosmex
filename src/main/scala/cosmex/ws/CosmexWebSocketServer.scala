@@ -1,6 +1,7 @@
 package cosmex.ws
 
 import cosmex.*
+import cosmex.util.JsonCodecs.given
 import ox.*
 import ox.channels.{Channel, ChannelClosedUnion}
 import scalus.utils.await

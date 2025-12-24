@@ -1,6 +1,7 @@
 package cosmex.demo
 
 import cosmex.config.DemoConfig
+import cosmex.util.JsonCodecs.given
 import cosmex.ws.{CosmexWebSocketServer, SimpleWebSocketClient}
 import cosmex.DemoHelpers.*
 import cosmex.{CardanoInfoTestNet, ChannelStatus, ClientId, ClientRequest, ClientResponse, ClientState, CosmexTransactions, LimitOrder, OnChainChannelState, OnChainState, Server}
