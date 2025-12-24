@@ -249,24 +249,25 @@ object InteractiveDemo {
                 // Transaction builder
                 val txbuilder = CosmexTransactions(exchangeParams, cardanoInfo)
 
-                // Helper to find client's UTxO
-                // Selects the minimum UTxO that has at least requiredAmount (to avoid fragmentation)
-                def findClientUtxo(
+                // Helper to find client's UTxOs
+                // Returns enough UTxOs to cover requiredAmount, preferring fewer larger UTxOs
+                def findClientUtxos(
                     txIdFilter: Option[TransactionHash] = None,
-                    requiredAmount: Long
-                ): Utxo = {
+                    requiredAmount: Long,
+                    requiredTokens: Value = Value.lovelace(0)
+                ): Seq[Utxo] = {
                     config.blockchain.provider.toLowerCase match {
                         case "mock" =>
                             val genesisHash =
                                 TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
                             val genesisInput = TransactionInput(genesisHash, 0)
-                            Utxo(
+                            Seq(Utxo(
                               input = genesisInput,
                               output = TransactionOutput(
                                 address = clientAddress,
                                 value = clientInitialValue + Value.lovelace(100_000_000L)
                               )
-                            )
+                            ))
 
                         case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                             import scalus.cardano.address.ShelleyAddress
@@ -275,8 +276,37 @@ object InteractiveDemo {
 
                             println(s"[$partyName] Looking for UTxO at address: $addressBech32")
 
-                            try {
-                                // Query all UTxOs and filter out ones we've already spent
+                            // Helper to check if UTxO contains the SPECIFIC required tokens
+                            def hasRequiredTokens(utxoValue: Value): Boolean = {
+                                // If no tokens required, always true
+                                if requiredTokens == Value.lovelace(0) ||
+                                   requiredTokens == Value.lovelace(requiredTokens.coin.value) then
+                                    true
+                                else
+                                    // Check that UTxO has at least the required amount of each token
+                                    requiredTokens.assets.assets.forall { case (policyId, requiredAssets) =>
+                                        utxoValue.assets.assets.get(policyId) match {
+                                            case None => false // UTxO doesn't have this policy
+                                            case Some(utxoAssets) =>
+                                                requiredAssets.forall { case (assetName, requiredAmount) =>
+                                                    utxoAssets.get(assetName) match {
+                                                        case None => false // UTxO doesn't have this asset
+                                                        case Some(utxoAmount) => utxoAmount >= requiredAmount
+                                                    }
+                                                }
+                                        }
+                                    }
+                            }
+
+                            // Check if we need specific tokens
+                            val needsTokens = requiredTokens != Value.lovelace(0) &&
+                                requiredTokens != Value.lovelace(requiredTokens.coin.value)
+
+                            // Retry configuration for waiting on token indexing
+                            val maxRetries = if needsTokens then 12 else 1  // 12 retries * 5 seconds = 60 seconds max
+                            val retryDelayMs = 5000  // 5 seconds between retries
+
+                            def tryFindUtxos(attempt: Int): Either[Throwable, Seq[Utxo]] = {
                                 provider
                                     .findUtxos(
                                       address = clientAddress,
@@ -287,38 +317,79 @@ object InteractiveDemo {
                                     )
                                     .await() match {
                                     case Right(utxos) =>
-                                        // Filter: 1) not spent, 2) has enough ADA
-                                        val available = utxos.filter { case (input, output) =>
-                                            !spentUtxos.contains(input) &&
-                                            output.value.coin.value >= requiredAmount
+                                        // Get all unspent UTxOs
+                                        val allUnspent = utxos.filter { case (input, _) =>
+                                            !spentUtxos.contains(input)
                                         }
 
-                                        if available.isEmpty then {
-                                            Left(
-                                              new RuntimeException(
-                                                s"No available UTxOs (all are spent or below ${requiredAmount / 1_000_000} ADA)"
-                                              )
-                                            )
+                                        // Separate UTxOs with required tokens from others
+                                        val (withTokens, adaOnly) = if needsTokens then {
+                                            val wt = allUnspent.filter { case (_, output) =>
+                                                hasRequiredTokens(output.value)
+                                            }
+                                            val ao = allUnspent.filter { case (_, output) =>
+                                                !hasRequiredTokens(output.value)
+                                            }
+                                            (wt, ao)
                                         } else {
-                                            // Select the MINIMUM UTxO that's large enough (avoid fragmentation)
-                                            val (input, output) = available.minBy {
-                                                case (_, output) =>
-                                                    output.value.coin.value
+                                            (Map.empty[TransactionInput, TransactionOutput], allUnspent)
+                                        }
+
+                                        if needsTokens && withTokens.isEmpty then {
+                                            // Tokens needed but not found - retry if we have attempts left
+                                            if attempt < maxRetries then {
+                                                val waitSeconds = (maxRetries - attempt) * retryDelayMs / 1000
+                                                println(s"[$partyName] Waiting for token UTxO to be indexed... (attempt $attempt/$maxRetries, ~${waitSeconds}s remaining)")
+                                                Thread.sleep(retryDelayMs)
+                                                tryFindUtxos(attempt + 1)
+                                            } else {
+                                                Left(new RuntimeException(
+                                                  s"No UTxO found with required tokens after $maxRetries attempts. " +
+                                                  s"The mint transaction may not be confirmed yet."
+                                                ))
                                             }
-                                            val utxo = Utxo(input, output)
-                                            println(
-                                              s"[$partyName] ✓ Found UTxO with ${utxo.output.value.coin.value / 1_000_000} ADA (min from ${available.size} UTxOs >= ${requiredAmount / 1_000_000} ADA)"
-                                            )
-                                            if spentUtxos.nonEmpty then {
+                                        } else {
+                                            // Start with UTxOs that have required tokens
+                                            var collected = withTokens.toList
+                                            var total = collected.map(_._2.value.coin.value).sum
+
+                                            // Add ADA-only UTxOs if we need more ADA
+                                            val sortedAdaOnly = adaOnly.toSeq.sortBy(-_._2.value.coin.value)
+                                            val adaIter = sortedAdaOnly.iterator
+                                            while total < requiredAmount && adaIter.hasNext do {
+                                                val utxo = adaIter.next()
+                                                collected = utxo :: collected
+                                                total += utxo._2.value.coin.value
+                                            }
+
+                                            if total < requiredAmount then {
+                                                Left(new RuntimeException(
+                                                  s"Insufficient funds: need ${requiredAmount / 1_000_000} ADA, " +
+                                                  s"have ${total / 1_000_000} ADA across ${collected.size} UTxOs"
+                                                ))
+                                            } else {
+                                                val result = collected.reverse.map { case (input, output) =>
+                                                    Utxo(input, output)
+                                                }
+
                                                 println(
-                                                  s"[$partyName]   (filtered out ${spentUtxos.size} spent UTxOs)"
+                                                  s"[$partyName] ✓ Found ${result.size} UTxO(s) with ${total / 1_000_000} ADA total (need ${requiredAmount / 1_000_000} ADA)"
                                                 )
+                                                if spentUtxos.nonEmpty then {
+                                                    println(
+                                                      s"[$partyName]   (filtered out ${spentUtxos.size} spent UTxOs)"
+                                                    )
+                                                }
+                                                Right(result)
                                             }
-                                            Right(utxo)
                                         }
                                     case Left(err) => Left(err)
-                                } match {
-                                    case Right(utxo) => utxo
+                                }
+                            }
+
+                            try {
+                                tryFindUtxos(1) match {
+                                    case Right(utxos) => utxos
                                     case Left(err) =>
                                         println(
                                           s"\n[$partyName] ✗ ERROR: Could not find funded UTxO"
@@ -385,6 +456,13 @@ object InteractiveDemo {
                             throw new IllegalArgumentException(s"Unsupported provider: $other")
                     }
                 }
+
+                // Convenience function returning a single UTxO (for backwards compatibility)
+                def findClientUtxo(
+                    txIdFilter: Option[TransactionHash] = None,
+                    requiredAmount: Long,
+                    requiredTokens: Value = Value.lovelace(0)
+                ): Utxo = findClientUtxos(txIdFilter, requiredAmount, requiredTokens).head
 
                 // Helper to mint tokens
                 def mintTokens(tokenName: String, amount: Long): (TransactionHash, ByteString) = {
@@ -579,16 +657,20 @@ object InteractiveDemo {
                     val feeReserve = 5_000_000L // 5 ADA for fees/change
                     val requiredAmount = depositAmountLovelace + feeReserve
 
+                    // Check if tokens are required
+                    val hasTokens = depositValue != Value.lovelace(depositValue.coin.value)
+                    val tokenInfo = if hasTokens then " + tokens" else ""
+
                     println(
-                      s"[DEBUG] About to call findClientUtxo (need at least ${requiredAmount / 1_000_000} ADA)..."
+                      s"[DEBUG] About to call findClientUtxos (need at least ${requiredAmount / 1_000_000} ADA$tokenInfo)..."
                     )
                     System.out.flush()
-                    val depositUtxo = findClientUtxo(utxoFilter, requiredAmount)
-                    println(s"[DEBUG] findClientUtxo returned successfully")
+                    val depositUtxos = findClientUtxos(utxoFilter, requiredAmount, depositValue)
+                    println(s"[DEBUG] findClientUtxos returned ${depositUtxos.size} UTxO(s)")
                     System.out.flush()
 
-                    // Deposit configured amount into the channel
-                    val totalAvailable = depositUtxo.output.value.coin.value
+                    // Calculate total available from all UTxOs
+                    val totalAvailable = depositUtxos.map(_.output.value.coin.value).sum
 
                     // Verify we have enough ADA
                     if totalAvailable < depositAmountLovelace + feeReserve then {
@@ -601,11 +683,11 @@ object InteractiveDemo {
                     val depositAmount = depositValue
 
                     // Display deposit info
-                    val tokenInfo =
-                        if depositAmount == Value.lovelace(depositAmount.coin.value) then ""
+                    val tokenInfo2 =
+                        if depositValue == Value.lovelace(depositValue.coin.value) then ""
                         else s" + tokens"
                     println(
-                      s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA$tokenInfo (keeping ${(totalAvailable - depositAmountLovelace) / 1_000_000} ADA in wallet for fees/change)"
+                      s"[Connect] Depositing: ${depositAmountLovelace / 1_000_000} ADA$tokenInfo2 (using ${depositUtxos.size} UTxO(s), keeping ${(totalAvailable - depositAmountLovelace) / 1_000_000} ADA for fees/change)"
                     )
 
                     println(s"[DEBUG] Building openChannel transaction...")
@@ -614,7 +696,7 @@ object InteractiveDemo {
                       s"[DEBUG] Client-side script hash: ${txbuilder.script.scriptHash.toHex}"
                     )
                     val unsignedTx = txbuilder.openChannel(
-                      clientInput = depositUtxo,
+                      clientInputs = depositUtxos,
                       clientPubKey = clientPubKey,
                       depositAmount = depositAmount
                     )
@@ -646,6 +728,16 @@ object InteractiveDemo {
                     )
                     val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
 
+                    // Debug: Print CBOR details to diagnose serialization issues
+                    val txCbor = openChannelTx.toCbor
+                    val firstByte = txCbor.headOption.map(b => f"${b & 0xff}%02x").getOrElse("??")
+                    println(s"[DEBUG] TX CBOR first byte: 0x$firstByte (should be 0x84 for 4-element array)")
+                    println(s"[DEBUG] TX CBOR length: ${txCbor.length} bytes")
+                    println(s"[DEBUG] TX CBOR first 50 bytes: ${txCbor.take(50).map(b => f"${b & 0xff}%02x").mkString}")
+                    println(s"[DEBUG] TX isValid: ${openChannelTx.isValid}")
+                    println(s"[DEBUG] TX auxiliaryData: ${openChannelTx.auxiliaryData}")
+                    println(s"[DEBUG] TX witnessSet.vkeyWitnesses count: ${openChannelTx.witnessSet.vkeyWitnesses.toSeq.size}")
+
                     // Find the actual output index for the Cosmex script output
                     val cosmexScriptAddress = Address(
                       scalusNetwork,
@@ -676,8 +768,9 @@ object InteractiveDemo {
 
                     println(s"[Connect] Found script output at index: $channelOutputIdx")
 
-                    // Create client ID and connect
-                    val cId = ClientId(depositUtxo.input)
+                    // Create client ID and connect (use first UTxO as channel identifier)
+                    val primaryUtxo = depositUtxos.head
+                    val cId = ClientId(primaryUtxo.input)
                     val wsUrl =
                         s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
 
@@ -688,8 +781,8 @@ object InteractiveDemo {
                     // Note: clientTxOutRef must be the INPUT being spent (not the output)
                     // The server uses the first input as the channel identifier
                     val clientTxOutRef = TxOutRef(
-                      scalus.ledger.api.v3.TxId(depositUtxo.input.transactionId),
-                      depositUtxo.input.index
+                      scalus.ledger.api.v3.TxId(primaryUtxo.input.transactionId),
+                      primaryUtxo.input.index
                     )
                     val initialSnapshot = mkInitialSnapshot(depositAmount)
                     val clientSignedSnapshot =
@@ -817,6 +910,66 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
+                                                        case Success(
+                                                              ClientResponse.State(
+                                                                balance,
+                                                                orders,
+                                                                channelStatus,
+                                                                snapshotVersion
+                                                              )
+                                                            ) =>
+                                                            // Handle State response from get-state command
+                                                            println("\n" + "=" * 60)
+                                                            println("Client State")
+                                                            println("=" * 60)
+                                                            println(s"Channel Status:    $channelStatus")
+                                                            println(s"Snapshot Version:  $snapshotVersion")
+                                                            println()
+                                                            println("Balance:")
+                                                            val adaBalance = balance.quantityOf(
+                                                              scalus.builtin.ByteString.empty,
+                                                              scalus.builtin.ByteString.empty
+                                                            )
+                                                            println(
+                                                              f"  ADA:             ${adaBalance.toLong / 1_000_000.0}%.6f"
+                                                            )
+                                                            balance.toSortedMap.toList.foreach {
+                                                                case (policyId, assets) =>
+                                                                    if policyId.bytes.nonEmpty then {
+                                                                        assets.toList.foreach {
+                                                                            case (assetName, amount) =>
+                                                                                val symbol =
+                                                                                    new String(
+                                                                                      assetName.bytes,
+                                                                                      "UTF-8"
+                                                                                    )
+                                                                                println(
+                                                                                  f"  $symbol%-16s ${amount.toLong}"
+                                                                                )
+                                                                        }
+                                                                    }
+                                                            }
+                                                            println()
+                                                            println("Orders:")
+                                                            if orders.isEmpty then {
+                                                                println("  (no open orders)")
+                                                            } else {
+                                                                orders.toList.foreach {
+                                                                    case (orderId, order) =>
+                                                                        val side =
+                                                                            if order.orderAmount > 0
+                                                                            then "BUY"
+                                                                            else "SELL"
+                                                                        val amount = order.orderAmount.abs
+                                                                        println(
+                                                                          s"  #${orderId.toString.padTo(6, ' ')} ${side.padTo(4, ' ')} ${amount.toString.reverse.padTo(10, ' ').reverse} @ ${order.orderPrice}"
+                                                                        )
+                                                                }
+                                                            }
+                                                            println("=" * 60)
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
                                                         case Success(other) =>
                                                             // Log unexpected messages for debugging
                                                             println(
@@ -903,12 +1056,39 @@ object InteractiveDemo {
                             }
                     }
 
+                    // Convert amount from display units to base units
+                    // For ADA: 1 ADA = 1,000,000 lovelace (6 decimals)
+                    val baseDecimals = baseAsset.toLowerCase match {
+                        case "ada" => 6
+                        case other =>
+                            try { config.assets.getAsset(other).decimals }
+                            catch { case _: Exception => 0 }
+                    }
+                    val quoteDecimals = quoteAsset.toLowerCase match {
+                        case "ada" => 6
+                        case other =>
+                            try { config.assets.getAsset(other).decimals }
+                            catch { case _: Exception => 6 } // Default to 6 for unknown assets
+                    }
+                    val baseAmount = BigInt(amount) * BigInt(10).pow(baseDecimals)
                     val signedAmount =
-                        if side.equalsIgnoreCase("BUY") then BigInt(amount) else BigInt(-amount)
+                        if side.equalsIgnoreCase("BUY") then baseAmount else -baseAmount
+
+                    // Convert user price to system price
+                    // System price formula: price = user_price * 10^(quote_decimals - base_decimals) * PRICE_SCALE
+                    // This accounts for different decimal places between base and quote assets
+                    val PRICE_SCALE = BigInt(1_000_000)
+                    val decimalDiff = quoteDecimals - baseDecimals
+                    val scaledPrice =
+                        if decimalDiff >= 0 then
+                            BigInt(price) * BigInt(10).pow(decimalDiff) * PRICE_SCALE
+                        else
+                            BigInt(price) * PRICE_SCALE / BigInt(10).pow(-decimalDiff)
+
                     val order = LimitOrder(
                       orderPair = (base, quote),
                       orderAmount = signedAmount,
-                      orderPrice = price
+                      orderPrice = scaledPrice
                     )
 
                     // Send order asynchronously - background listener will handle response
@@ -1582,7 +1762,10 @@ object InteractiveDemo {
                                         val depositArgs =
                                             parts.drop(1).toSeq // Remove "connect" from args
                                         val depositValue = parseDepositValue(depositArgs)
-                                        connectToExchange(lastMintTxId, depositValue)
+
+                                        // No longer filter by mint txId - tokens might have moved
+                                        // Instead, findClientUtxo will find any UTxO with enough funds
+                                        connectToExchange(None, depositValue)
                                     }.recover {
                                         case e: DemoException if e.alreadyPrinted =>
                                             // Error message already displayed, don't repeat it
@@ -1623,135 +1806,11 @@ object InteractiveDemo {
                                       "[State] ERROR: Not connected to exchange. Please use 'connect' first."
                                     )
                                 } else {
-                                    Try {
-                                        client.sendMessage(ClientRequest.GetState(clientId.get))
-                                        client.receiveMessage(timeoutSeconds = 10) match {
-                                            case Success(responseJson) =>
-                                                read[ClientResponse](responseJson) match {
-                                                    case ClientResponse.State(
-                                                          balance,
-                                                          orders,
-                                                          channelStatus,
-                                                          snapshotVersion
-                                                        ) =>
-                                                        println("\n" + "=" * 60)
-                                                        println("Client State")
-                                                        println("=" * 60)
-                                                        println(
-                                                          s"Channel Status:    ${channelStatus}"
-                                                        )
-                                                        println(
-                                                          s"Snapshot Version:  ${snapshotVersion}"
-                                                        )
-                                                        println()
-                                                        println("Balance:")
-                                                        // Display ADA balance
-                                                        val adaBalance = balance.quantityOf(
-                                                          scalus.builtin.ByteString.empty,
-                                                          scalus.builtin.ByteString.empty
-                                                        )
-                                                        println(
-                                                          f"  ADA:             ${adaBalance.toLong / 1_000_000.0}%.6f"
-                                                        )
-                                                        // Display other token balances from the Value map
-                                                        balance.toSortedMap.toList.foreach {
-                                                            case (policyId, assets) =>
-                                                                if policyId.bytes.nonEmpty then {
-                                                                    assets.toList.foreach {
-                                                                        case (assetName, amount) =>
-                                                                            // Try to find symbol and decimals from registered assets
-                                                                            val (symbol, decimals) =
-                                                                                try {
-                                                                                    config.assets
-                                                                                        .getAssetByPolicyId(
-                                                                                          policyId
-                                                                                        )
-                                                                                        .map(a =>
-                                                                                            (
-                                                                                              a.symbol,
-                                                                                              a.decimals
-                                                                                            )
-                                                                                        )
-                                                                                        .getOrElse(
-                                                                                          (
-                                                                                            assetName.toHex
-                                                                                                .take(
-                                                                                                  16
-                                                                                                ),
-                                                                                            0
-                                                                                          )
-                                                                                        )
-                                                                                } catch {
-                                                                                    case _: Exception =>
-                                                                                        (
-                                                                                          assetName.toHex
-                                                                                              .take(
-                                                                                                16
-                                                                                              ),
-                                                                                          0
-                                                                                        )
-                                                                                }
-                                                                            val displayAmount =
-                                                                                if decimals > 0
-                                                                                then
-                                                                                    amount.toLong / Math
-                                                                                        .pow(
-                                                                                          10,
-                                                                                          decimals
-                                                                                        )
-                                                                                else amount.toDouble
-                                                                            val formatStr =
-                                                                                s"  %-16s %.${decimals}f"
-                                                                            println(
-                                                                              formatStr.format(
-                                                                                symbol,
-                                                                                displayAmount
-                                                                              )
-                                                                            )
-                                                                    }
-                                                                }
-                                                        }
-                                                        println()
-                                                        println("Orders:")
-                                                        if orders.isEmpty then {
-                                                            println("  (no open orders)")
-                                                        } else {
-                                                            orders.toList.foreach {
-                                                                case (orderId, order) =>
-                                                                    val side =
-                                                                        if order.orderAmount > 0
-                                                                        then "BUY"
-                                                                        else "SELL"
-                                                                    val amount =
-                                                                        order.orderAmount.abs
-                                                                    println(
-                                                                      f"  #${orderId}%-6s ${side}%-4s ${amount}%10d @ ${order.orderPrice}"
-                                                                    )
-                                                            }
-                                                        }
-                                                        println("=" * 60)
-
-                                                    case ClientResponse.Error(code, msg) =>
-                                                        println(
-                                                          s"[State] ERROR [$code]: $msg"
-                                                        )
-                                                    case other =>
-                                                        println(
-                                                          s"[State] Unexpected response: $other"
-                                                        )
-                                                }
-                                            case Failure(e) =>
-                                                println(
-                                                  s"[State] ERROR: Failed to get state: ${e.getMessage}"
-                                                )
-                                        }
-                                    }.recover {
-                                        case e: DemoException if e.alreadyPrinted => ()
-                                        case e: DemoException =>
-                                            println(s"[State] ERROR [${e.code}]: ${e.message}")
-                                        case e: Exception =>
-                                            println(s"[State] UNEXPECTED ERROR: ${e.getMessage}")
-                                            e.printStackTrace()
+                                    // Send request - response will be handled by background listener
+                                    client.sendMessage(ClientRequest.GetState(clientId.get)) match {
+                                        case Success(_) => () // Response handled by background listener
+                                        case Failure(e) =>
+                                            println(s"[State] ERROR: Failed to send request: ${e.getMessage}")
                                     }
                                 }
 

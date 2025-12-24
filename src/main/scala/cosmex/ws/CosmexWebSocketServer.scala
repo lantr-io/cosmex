@@ -43,7 +43,7 @@ object CosmexWebSocketServer {
                         println(s"[Server] Received request: ${request.getClass.getSimpleName}")
 
                         // Handle the request - returns List[ClientResponse]
-                        val responses = handleRequest(server, request)
+                        val responses = handleRequest(server, clientId, request)
 
                         // Convert each response to JSON and return as List
                         responses.map { response =>
@@ -173,7 +173,7 @@ object CosmexWebSocketServer {
       * Most requests return a single response, but CreateOrder returns OrderCreated followed by
       * OrderExecuted for each trade (ensures correct ordering)
       */
-    def handleRequest(server: Server, request: ClientRequest): List[ClientResponse] = {
+    def handleRequest(server: Server, wsClientId: ClientId, request: ClientRequest): List[ClientResponse] = {
         given Server = server
         val responses = request match {
             case ClientRequest.OpenChannel(tx, snapshot) =>
@@ -209,6 +209,19 @@ object CosmexWebSocketServer {
                         )
                         server.clientStates.put(clientId, clientState)
 
+                        // Debug: Check server-side CBOR before submission
+                        val serverTxCbor = tx.toCbor
+                        val serverFirstByte = serverTxCbor.headOption.map(b => f"${b & 0xff}%02x").getOrElse("??")
+                        println(s"[Server] TX CBOR first byte: 0x$serverFirstByte (should be 0x84)")
+                        println(s"[Server] TX CBOR length: ${serverTxCbor.length} bytes")
+                        println(s"[Server] TX CBOR first 100 bytes: ${serverTxCbor.take(100).map(b => f"${b & 0xff}%02x").mkString}")
+                        println(s"[Server] TX CBOR last 20 bytes: ${serverTxCbor.takeRight(20).map(b => f"${b & 0xff}%02x").mkString}")
+                        println(s"[Server] TX isValid: ${tx.isValid}, auxiliaryData: ${tx.auxiliaryData}")
+                        println(s"[Server] TX body inputs: ${tx.body.value.inputs.toSeq.size}")
+                        println(s"[Server] TX body outputs: ${tx.body.value.outputs.size}")
+                        println(s"[Server] TX witnessSet vkeys: ${tx.witnessSet.vkeyWitnesses.toSeq.size}")
+                        println(s"[Server] Full TX CBOR hex: ${serverTxCbor.map(b => f"${b & 0xff}%02x").mkString}")
+
                         // Submit transaction to blockchain (non-blocking)
                         server.provider.submit(tx).await() match {
                             case Left(submitError) =>
@@ -225,11 +238,11 @@ object CosmexWebSocketServer {
                                 )
                         }
 
-                        // Get the client's async response channel
-                        server.clientChannels.get(clientId) match {
+                        // Get the client's async response channel (use WebSocket clientId, not tx-derived)
+                        server.clientChannels.get(wsClientId) match {
                             case None =>
                                 val errorMsg =
-                                    s"Internal error: No async channel for client ${clientId}"
+                                    s"Internal error: No async channel for client ${wsClientId}"
                                 println(s"[Server] ERROR: $errorMsg")
                                 List(ClientResponse.Error(ErrorCode.InternalError, errorMsg))
 
@@ -237,7 +250,7 @@ object CosmexWebSocketServer {
                                 // Launch background thread to wait for confirmation using submitAndWait
                                 val pollingThread = new Thread(() => {
                                     println(
-                                      s"[Server] Starting background confirmation wait for: ${clientId}"
+                                      s"[Server] Starting background confirmation wait for: ${wsClientId}"
                                     )
 
                                     // Use submitAndWait extension (handles both transaction status and UTxO polling)
@@ -290,7 +303,7 @@ object CosmexWebSocketServer {
                                 pollingThread.setDaemon(true)
                                 pollingThread.start()
 
-                                println(s"[Server] Channel pending for client: ${clientId}")
+                                println(s"[Server] Channel pending for client: ${wsClientId}")
                                 List(ClientResponse.ChannelPending(tx.id.toHex))
                         }
                 }

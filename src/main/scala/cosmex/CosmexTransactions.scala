@@ -50,68 +50,83 @@ class CosmexTransactions(
       *   An unsigned Transaction that opens the channel
       */
     def openChannel(
-        clientInput: Utxo,
+        clientInputs: Seq[Utxo],
         clientPubKey: Signature,
         depositAmount: Value
     ): Transaction = {
+        require(clientInputs.nonEmpty, "At least one input required")
+
+        // The first input is used as the channel identifier
+        val primaryInput = clientInputs.head
+
         // The script address where funds will be locked
         val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
 
         // Create the initial OnChainState with OpenState
-        // The clientTxOutRef is the input being spent, which uniquely identifies this channel
+        // The clientTxOutRef is the first input being spent, which uniquely identifies this channel
         val initialState = OnChainState(
           clientPkh = PubKeyHash(platform.blake2b_224(clientPubKey)),
           clientPubKey = clientPubKey,
-          clientTxOutRef = TxOutRef(TxId(clientInput.input.transactionId), clientInput.input.index),
+          clientTxOutRef = TxOutRef(TxId(primaryInput.input.transactionId), primaryInput.input.index),
           channelState = OnChainChannelState.OpenState
         )
 
-        // Check if input contains tokens (multi-assets) by comparing to ADA-only value
-        val inputValue = clientInput.output.value
-        val hasTokens = inputValue != Value.lovelace(inputValue.coin.value)
+        // Calculate total input value across all inputs
+        val totalInputValue = clientInputs.map(_.output.value).reduce(_ + _)
+        val hasTokens = totalInputValue != Value.lovelace(totalInputValue.coin.value)
+
+        // Build transaction with all inputs
+        val builder = clientInputs.foldLeft(TxBuilder(env)) { (b, utxo) =>
+            b.spend(utxo)
+        }
 
         if hasTokens then {
-            // If input has tokens, we need to explicitly handle them
+            // If inputs have tokens, we need to explicitly handle them
             // Calculate what remains after deposit (tokens should be preserved)
-            val remainingValue = inputValue - depositAmount
+            val rawRemainingValue = totalInputValue - depositAmount
+            // Filter out zero and negative token amounts (subtraction can leave these)
+            val remainingValue = Value(rawRemainingValue.coin, rawRemainingValue.assets.onlyPositive)
 
             // If there's remaining value (tokens + ADA), send it back explicitly
-            // Then use changeTo to set the diff handler for fee calculation
             if remainingValue.coin.value > 0 || remainingValue != Value.lovelace(
                   remainingValue.coin.value
                 )
             then {
-                TxBuilder(env)
-                    .spend(clientInput)
+                builder
                     .payTo(
                       address = scriptAddress,
                       value = depositAmount,
                       datum = initialState.toData
                     )
-                    .payTo(address = clientInput.output.address, value = remainingValue)
-                    .build(changeTo = clientInput.output.address)
+                    .payTo(address = primaryInput.output.address, value = remainingValue)
+                    .build(changeTo = primaryInput.output.address)
                     .transaction
             } else {
                 // All value deposited, just need diff handler for fees
-                TxBuilder(env)
-                    .spend(clientInput)
+                builder
                     .payTo(
                       address = scriptAddress,
                       value = depositAmount,
                       datum = initialState.toData
                     )
-                    .build(changeTo = clientInput.output.address)
+                    .build(changeTo = primaryInput.output.address)
                     .transaction
             }
         } else {
             // No tokens - use standard changeTo
-            TxBuilder(env)
-                .spend(clientInput)
+            builder
                 .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
-                .build(changeTo = clientInput.output.address)
+                .build(changeTo = primaryInput.output.address)
                 .transaction
         }
     }
+
+    // Convenience method for single input (backwards compatibility)
+    def openChannel(
+        clientInput: Utxo,
+        clientPubKey: Signature,
+        depositAmount: Value
+    ): Transaction = openChannel(Seq(clientInput), clientPubKey, depositAmount)
 
     def update(state: OnChainState, signatories: Seq[PubKeyHash]): Transaction = {
         // Create the input (hardcoded as in original)

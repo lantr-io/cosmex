@@ -294,7 +294,6 @@ class Server(
         tx: Transaction,
         snapshot: SignedSnapshot
     ): Either[String, OpenChannelInfo] = {
-        val firstInput = tx.body.value.inputs.toSeq.head
         // Find the unique output to Cosmex script address
         println(s"[Server] Expected Cosmex script address: $CosmexScriptAddress")
         println(s"[Server] Transaction outputs:")
@@ -344,16 +343,15 @@ class Server(
         // Check that there are no orders
         if !tradingState.tsOrders.isEmpty then return Left("Initial snapshot must have no orders")
 
-        // Extract client public key from the inline datum (OnChainState)
-        val clientPubKey: ByteString = output.datumOption match
+        // Extract client public key and TxOutRef from the inline datum (OnChainState)
+        // Note: We must use the clientTxOutRef from the on-chain state, not from the transaction inputs,
+        // because transaction inputs are sorted and may differ from the original order used when signing.
+        val (clientPubKey, clientTxOutRef) = output.datumOption match
             case Some(DatumOption.Inline(data)) =>
                 val onChainState = data.to[OnChainState]
-                onChainState.clientPubKey
+                (onChainState.clientPubKey, onChainState.clientTxOutRef)
             case _ =>
                 return Left("Output must have inline datum with OnChainState")
-
-        // Verify client signature using the extracted public key
-        val clientTxOutRef = TxOutRef(TxId(firstInput.transactionId), firstInput.index)
         println(s"[Server] Verifying client signature:")
         println(
           s"[Server]   Public key length: ${clientPubKey.length}, hex: ${clientPubKey.toHex.take(32)}..."
@@ -406,16 +404,20 @@ class Server(
 
     /** Validate that the client has sufficient balance for the order.
       *
-      * For SELL orders (orderAmount < 0): need base asset (|orderAmount|) For BUY orders
-      * (orderAmount > 0): need quote asset (orderAmount * orderPrice / PRICE_SCALE)
+      * For SELL orders (orderAmount < 0): need base asset (|orderAmount|)
+      * For BUY orders (orderAmount > 0): need quote asset (orderAmount * orderPrice / PRICE_SCALE)
+      *
+      * Note: Uses tsClientBalance directly because existing orders have already
+      * had their locked amounts deducted from tsClientBalance (pre-deduction model).
       */
     def validateOrderBalance(
-        clientBalance: scalus.ledger.api.v3.Value,
+        tradingState: TradingState,
         order: LimitOrder
     ): Either[(String, String), Unit] = {
         val (baseAsset, quoteAsset) = order.orderPair
         val orderAmount = order.orderAmount
         val orderPrice = order.orderPrice
+        val clientBalance = tradingState.tsClientBalance
 
         if orderAmount < 0 then {
             // SELL order: need base asset
@@ -467,7 +469,7 @@ class Server(
                 val currentTradingState = currentSnapshot.snapshotTradingState
 
                 // Validate that client has sufficient balance for the order
-                validateOrderBalance(currentTradingState.tsClientBalance, order) match
+                validateOrderBalance(currentTradingState, order) match
                     case Left(error) => return Left(error)
                     case Right(())   => () // Validation passed
 
@@ -491,6 +493,7 @@ class Server(
                         )
 
                 // Reduce client's free balance by the locked amount
+                // This maintains the invariant: tsClientBalance + tsExchangeBalance + lockedInOrders = locked
                 val newClientBalance = currentTradingState.tsClientBalance - lockedValue
 
                 val newOrders = AssocMap.insert(currentTradingState.tsOrders)(orderId, order)
@@ -574,7 +577,61 @@ class Server(
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
                 clientStates.put(clientId, updatedState)
 
+                // Update counterparty states for matched trades
+                updateCounterpartyStates(clientId, matchResult.trades)
+
                 Right((longOrderId, bothSignedSnapshot, matchResult.trades))
+    }
+
+    /** Update counterparty states after trades are executed.
+      * For each trade, finds the counterparty (owner of the matched order) and
+      * updates their trading state with the trade result.
+      */
+    def updateCounterpartyStates(initiatingClientId: ClientId, trades: List[Trade]): Unit = {
+        import CosmexValidator.applyTrade
+
+        // Group trades by orderId to find counterparty orders
+        val tradesByOrderId = trades.groupBy(_.orderId)
+
+        tradesByOrderId.foreach { case (tradeOrderId, tradesForOrder) =>
+            orderOwners.get(tradeOrderId).foreach { counterpartyClientId =>
+                // Skip if this is the initiating client (already updated)
+                if counterpartyClientId != initiatingClientId then {
+                    clientStates.get(counterpartyClientId).foreach { counterpartyState =>
+                        val currentSnapshot = counterpartyState.latestSnapshot.signedSnapshot
+                        val currentTradingState = currentSnapshot.snapshotTradingState
+
+                        // Apply counterparty's trades to their trading state
+                        val tradingStateAfterTrades = tradesForOrder.foldLeft(currentTradingState) {
+                            (ts, trade) => applyTrade(ts, trade)
+                        }
+
+                        // Create new snapshot
+                        val newSnapshot = Snapshot(
+                          snapshotTradingState = tradingStateAfterTrades,
+                          snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                          snapshotVersion = currentSnapshot.snapshotVersion + 1
+                        )
+
+                        val counterpartyTxOutRef = TxOutRef(
+                          TxId(counterpartyState.channelRef.transactionId),
+                          counterpartyState.channelRef.index
+                        )
+
+                        val signedSnapshot = SignedSnapshot(
+                          signedSnapshot = newSnapshot,
+                          snapshotClientSignature = ByteString.empty,
+                          snapshotExchangeSignature = ByteString.empty
+                        )
+
+                        val bothSignedSnapshot = signSnapshot(counterpartyTxOutRef, signedSnapshot)
+                        val updatedCounterpartyState =
+                            counterpartyState.copy(latestSnapshot = bothSignedSnapshot)
+                        clientStates.put(counterpartyClientId, updatedCounterpartyState)
+                    }
+                }
+            }
+        }
     }
 
     def handleCancelOrder(
@@ -712,19 +769,19 @@ class Server(
         provider.findUtxo(txOutRef).await().isRight
     }
 
-    /** Check if a client needs rebalancing (on-chain locked value != snapshot balances) */
+    /** Check if a client needs rebalancing (on-chain locked value != client's entitled balance) */
     def needsRebalancing(clientId: ClientId): Boolean = {
         clientStates.get(clientId) match
             case None => false
             case Some(clientState) =>
                 val tradingState = clientState.latestSnapshot.signedSnapshot.snapshotTradingState
-                // Total snapshot balance = client + exchange + locked in orders
-                val snapshotTotal = tradingState.tsClientBalance +
-                    tradingState.tsExchangeBalance +
+                // Client's entitled balance = client balance + locked in orders
+                // (exchange balance is what the exchange owes/is owed, not part of client's entitlement)
+                val clientEntitledBalance = tradingState.tsClientBalance +
                     CosmexValidator.lockedInOrders(tradingState.tsOrders)
                 // Compare with on-chain locked value
                 val lockedValue = LedgerToPlutusTranslation.getValue(clientState.lockedValue)
-                snapshotTotal != lockedValue
+                clientEntitledBalance != lockedValue
     }
 
     /** Find all clients that need rebalancing */

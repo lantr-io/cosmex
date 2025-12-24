@@ -553,6 +553,142 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         )
     }
 
+    test("Server: needsRebalancing returns true after trade changes balances") {
+        val provider = this.newEmulator()
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+
+        // 1. Alice opens channel with 900 ADA
+        val aliceDepositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(900)))
+            .await()
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(900L)
+        val aliceOpenChannelTx = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+
+        val aliceActualDeposit = aliceOpenChannelTx.body.value.outputs.view
+            .map(_.value)
+            .find(_.address == server.CosmexScriptAddress)
+            .get
+            .value
+        val aliceClientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(aliceDepositUtxo.input)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, 0))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
+        )
+        server.clientStates.put(aliceClientId, aliceClientState)
+
+        // 2. Bob opens channel with 50 ADA + 500 USDM
+        val bobDepositUtxo = provider
+            .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(50)))
+            .await()
+            .toOption
+            .get
+
+        val bobDepositAmount =
+            Value.ada(50L) + Value.asset(usdmPolicyId, usdmAssetName, 500_000_000)
+        val bobOpenChannelTx = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+        val bobChannelTxOut = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+
+        val bobActualDeposit = bobChannelTxOut._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelTxOut._2)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelTxOut._2))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = bobPubKey
+        )
+        server.clientStates.put(bobClientId, bobClientState)
+
+        // 3. Verify BEFORE trade: no rebalancing needed
+        assert(
+          !server.needsRebalancing(aliceClientId),
+          "Alice should NOT need rebalancing before any trades"
+        )
+        assert(
+          !server.needsRebalancing(bobClientId),
+          "Bob should NOT need rebalancing before any trades"
+        )
+        assert(
+          server.findClientsNeedingRebalancing().isEmpty,
+          "No clients should need rebalancing before trades"
+        )
+
+        // 4. Alice creates SELL order: 100 ADA @ 0.50 USDM/ADA
+        val aliceSellOrder = mkSellOrder(
+          pair = (ADA, USDM),
+          amount = 100_000_000,
+          price = 500_000
+        )
+        val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceSellOrder)
+        assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
+
+        // 5. Bob creates BUY order: 70 ADA @ 0.55 USDM/ADA (matches Alice's order)
+        val bobBuyOrder = mkBuyOrder(
+          pair = (ADA, USDM),
+          amount = 70_000_000,
+          price = 550_000
+        )
+        val bobOrderResult = server.handleCreateOrder(bobClientId, bobBuyOrder)
+        assert(bobOrderResult.isRight, s"Bob order creation failed: $bobOrderResult")
+
+        val (_, _, bobTrades) = bobOrderResult.toOption.get
+        assert(bobTrades.nonEmpty, "Trade should have executed")
+
+        // 6. Verify AFTER trade: rebalancing IS needed
+        // Alice sold 70 ADA, received USDM → her on-chain (900 ADA) != her balance (830 ADA + USDM)
+        // Bob bought 70 ADA, paid USDM → his on-chain (50 ADA + 500 USDM) != his balance (120 ADA + 465 USDM)
+        assert(
+          server.needsRebalancing(aliceClientId),
+          "Alice SHOULD need rebalancing after trade (balance changed)"
+        )
+        assert(
+          server.needsRebalancing(bobClientId),
+          "Bob SHOULD need rebalancing after trade (balance changed)"
+        )
+
+        val clientsNeedingRebalance = server.findClientsNeedingRebalancing()
+        assert(
+          clientsNeedingRebalance.size == 2,
+          s"Both clients should need rebalancing, but got: $clientsNeedingRebalance"
+        )
+        assert(
+          clientsNeedingRebalance.contains(aliceClientId),
+          "Alice should be in the set of clients needing rebalancing"
+        )
+        assert(
+          clientsNeedingRebalance.contains(bobClientId),
+          "Bob should be in the set of clients needing rebalancing"
+        )
+
+        println("✓ Rebalancing detection works correctly after trades")
+    }
+
     test("Server: reject SELL order when insufficient base asset balance") {
         val provider = this.newEmulator()
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)

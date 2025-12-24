@@ -1059,8 +1059,16 @@ object CosmexValidator extends DataParameterizedValidator {
                                     val quoteAmount = tradeAmount * tradePrice / PRICE_SCALE
                                     val baseAssetValue = assetClassValue(baseAsset, tradeAmount)
                                     val quoteAssetValue = assetClassValue(quoteAsset, quoteAmount)
+                                    // When order was created, the locked asset was pre-deducted from clientBalance.
+                                    // For SELL orders (orderAmount < 0): base was locked, so just receive quote
+                                    // For BUY orders (orderAmount > 0): quote was locked, so just receive base
                                     val clientBalance1 =
-                                        tsClientBalance + baseAssetValue - quoteAssetValue
+                                        if orderAmount < BigInt(0) then
+                                            // SELL: base already deducted, just add quote received
+                                            tsClientBalance - quoteAssetValue
+                                        else
+                                            // BUY: quote already deducted, just add base received
+                                            tsClientBalance + baseAssetValue
                                     val exchangeBalance1 =
                                         tsExchangeBalance - baseAssetValue + quoteAssetValue
                                     val orderAmountLeft = orderAmount - tradeAmount
