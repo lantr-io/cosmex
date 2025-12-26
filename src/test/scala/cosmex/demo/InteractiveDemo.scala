@@ -1274,7 +1274,13 @@ object InteractiveDemo {
                                 provider.submit(tx).await() match {
                                     case Right(txHash) =>
                                         println(
-                                          s"[ContestedClose] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                          s"[ContestedClose] ✓ Transaction submitted!"
+                                        )
+                                        println(
+                                          s"[ContestedClose] Full TX ID: ${txHash.toHex}"
+                                        )
+                                        println(
+                                          s"[ContestedClose] Check on Cardanoscan: https://preprod.cardanoscan.io/transaction/${txHash.toHex}"
                                         )
 
                                         // Update channel ref to the new UTxO
@@ -1414,7 +1420,7 @@ object InteractiveDemo {
                                 provider.submit(tx).await() match {
                                     case Right(txHash) =>
                                         println(
-                                          s"[Timeout] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                          s"[Timeout] ✓ Transaction submitted! TX ID: ${txHash.toHex}"
                                         )
 
                                         // Update channel ref
@@ -1578,7 +1584,7 @@ object InteractiveDemo {
                                 provider.submit(tx).await() match {
                                     case Right(txHash) =>
                                         println(
-                                          s"[Payout] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
+                                          s"[Payout] ✓ Transaction submitted! TX ID: ${txHash.toHex}"
                                         )
                                         println(
                                           s"[Payout] ✓ Funds have been returned to your wallet!"
