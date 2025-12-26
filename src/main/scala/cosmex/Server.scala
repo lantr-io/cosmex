@@ -829,22 +829,18 @@ class Server(
         // Build rebalance transaction using CosmexTransactions
         val txBuilder = CosmexTransactions(exchangeParams, env)
 
-        // Reconstruct OnChainState from ClientState (we have all the info we need)
+        // Read OnChainState from UTxO datum - we must use the datum's clientTxOutRef
+        // because it's immutable (set when channel was opened), while channelRef changes
+        // with each update transaction
         val channelDataWithOnChainState = channelUtxos.map { case (clientId, utxo, state) =>
-            // Compute clientPkh from clientPubKey
-            val clientPkh = scalus.ledger.api.v2.PubKeyHash(
-              platform.blake2b_224(state.clientPubKey)
-            )
-            val clientTxOutRef = scalus.ledger.api.v3.TxOutRef(
-              scalus.ledger.api.v3.TxId(state.channelRef.transactionId),
-              state.channelRef.index
-            )
-            val onChainState = OnChainState(
-              clientPkh = clientPkh,
-              clientPubKey = state.clientPubKey,
-              clientTxOutRef = clientTxOutRef,
-              channelState = OnChainChannelState.OpenState
-            )
+            val onChainState = utxo.output.datumOption match {
+                case Some(DatumOption.Inline(data)) =>
+                    data.to[OnChainState]
+                case _ =>
+                    throw new RuntimeException(
+                      s"Channel UTxO for client $clientId does not have inline datum"
+                    )
+            }
             (utxo, onChainState, state.latestSnapshot.signedSnapshot.snapshotTradingState)
         }
 
@@ -858,12 +854,42 @@ class Server(
         )
         println(s"[Server] Using sponsor address: $sponsorAddress")
 
-        val rebalanceTx = txBuilder.rebalance(
-          provider,
-          channelDataWithOnChainState,
-          exchangeParams.exchangePkh,
-          sponsor = sponsorAddress
-        )
+        // Debug: print channel data being rebalanced
+        println(s"[Server] Rebalancing ${channelDataWithOnChainState.size} channels:")
+        channelDataWithOnChainState.foreach { case (utxo, onChainState, tradingState) =>
+            println(s"[Server]   Channel UTxO: ${utxo.input.transactionId.toHex.take(16)}...#${utxo.input.index}")
+            println(s"[Server]     clientTxOutRef: ${onChainState.clientTxOutRef.id.hash.toHex.take(16)}...#${onChainState.clientTxOutRef.idx}")
+        }
+
+        val rebalanceTx = try {
+            txBuilder.rebalance(
+              provider,
+              channelDataWithOnChainState,
+              exchangeParams.exchangePkh,
+              sponsor = sponsorAddress
+            )
+        } catch {
+            case e: Exception =>
+                println(s"[Server] Rebalance transaction build FAILED: ${e.getMessage}")
+                // Extract trace logs from EvaluationFailure if present
+                var cause = e.getCause
+                while cause != null do {
+                    println(s"[Server]   Cause: ${cause.getClass.getName}")
+                    try {
+                        val logsField = cause.getClass.getDeclaredField("logs")
+                        logsField.setAccessible(true)
+                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                        if logs != null && logs.nonEmpty then {
+                            println(s"[Server]   TRACE LOGS from Plutus evaluation:")
+                            logs.foreach(log => println(s"[Server]     $log"))
+                        }
+                    } catch {
+                        case _: NoSuchFieldException => // No logs field in this exception
+                    }
+                    cause = cause.getCause
+                }
+                return Left((ErrorCode.RebalancingFailed, s"Failed to build rebalance transaction: ${e.getMessage}"))
+        }
 
         // Set rebalancing state
         val context = RebalancingContext(
@@ -926,16 +952,20 @@ class Server(
             tx.witnessSet.vkeyWitnesses.toSeq
         }.toSeq
 
-        // Create final transaction with all witnesses
+        // Sign with exchange key
+        val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
+        val exchangeSignature = ByteString.fromArray(
+          signingProvider.signExtended(context.rebalanceTx.id.bytes, CosmexSignKey.bytes)
+        )
+        val exchangeWitness = VKeyWitness(CosmexPubKey, exchangeSignature)
+
+        // Create final transaction with all witnesses (client + exchange)
         val finalWitnessSet = context.rebalanceTx.witnessSet.copy(
-          vkeyWitnesses = TaggedSortedSet.from(allWitnesses)
+          vkeyWitnesses = TaggedSortedSet.from(allWitnesses :+ exchangeWitness)
         )
         val finalTx = context.rebalanceTx.copy(
           witnessSet = finalWitnessSet
         )
-
-        // Sign with exchange key and submit
-        // TODO: Add exchange signature to finalTx
 
         println(s"[Server] Submitting rebalance transaction: ${finalTx.id.toHex.take(16)}...")
 

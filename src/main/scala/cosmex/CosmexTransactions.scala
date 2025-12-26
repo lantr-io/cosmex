@@ -383,18 +383,26 @@ class CosmexTransactions(
         val validityEnd = validityStart.plusSeconds(600) // 10 minutes validity window
         println(s"[rebalance] validityStart: $validityStart, validityEnd: $validityEnd")
 
+        // CRITICAL: Sort channelData by TxOutRef to match Cardano's input ordering.
+        // The validator uses input index to find the corresponding output, expecting
+        // output[i] to correspond to input[i]. Since Cardano sorts inputs by TxOutRef,
+        // we must add outputs in the same sorted order.
+        val sortedChannelData = channelData.sortBy { case (utxo, _, _) =>
+            (utxo.input.transactionId.toHex, utxo.input.index)
+        }
+
         // Collect all signatories needed (all clients + exchange)
-        val clientPkhs = channelData.map(_._2.clientPkh)
+        val clientPkhs = sortedChannelData.map(_._2.clientPkh)
         val allSignatories = (clientPkhs :+ exchangePkh).distinct.map(pkh => AddrKeyHash(pkh.hash)).toSet
 
         // Build the transaction using TxBuilder which handles collateral
-        // First add all spends
-        val withSpends = channelData.foldLeft(TxBuilder(env)) { case (b, (utxo, _, _)) =>
+        // First add all spends (order doesn't matter, they get sorted anyway)
+        val withSpends = sortedChannelData.foldLeft(TxBuilder(env)) { case (b, (utxo, _, _)) =>
             b.spend(utxo, Action.Update, script, allSignatories)
         }
 
-        // Then add all outputs
-        val withOutputs = channelData.foldLeft(withSpends) { case (b, (_, onChainState, tradingState)) =>
+        // Then add all outputs IN SORTED ORDER to match input ordering
+        val withOutputs = sortedChannelData.foldLeft(withSpends) { case (b, (_, onChainState, tradingState)) =>
             // Calculate new locked value from snapshot: client + exchange + locked in orders
             val newLockedValue = tradingState.tsClientBalance +
                 tradingState.tsExchangeBalance +

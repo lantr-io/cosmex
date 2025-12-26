@@ -158,6 +158,64 @@ object CosmexValidator extends DataParameterizedValidator {
         go(0, inputs)
     }
 
+    /** Try to find the output that corresponds to a given clientTxOutRef.
+      *
+      * For multi-input transactions (like rebalance), index-based output matching doesn't work
+      * because non-script inputs (sponsor UTxOs) may be present. Instead, we find the output
+      * by matching the clientTxOutRef stored in its datum.
+      *
+      * @param outputs
+      *   List of transaction outputs
+      * @param expectedAddress
+      *   The expected script address for the output
+      * @param clientTxOutRef
+      *   The clientTxOutRef that should be in the output's datum
+      * @return
+      *   Some(output) if found, None otherwise
+      */
+    def tryFindOwnOutput(
+        outputs: List[TxOut],
+        expectedAddress: Address,
+        clientTxOutRef: TxOutRef
+    ): scalus.prelude.Option[TxOut] = {
+        def go(outs: List[TxOut]): scalus.prelude.Option[TxOut] = outs match
+            case List.Nil => scalus.prelude.Option.None
+            case List.Cons(txOut, tail) =>
+                txOut match
+                    case TxOut(address, _, datum, _) =>
+                        // Check if address matches and datum contains our clientTxOutRef
+                        if address === expectedAddress then
+                            datum match
+                                case v2.OutputDatum.OutputDatum(data) =>
+                                    // Try to extract OnChainState from datum
+                                    val state = data.to[OnChainState]
+                                    if state.clientTxOutRef === clientTxOutRef then
+                                        scalus.prelude.Option.Some(txOut)
+                                    else go(tail)
+                                case _ => go(tail)
+                        else go(tail)
+
+        go(outputs)
+    }
+
+    /** Find the output for this input, trying datum-matching first, then falling back to index.
+      *
+      * For multi-input transactions (rebalance), finds output by matching clientTxOutRef in datum.
+      * For single-input transactions (payout), where output goes to key address, uses index.
+      */
+    def findOwnOutputOrByIndex(
+        outputs: List[TxOut],
+        expectedAddress: Address,
+        clientTxOutRef: TxOutRef,
+        fallbackIndex: BigInt
+    ): TxOut = {
+        tryFindOwnOutput(outputs, expectedAddress, clientTxOutRef) match
+            case scalus.prelude.Option.Some(txOut) => txOut
+            case scalus.prelude.Option.None =>
+                // Fall back to index-based matching for payout/close scenarios
+                outputs !! fallbackIndex
+    }
+
     def expectNewState(
         ownOutput: TxOut,
         ownInputAddress: Address,
@@ -923,7 +981,16 @@ object CosmexValidator extends DataParameterizedValidator {
         findOwnInputAndIndex(0, tx.inputs) match
             case (ownTxInResolvedTxOut, ownIndex) =>
                 trace("cosmexSpending: found input")(())
-                val ownOutput = tx.outputs !! ownIndex
+                // Try to find the matching output by clientTxOutRef for multi-input transactions.
+                // Fall back to index-based matching for payout transactions where output
+                // goes to a key address (not script address) and has no datum.
+                val ownInputAddress = ownTxInResolvedTxOut.address
+                val ownOutput = findOwnOutputOrByIndex(
+                  tx.outputs,
+                  ownInputAddress,
+                  state.clientTxOutRef,
+                  ownIndex
+                )
                 trace("cosmexSpending: got ownOutput")(())
                 state.channelState match
                     case OpenState =>

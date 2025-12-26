@@ -27,16 +27,27 @@ import scala.util.{Failure, Success, Try}
   *
   * This test verifies the full lifecycle:
   *   1. Alice and Bob open channels
-  *   2. Alice creates a BUY order, Bob creates a SELL order
-  *   3. Orders are matched and executed
-  *   4. Alice triggers rebalancing
+  *   2. Alice creates a BUY order for GOLD, Bob creates a SELL order for GOLD
+  *   3. Orders are matched and executed (GOLD moves from Bob to Alice, ADA moves from Alice to Bob)
+  *   4. Alice triggers rebalancing (required because on-chain values differ from snapshot balances)
   *   5. Both clients sign the rebalance transaction
-  *   6. Rebalancing completes
-  *   7. Alice initiates close/payout
+  *   6. Rebalancing completes - on-chain values now match snapshot balances
+  *   7. Final state is verified
+  *
+  * IMPORTANT: This test uses GOLD/ADA trading pair (not ADA/ADA) to ensure balances
+  * actually change after trades, which is required to trigger the rebalancing code path.
   */
 class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
 
-    test("Complete Trading -> Rebalance -> Payout scenario") {
+    // Create a mock GOLD token for testing
+    // In real scenarios, this would be minted on-chain
+    private val goldPolicyId: ScriptHash =
+        Hash.scriptHash(ByteString.fromHex("1234567890abcdef1234567890abcdef1234567890abcdef12345678"))
+    private val goldAssetName = AssetName(ByteString.fromString("GOLD"))
+    private val goldAsset: (ByteString, ByteString) = (goldPolicyId, goldAssetName.bytes)
+    private val adaAsset: (ByteString, ByteString) = (ByteString.empty, ByteString.empty)
+
+    test("Complete Trading -> Rebalance -> Payout scenario with GOLD/ADA") {
         supervised {
             // Load configuration
             val config = DemoConfig.load()
@@ -47,7 +58,7 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
             val exchangeParams = config.exchange.createParams()
             val exchangePrivKey = config.exchange.getPrivateKey()
 
-            // Setup Alice
+            // Setup Alice - starts with 100 ADA, will buy GOLD
             val aliceAccount = config.alice.createAccount()
             val alicePubKey = config.alice.getPubKey()
             val alicePubKeyHash = config.alice.getPubKeyHash()
@@ -57,7 +68,7 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
             )
             val aliceInitialValue = Value.ada(100) // 100 ADA
 
-            // Setup Bob
+            // Setup Bob - starts with 50 ADA + 100 GOLD tokens, will sell GOLD
             val bobAccount = config.bob.createAccount()
             val bobPubKey = config.bob.getPubKey()
             val bobPubKeyHash = config.bob.getPubKeyHash()
@@ -65,7 +76,8 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
               config.network.scalusNetwork,
               Credential.KeyHash(AddrKeyHash.fromByteString(bobPubKeyHash))
             )
-            val bobInitialValue = Value.ada(100) // 100 ADA
+            // Bob deposits 50 ADA + 100 GOLD tokens
+            val bobInitialValue = Value.ada(50) + Value.asset(goldPolicyId, goldAssetName, 100)
 
             // Create provider (mock for this test)
             val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
@@ -76,10 +88,15 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                   TransactionOutput(address = bobAddress, value = bobInitialValue + Value.ada(50))
             )
 
+            // Create emulator with initial slot, then advance to current time
             val mainnetCtx = Context.testMainnet(slot = 1000)
             val testnetEnv = mainnetCtx.env.copy(network = scalus.cardano.address.Network.Testnet)
             val testnetContext = new Context(mainnetCtx.fee, testnetEnv, mainnetCtx.slotConfig)
             val provider = Emulator(initialUtxos = initialUtxos, initialContext = testnetContext)
+
+            // Advance emulator slot to current time so validity intervals work correctly
+            val currentSlot = SlotConfig.Mainnet.timeToSlot(java.time.Instant.now().toEpochMilli)
+            provider.setSlot(currentSlot)
 
             val cardanoInfo = CardanoInfoTestNet.currentNetwork(provider)
             val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
@@ -128,28 +145,31 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                 )
 
                 try {
-                    // Phase 2: Create matching orders
-                    println("\n=== Phase 2: Creating Matching Orders ===")
+                    // Phase 2: Create matching orders for GOLD/ADA pair
+                    println("\n=== Phase 2: Creating Matching Orders (GOLD/ADA) ===")
 
-                    val adaAsset = (ByteString.empty, ByteString.empty)
-                    val tradingPair = (adaAsset, adaAsset) // ADA/ADA for simplicity
+                    // Trading pair: GOLD (base) / ADA (quote)
+                    // Price is in ADA per GOLD (scaled by PRICE_SCALE = 1_000_000)
+                    val tradingPair = (goldAsset, adaAsset)
 
-                    // Alice: BUY 10 ADA @ price 1000000
+                    // Alice: BUY 50 GOLD @ price 1_000_000 (1 ADA per GOLD)
+                    // This means Alice will pay 50 ADA to receive 50 GOLD
                     val aliceOrder = LimitOrder(
                       orderPair = tradingPair,
-                      orderAmount = 10_000_000L, // 10 ADA (positive = buy)
-                      orderPrice = 1_000_000L
+                      orderAmount = 50L, // 50 GOLD (positive = buy)
+                      orderPrice = 1_000_000L // 1 ADA per GOLD
                     )
-                    println("[Alice] Creating BUY order: 10 ADA @ 1000000")
+                    println("[Alice] Creating BUY order: 50 GOLD @ 1 ADA/GOLD")
                     createOrder(aliceClient, aliceClientId, aliceOrder, "Alice")
 
-                    // Bob: SELL 10 ADA @ price 1000000
+                    // Bob: SELL 50 GOLD @ price 1_000_000 (1 ADA per GOLD)
+                    // This means Bob will sell 50 GOLD and receive 50 ADA
                     val bobOrder = LimitOrder(
                       orderPair = tradingPair,
-                      orderAmount = -10_000_000L, // -10 ADA (negative = sell)
-                      orderPrice = 1_000_000L
+                      orderAmount = -50L, // -50 GOLD (negative = sell)
+                      orderPrice = 1_000_000L // 1 ADA per GOLD
                     )
-                    println("[Bob] Creating SELL order: 10 ADA @ 1000000")
+                    println("[Bob] Creating SELL order: 50 GOLD @ 1 ADA/GOLD")
                     createOrder(bobClient, bobClientId, bobOrder, "Bob")
 
                     // Wait for trade execution
@@ -165,6 +185,10 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
 
                     // Phase 3: Rebalancing
                     println("\n=== Phase 3: Rebalancing ===")
+
+                    // Advance emulator slot to current time (time passed during trading)
+                    val rebalanceSlot = SlotConfig.Mainnet.timeToSlot(java.time.Instant.now().toEpochMilli)
+                    provider.setSlot(rebalanceSlot)
 
                     // Alice triggers rebalancing
                     println("[Alice] Triggering FixBalance...")
@@ -193,9 +217,13 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                     println("=" * 70)
                     println("\nVerified:")
                     println("  - Both clients opened channels successfully")
-                    println("  - Orders were created and matched")
-                    println("  - Rebalancing flow completed")
+                    println("  - GOLD/ADA orders were created and matched")
+                    println("  - Trade executed: 50 GOLD moved from Bob to Alice, 50 ADA moved from Alice to Bob")
+                    println("  - Rebalancing synchronized on-chain values with snapshot balances")
                     println("  - Final state verified")
+                    println("\nExpected final balances after trade:")
+                    println("  Alice: 50 ADA + 50 GOLD (was 100 ADA)")
+                    println("  Bob: 100 ADA + 50 GOLD (was 50 ADA + 100 GOLD)")
                     println()
 
                     succeed
@@ -325,10 +353,15 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                               scalus.builtin.ByteString.empty,
                               scalus.builtin.ByteString.empty
                             )
+                            val goldBalance = balance.quantityOf(
+                              goldAsset._1,
+                              goldAsset._2
+                            )
                             println(s"[$name] ✓ State received:")
                             println(s"[$name]   Status: $status")
                             println(s"[$name]   Snapshot version: $version")
-                            println(s"[$name]   Balance: $adaBalance lovelace")
+                            println(s"[$name]   ADA Balance: ${adaBalance.toDouble / 1_000_000.0} ADA")
+                            println(s"[$name]   GOLD Balance: $goldBalance GOLD")
                             println(s"[$name]   Active orders: ${orders.size}")
                             done = true
 
