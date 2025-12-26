@@ -1276,16 +1276,44 @@ object InteractiveDemo {
                                         println(
                                           s"[ContestedClose] ✓ Transaction submitted: ${txHash.toHex.take(16)}..."
                                         )
-                                        println(
-                                          s"[ContestedClose] Channel is now in SnapshotContestState."
-                                        )
-                                        println(
-                                          s"[ContestedClose] After the contest period, use 'timeout' to advance."
-                                        )
 
                                         // Update channel ref to the new UTxO
                                         val newChannelRef = TransactionInput(txHash, 0)
-                                        clientState = Some(state.copy(channelRef = newChannelRef))
+
+                                        // Wait for UTxO to be indexed before returning
+                                        println(s"[ContestedClose] Waiting for confirmation...")
+                                        var confirmed = false
+                                        var attempts = 0
+                                        val maxAttempts = 60  // 60 attempts * 2s = 120s max wait
+                                        while (!confirmed && attempts < maxAttempts) {
+                                            provider.findUtxo(newChannelRef).await() match {
+                                                case Right(_) =>
+                                                    confirmed = true
+                                                    println(s"[ContestedClose] ✓ Transaction confirmed after ${attempts + 1} attempt(s)")
+                                                case Left(_) =>
+                                                    attempts += 1
+                                                    if (attempts < maxAttempts) {
+                                                        if (attempts % 10 == 0) {
+                                                            println(s"[ContestedClose] Still waiting for confirmation... (attempt $attempts/$maxAttempts)")
+                                                        }
+                                                        Thread.sleep(2000)
+                                                    }
+                                            }
+                                        }
+
+                                        if (confirmed) {
+                                            clientState = Some(state.copy(channelRef = newChannelRef))
+                                            println(
+                                              s"[ContestedClose] Channel is now in SnapshotContestState."
+                                            )
+                                            println(
+                                              s"[ContestedClose] After the contest period, use 'timeout' to advance."
+                                            )
+                                        } else {
+                                            println(s"[ContestedClose] WARNING: Transaction not confirmed after $maxAttempts attempts")
+                                            println(s"[ContestedClose] Updating channelRef anyway - you may need to wait before using 'timeout'")
+                                            clientState = Some(state.copy(channelRef = newChannelRef))
+                                        }
                                     case Left(error) =>
                                         println(
                                           s"[ContestedClose] ERROR: Transaction submission failed: $error"
@@ -1317,15 +1345,30 @@ object InteractiveDemo {
                             println(s"[Timeout] Channel ref: ${state.channelRef}")
 
                             Try {
-                                // Fetch the channel UTxO and extract on-chain state
-                                val channelUtxo = provider
-                                    .findUtxo(state.channelRef)
-                                    .await()
-                                    .getOrElse(
-                                      throw new RuntimeException(
-                                        s"Channel UTxO not found: ${state.channelRef}"
-                                      )
+                                // Fetch the channel UTxO with retry (Blockfrost indexing can be slow)
+                                println(s"[Timeout] Looking up channel UTxO (may take a moment for indexing)...")
+                                var channelUtxo: Utxo = null
+                                var attempts = 0
+                                val maxAttempts = 30  // 30 attempts * 2s = 60s max wait
+                                while (channelUtxo == null && attempts < maxAttempts) {
+                                    provider.findUtxo(state.channelRef).await() match {
+                                        case Right(utxo) =>
+                                            channelUtxo = utxo
+                                        case Left(_) =>
+                                            attempts += 1
+                                            if (attempts < maxAttempts) {
+                                                if (attempts % 5 == 0) {
+                                                    println(s"[Timeout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)")
+                                                }
+                                                Thread.sleep(2000)
+                                            }
+                                    }
+                                }
+                                if (channelUtxo == null) {
+                                    throw new RuntimeException(
+                                      s"Channel UTxO not found after $maxAttempts attempts: ${state.channelRef}"
                                     )
+                                }
 
                                 val onChainState = channelUtxo.output.datumOption match {
                                     case Some(DatumOption.Inline(data)) =>
@@ -1451,15 +1494,30 @@ object InteractiveDemo {
                             println(s"[Payout] Channel ref: ${state.channelRef}")
 
                             Try {
-                                // Fetch the channel UTxO and extract on-chain state
-                                val channelUtxo = provider
-                                    .findUtxo(state.channelRef)
-                                    .await()
-                                    .getOrElse(
-                                      throw new RuntimeException(
-                                        s"Channel UTxO not found: ${state.channelRef}"
-                                      )
+                                // Fetch the channel UTxO with retry (Blockfrost indexing can be slow)
+                                println(s"[Payout] Looking up channel UTxO (may take a moment for indexing)...")
+                                var channelUtxo: Utxo = null
+                                var attempts = 0
+                                val maxAttempts = 30  // 30 attempts * 2s = 60s max wait
+                                while (channelUtxo == null && attempts < maxAttempts) {
+                                    provider.findUtxo(state.channelRef).await() match {
+                                        case Right(utxo) =>
+                                            channelUtxo = utxo
+                                        case Left(_) =>
+                                            attempts += 1
+                                            if (attempts < maxAttempts) {
+                                                if (attempts % 5 == 0) {
+                                                    println(s"[Payout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)")
+                                                }
+                                                Thread.sleep(2000)
+                                            }
+                                    }
+                                }
+                                if (channelUtxo == null) {
+                                    throw new RuntimeException(
+                                      s"Channel UTxO not found after $maxAttempts attempts: ${state.channelRef}"
                                     )
+                                }
 
                                 val onChainState = channelUtxo.output.datumOption match {
                                     case Some(DatumOption.Inline(data)) =>
