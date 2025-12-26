@@ -37,6 +37,14 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
 
     private val mapper = new ObjectMapper()
 
+    /** Detect the network type from the base URL */
+    val networkType: BlockfrostProvider.NetworkType = baseUrl match {
+        case BlockfrostProvider.MainnetUrl => BlockfrostProvider.NetworkType.Mainnet
+        case BlockfrostProvider.PreprodUrl => BlockfrostProvider.NetworkType.Preprod
+        case BlockfrostProvider.PreviewUrl => BlockfrostProvider.NetworkType.Preview
+        case _ => BlockfrostProvider.NetworkType.Unknown
+    }
+
     /** Submit a transaction to the blockchain */
     override def submit(
         tx: Transaction
@@ -290,6 +298,11 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
 }
 
 object BlockfrostProvider {
+    /** Network type enumeration */
+    enum NetworkType {
+        case Mainnet, Preprod, Preview, Unknown
+    }
+
     val MainnetUrl = "https://cardano-mainnet.blockfrost.io/api/v0"
     val PreviewUrl = "https://cardano-preview.blockfrost.io/api/v0"
     val PreprodUrl = "https://cardano-preprod.blockfrost.io/api/v0"
