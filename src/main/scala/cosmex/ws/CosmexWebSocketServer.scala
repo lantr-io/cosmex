@@ -68,8 +68,8 @@ object CosmexWebSocketServer {
                             println(
                               s"[Server] Sent async order execution: Order ID ${trade.orderId}"
                             )
-                        case ClientResponse.ChannelOpened(_) =>
-                            println(s"[Server] Sent async ChannelOpened")
+                        case ClientResponse.ChannelOpened(_, channelRef) =>
+                            println(s"[Server] Sent async ChannelOpened, channelRef: ${channelRef.transactionId.toHex.take(16)}...#${channelRef.index}")
                         case ClientResponse.RebalanceRequired(tx) =>
                             println(s"[Server] Sending RebalanceRequired:")
                             println(s"[Server]   TX ID: ${tx.id.toHex.take(16)}...")
@@ -199,9 +199,9 @@ object CosmexWebSocketServer {
                         // Sign the snapshot
                         val signedSnapshot = server.signSnapshot(clientTxOutRef, snapshot)
 
-                        // Store client state - use the actual channel ref from validation
+                        // Store client state - use the channel OUTPUT ref (matches Server.scala)
                         val channelRef = openChannelInfo.channelRef
-                        val clientId = ClientId(firstInput)
+                        val clientId = ClientId(channelRef)
 
                         // Use the deposit amount from validation result
                         val actualDeposit = openChannelInfo.amount
@@ -279,7 +279,7 @@ object CosmexWebSocketServer {
                                                   ChannelStatus.Open
                                                 )
                                                 channel.send(
-                                                  ClientResponse.ChannelOpened(signedSnapshot)
+                                                  ClientResponse.ChannelOpened(signedSnapshot, channelRef)
                                                 )
                                                 confirmed = true
                                             case Left(_) =>

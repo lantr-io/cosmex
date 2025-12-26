@@ -268,12 +268,15 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
         )
 
         val openChannelTx = signTransaction(account, unsignedTx)
-        val clientId = ClientId(depositUtxo.input)
+        // ClientId is based on the channel OUTPUT (script UTxO), not the spent input
+        val channelOutputRef = TransactionInput(openChannelTx.id, 0)
+        val clientId = ClientId(channelOutputRef)
 
         val wsUrl = s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
         val client = SimpleWebSocketClient(wsUrl)
 
-        val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(clientId.txOutRef)
+        // Snapshot's clientTxOutRef is the INPUT being spent (not the output)
+        val clientTxOutRef = LedgerToPlutusTranslation.getTxOutRefV3(depositUtxo.input)
         val initialSnapshot = mkInitialSnapshot(depositValue)
         val clientSignedSnapshot = mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 

@@ -63,7 +63,7 @@ object MultiClientTestHelpers {
                         println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
                         waitForChannelOpened(client, name)
 
-                    case ClientResponse.ChannelOpened(_) if isMockProvider =>
+                    case ClientResponse.ChannelOpened(_, _) if isMockProvider =>
                         println(s"[$name] ✓ Channel opened instantly (mock provider)")
 
                     case ClientResponse.Error(code, msg) =>
@@ -83,7 +83,7 @@ object MultiClientTestHelpers {
         openResponse match {
             case Success(openJson) =>
                 read[ClientResponse](openJson) match {
-                    case ClientResponse.ChannelOpened(_) =>
+                    case ClientResponse.ChannelOpened(_, _) =>
                         println(s"[$name] ✓ Channel opened!")
                     case ClientResponse.Error(code, msg) =>
                         throw new RuntimeException(

@@ -582,10 +582,12 @@ class CosmexTransactions(
             println(s"[payout] Full payout - channelUtxo.output.value: ${channelUtxo.output.value}")
             println(s"[payout] payoutAddress: $payoutAddress")
 
+            // Add clock skew buffer for preprod compatibility
+            val validityStart = Instant.now().minusSeconds(60)
             val tx = TxBuilder(env)
                 .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
                 .payTo(payoutAddress, channelUtxo.output.value)
-                .validFrom(Instant.now())
+                .validFrom(validityStart)
                 .validTo(Instant.now().plusSeconds(600))
                 .complete(provider, sponsor = payoutAddress)
                 .await()

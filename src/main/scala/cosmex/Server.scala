@@ -66,7 +66,7 @@ object ErrorCode:
 
 enum ClientResponse derives ReadWriter:
     case ChannelPending(txId: String) // Transaction submitted, waiting for confirmation
-    case ChannelOpened(snapshot: SignedSnapshot)
+    case ChannelOpened(snapshot: SignedSnapshot, channelRef: TransactionInput)
     case ClosePending(txId: String) // Close transaction submitted, waiting for confirmation
     case ChannelClosed(snapshot: SignedSnapshot)
     case Error(code: String, message: String)
@@ -186,8 +186,8 @@ class Server(
                         // Send the transaction to the blockchain
                         sendTx(tx)
 
-                        // Reply with the both-signed snapshot
-                        reply(ClientResponse.ChannelOpened(bothSignedSnapshot))
+                        // Reply with the both-signed snapshot and channelRef
+                        reply(ClientResponse.ChannelOpened(bothSignedSnapshot, openChannelInfo.channelRef))
                     case Left(error) =>
                         reply(ClientResponse.Error(ErrorCode.InvalidTransaction, error))
             case _ => List.empty

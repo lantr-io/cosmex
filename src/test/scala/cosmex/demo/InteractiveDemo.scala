@@ -830,21 +830,22 @@ object InteractiveDemo {
                     client.receiveMessage(timeoutSeconds = 200) match {
                         case Success(responseJson) =>
                             read[ClientResponse](responseJson) match {
-                                case ClientResponse.ChannelOpened(snapshot) =>
+                                case ClientResponse.ChannelOpened(snapshot, serverChannelRef) =>
                                     println(s"[Connect] ✓ Channel opened successfully!")
+                                    println(s"[Connect] Server channelRef: ${serverChannelRef.transactionId.toHex.take(16)}...#${serverChannelRef.index}")
                                     isConnected = true
-                                    // Store client state for later use (e.g., close)
-                                    val channelRef =
-                                        TransactionInput(openChannelTx.id, channelOutputIdx)
+                                    // Store client state using the server's channelRef
                                     clientState = Some(
                                       ClientState(
                                         latestSnapshot = snapshot,
-                                        channelRef = channelRef,
+                                        channelRef = serverChannelRef,
                                         lockedValue = depositAmount,
                                         status = ChannelStatus.Open,
                                         clientPubKey = clientPubKey
                                       )
                                     )
+                                    // Update clientId to match server's channelRef
+                                    clientId = Some(ClientId(serverChannelRef))
 
                                     // Start background listener for async notifications
                                     fork {
