@@ -298,10 +298,14 @@ class CosmexTransactions(
 
         // Build the new state with SnapshotContestState
         // Note: contestSnapshotStart must match validRange(range)._2 (end of validity range)
-        // We use a short validity window (1 second) so timeout tests can run quickly
+        // Keep contestation starting ASAP (1 second) to prevent front-running.
+        // The 60-second clock skew buffer on validFrom gives a 61-second total validity window
+        // (from now-60s to now+1s), which is enough for preprod tx submission.
         val validityEndInstant = contestStartTime.plusSeconds(1)
         val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
         val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
+        // Add clock skew buffer - start 60 seconds in the past for preprod compatibility
+        val adjustedStart = contestStartTime.minusSeconds(60)
         println(
           s"[contestedClose] Round-trip: ${validityEndInstant.toEpochMilli} -> slot $validityEndSlot -> $validityEnd"
         )
@@ -329,7 +333,7 @@ class CosmexTransactions(
         println(
           s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}"
         )
-        println(s"[contestedClose] Validity: $contestStartTime to $validityEndInstant")
+        println(s"[contestedClose] Validity: $adjustedStart (adjusted -60s) to $validityEndInstant")
         println(s"[contestedClose] contestSnapshotStart in datum: $validityEnd")
         println(s"[contestedClose] Script address: $scriptAddress")
         println(s"[contestedClose] newState channelState: ${newState.channelState}")
@@ -342,7 +346,7 @@ class CosmexTransactions(
               Set(addrKeyHash) // Only client signs - NOT exchange
             )
             .payTo(scriptAddress, channelUtxo.output.value, newState.toData)
-            .validFrom(contestStartTime)
+            .validFrom(adjustedStart)
             .validTo(validityEndInstant)
             .complete(provider, sponsor = clientAddress)
             .await()

@@ -1510,6 +1510,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println("Step 3: Channel transitioned to SnapshotContestState")
 
         // === STEP 4: FIRST TIMEOUT -> TradesContestState (because orders exist) ===
+        // contestSnapshotStart = contestStart + 1s, contestPeriod = 5s
         // Use 7000ms to ensure timeout condition is met after slot rounding
         val timeAfterContest = contestStart.plusMillis(7000)
         provider.setSlot(SlotConfig.Mainnet.timeToSlot(timeAfterContest.toEpochMilli))
