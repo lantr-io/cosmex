@@ -13,10 +13,17 @@ import scalus.ledger.api.v3.{TxId, TxOutRef}
 import java.time.Instant
 import scala.concurrent.ExecutionContext.Implicits.global
 
+object CosmexTransactions {
+    /** Default validity window for transactions (1 minute for demo) */
+    val DefaultValiditySeconds: Int = 60
+}
+
 class CosmexTransactions(
     val exchangeParams: ExchangeParams,
     env: CardanoInfo
 ) {
+    import CosmexTransactions.DefaultValiditySeconds
+
     private val network = env.network
     val protocolVersion = env.protocolParams.protocolVersion.major
     // Enable error traces for debugging script failures
@@ -243,7 +250,7 @@ class CosmexTransactions(
             )
             .payTo(payoutAddress, clientState.lockedValue)
             .validFrom(Instant.now())
-            .validTo(Instant.now().plusSeconds(600))
+            .validTo(Instant.now().plusSeconds(DefaultValiditySeconds))
             .complete(provider, sponsor = payoutAddress)
             .await()
             .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
@@ -267,11 +274,13 @@ class CosmexTransactions(
       * @return
       *   Transaction that transitions channel to SnapshotContestState
       */
+    /** @param validitySeconds Time until validity expires. Use 1 for tests (instant), 60+ for preprod (block production delay) */
     def contestedClose(
         provider: Provider,
         clientAccount: Account,
         clientState: ClientState,
-        contestStartTime: Instant
+        contestStartTime: Instant,
+        validitySeconds: Int = 1
     ): Transaction = {
         val channelUtxo = provider
             .findUtxo(clientState.channelRef)
@@ -290,6 +299,12 @@ class CosmexTransactions(
                 throw new RuntimeException("Expected inline datum on channel UTxO")
         }
 
+        // VALIDATION: Log on-chain state for debugging
+        val onChainClientTxOutRef = currentOnChainState.clientTxOutRef
+        println(s"[contestedClose] On-chain clientTxOutRef: ${onChainClientTxOutRef.id.hash.toHex.take(16)}...#${onChainClientTxOutRef.idx}")
+        println(s"[contestedClose] On-chain clientPkh: ${currentOnChainState.clientPkh.hash.toHex.take(16)}...")
+        println(s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}")
+
         // Use the client's key hash from the on-chain state for consistency
         val addrKeyHash = AddrKeyHash(currentOnChainState.clientPkh.hash)
 
@@ -298,10 +313,9 @@ class CosmexTransactions(
 
         // Build the new state with SnapshotContestState
         // Note: contestSnapshotStart must match validRange(range)._2 (end of validity range)
-        // Keep contestation starting ASAP (1 second) to prevent front-running.
-        // The 60-second clock skew buffer on validFrom gives a 61-second total validity window
-        // (from now-60s to now+1s), which is enough for preprod tx submission.
-        val validityEndInstant = contestStartTime.plusSeconds(1)
+        // validitySeconds: use 1 for tests (instant), 60+ for preprod (block production delay)
+        // The 60-second clock skew buffer on validFrom gives (60 + validitySeconds) total window.
+        val validityEndInstant = contestStartTime.plusSeconds(validitySeconds)
         val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
         val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
         // Add clock skew buffer - start 60 seconds in the past for preprod compatibility
@@ -386,7 +400,7 @@ class CosmexTransactions(
         // Calculate validity times with buffer for clock skew between server and blockchain
         // Start 60 seconds in the past to ensure the tx is immediately valid
         val adjustedStart = validityStart.minusSeconds(60)
-        val validityEnd = validityStart.plusSeconds(600) // 10 minutes validity window
+        val validityEnd = validityStart.plusSeconds(DefaultValiditySeconds)
         println(s"[rebalance] validityStart: $adjustedStart (adjusted -60s), validityEnd: $validityEnd")
 
         // CRITICAL: Sort channelData by TxOutRef to match Cardano's input ordering.
@@ -449,9 +463,10 @@ class CosmexTransactions(
       */
     def timeout(
         provider: Provider,
+        clientAccount: Account,
         channelRef: TransactionInput,
         currentState: OnChainState,
-        validityStart: Instant
+        contestationPeriodMs: BigInt
     ): Transaction = {
         val channelUtxo = provider
             .findUtxo(channelRef)
@@ -468,13 +483,32 @@ class CosmexTransactions(
         val clientAddress =
             Address(network, Credential.KeyHash(AddrKeyHash(currentState.clientPkh.hash)))
 
-        // Round-trip through slot conversion to match validator computation
-        // The validator uses validRange(range)._2 for TradesContestState
-        val validityEndInstant = validityStart.plusSeconds(600)
+        // Extract contest start time from on-chain state
+        val contestStartMs = currentState.channelState match {
+            case OnChainChannelState.SnapshotContestState(_, contestSnapshotStart, _, _) =>
+                contestSnapshotStart
+            case OnChainChannelState.TradesContestState(_, tradeContestStart) =>
+                tradeContestStart
+            case _ =>
+                throw new RuntimeException(
+                  s"Cannot get contest start from state: ${currentState.channelState}"
+                )
+        }
+
+        // Calculate timeout deadline: contestStart + contestationPeriod
+        // validFrom must be STRICTLY AFTER this deadline for validator to pass (uses < not <=)
+        val timeoutDeadlineMs = (contestStartMs + contestationPeriodMs).toLong
+        // Add 1 slot length to ensure strict inequality after slot rounding in validator
+        // The slot rounding loses sub-slot precision, so we need to add a full slot
+        val validityStartInstant = Instant.ofEpochMilli(timeoutDeadlineMs + env.slotConfig.slotLength)
+        val validityEndInstant = validityStartInstant.plusSeconds(DefaultValiditySeconds)
         val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
         val validityEnd = env.slotConfig.slotToTime(validityEndSlot)
 
-        println(s"[timeout] validityStart: ${validityStart.toEpochMilli}")
+        println(s"[timeout] contestStartMs: $contestStartMs")
+        println(s"[timeout] contestationPeriodMs: $contestationPeriodMs")
+        println(s"[timeout] timeoutDeadlineMs: $timeoutDeadlineMs (${Instant.ofEpochMilli(timeoutDeadlineMs)})")
+        println(s"[timeout] validityStart: ${validityStartInstant.toEpochMilli} (= timeout deadline)")
         println(s"[timeout] validityEnd (round-tripped): $validityEnd")
 
         // Compute the new state based on current state
@@ -521,10 +555,11 @@ class CosmexTransactions(
         TxBuilder(env)
             .spend(channelUtxo, Action.Timeout, script, Set.empty)
             .payTo(scriptAddress, channelUtxo.output.value, newState.toData)
-            .validFrom(validityStart)
+            .validFrom(validityStartInstant)
             .validTo(validityEndInstant)
             .complete(provider, sponsor = clientAddress)
             .await()
+            .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
             .transaction
     }
 
@@ -588,7 +623,7 @@ class CosmexTransactions(
                 .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
                 .payTo(payoutAddress, channelUtxo.output.value)
                 .validFrom(validityStart)
-                .validTo(Instant.now().plusSeconds(600))
+                .validTo(Instant.now().plusSeconds(DefaultValiditySeconds))
                 .complete(provider, sponsor = payoutAddress)
                 .await()
                 .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
@@ -621,7 +656,7 @@ class CosmexTransactions(
                 .payTo(payoutAddress, availableForPaymentLedger)
                 .payTo(scriptAddress, newOutputValue, newState.toData)
                 .validFrom(Instant.now())
-                .validTo(Instant.now().plusSeconds(600))
+                .validTo(Instant.now().plusSeconds(DefaultValiditySeconds))
                 .complete(provider, sponsor = payoutAddress)
                 .await()
                 .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))

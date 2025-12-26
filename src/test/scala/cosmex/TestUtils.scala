@@ -55,7 +55,16 @@ object CardanoInfoTestNet {
                         println(s"[CardanoInfoTestNet] Warning: Unknown Blockfrost network, defaulting to mainnet config")
                         (Network.Testnet, SlotConfig.Mainnet)
                 }
-                CardanoInfo.mainnet.copy(network = network, slotConfig = slotConfig)
+                // Fetch protocol parameters from Blockfrost
+                bf.getProtocolParams() match {
+                    case Right(params) =>
+                        println(s"[CardanoInfoTestNet] Fetched protocol parameters from Blockfrost")
+                        CardanoInfo.mainnet.copy(network = network, slotConfig = slotConfig, protocolParams = params)
+                    case Left(error) =>
+                        println(s"[CardanoInfoTestNet] Warning: Failed to fetch protocol parameters: ${error.getMessage}")
+                        println(s"[CardanoInfoTestNet] Using default mainnet parameters")
+                        CardanoInfo.mainnet.copy(network = network, slotConfig = slotConfig)
+                }
             case _ =>
                 // For other providers (MockLedgerApi, etc.), use mainnet params with testnet network
                 CardanoInfo.mainnet.copy(network = Network.Testnet)

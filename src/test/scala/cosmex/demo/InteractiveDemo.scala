@@ -133,6 +133,7 @@ object InteractiveDemo {
             var isConnected = false
             var mintedPolicyId: Option[ByteString] = None
             var clientState: Option[ClientState] = None
+            var isRebalancing = false  // Track if rebalancing is in progress
 
             // Track spent UTxOs to filter them out from Blockfrost queries (indexing delay)
             val spentUtxos = scala.collection.mutable.Set[TransactionInput]()
@@ -839,6 +840,7 @@ object InteractiveDemo {
                                       ClientState(
                                         latestSnapshot = snapshot,
                                         channelRef = serverChannelRef,
+                                        clientTxOutRef = clientTxOutRef,
                                         lockedValue = depositAmount,
                                         status = ChannelStatus.Open,
                                         clientPubKey = clientPubKey
@@ -975,6 +977,7 @@ object InteractiveDemo {
                                                             System.out.flush()
 
                                                         case Success(ClientResponse.RebalanceStarted) =>
+                                                            isRebalancing = true
                                                             println(s"\n[Rebalance] Rebalancing started by server")
                                                             print(s"$partyName> ")
                                                             System.out.flush()
@@ -1013,16 +1016,48 @@ object InteractiveDemo {
                                                             System.out.flush()
 
                                                         case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
+                                                            isRebalancing = false
                                                             println(s"\n[Rebalance] ✓ Rebalancing complete!")
-                                                            println(s"[Rebalance] New snapshot version: ${snapshot.signedSnapshot.snapshotVersion}")
+                                                            println(s"[Rebalance] Server snapshot version: ${snapshot.signedSnapshot.snapshotVersion}")
                                                             println(s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
-                                                            // Update local client state with new channelRef
-                                                            clientState = clientState.map(_.copy(channelRef = newChannelRef))
+                                                            // Only update channelRef, NOT latestSnapshot
+                                                            // The server's snapshot may have empty client signature (not signed by client)
+                                                            // Keep the client's existing signed snapshot for contested-close
+                                                            clientState = clientState.map(_.copy(
+                                                                channelRef = newChannelRef
+                                                            ))
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
                                                         case Success(ClientResponse.RebalanceAborted(reason)) =>
+                                                            isRebalancing = false
                                                             println(s"\n[Rebalance] Aborted: $reason")
+                                                            print(s"$partyName> ")
+                                                            System.out.flush()
+
+                                                        case Success(ClientResponse.SnapshotToSign(exchangeSignedSnapshot, snapshotClientTxOutRef)) =>
+                                                            // Server requests client signature on snapshot (per whitepaper protocol)
+                                                            println(s"\n[Snapshot] Received snapshot v${exchangeSignedSnapshot.signedSnapshot.snapshotVersion} to sign")
+                                                            clientId match {
+                                                                case Some(cId) =>
+                                                                    // Sign the snapshot using existing DemoHelpers function
+                                                                    val clientSignedSnapshot = mkClientSignedSnapshot(
+                                                                        clientAccount,
+                                                                        snapshotClientTxOutRef,
+                                                                        exchangeSignedSnapshot.signedSnapshot
+                                                                    )
+                                                                    // Combine with exchange signature to create BothSignedSnapshot
+                                                                    val bothSignedSnapshot = clientSignedSnapshot.copy(
+                                                                        snapshotExchangeSignature = exchangeSignedSnapshot.snapshotExchangeSignature
+                                                                    )
+                                                                    // Send back to server
+                                                                    client.sendMessage(ClientRequest.SignSnapshot(cId, bothSignedSnapshot))
+                                                                    // Update local state with BothSignedSnapshot
+                                                                    clientState = clientState.map(_.copy(latestSnapshot = bothSignedSnapshot))
+                                                                    println(s"[Snapshot] Signed and stored snapshot v${bothSignedSnapshot.signedSnapshot.snapshotVersion}")
+                                                                case None =>
+                                                                    println(s"[Snapshot] ERROR: No client ID for signing")
+                                                            }
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
@@ -1251,6 +1286,12 @@ object InteractiveDemo {
                         return
                     }
 
+                    if isRebalancing then {
+                        println("[ContestedClose] ERROR: Rebalancing in progress - wait for completion!")
+                        println("[ContestedClose] The channelRef will change after rebalance completes.")
+                        return
+                    }
+
                     clientState match {
                         case None =>
                             println("[ContestedClose] ERROR: No client state available!")
@@ -1267,11 +1308,26 @@ object InteractiveDemo {
                                   provider,
                                   new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
                                   state,
-                                  Instant.now()
+                                  Instant.now(),
+                                  validitySeconds = CosmexTransactions.DefaultValiditySeconds
                                 )
                                 println(
                                   s"[ContestedClose] Transaction built: ${tx.id.toHex.take(16)}..."
                                 )
+
+                                // Pre-submission validation (check validity interval against blockchain state)
+                                provider match {
+                                    case bf: cosmex.cardano.BlockfrostProvider =>
+                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                            case Left(err) =>
+                                                println(s"[ContestedClose] PRE-SUBMISSION VALIDATION FAILED: $err")
+                                                println(s"[ContestedClose] Aborting submission to avoid silent rejection")
+                                                return
+                                            case Right(_) =>
+                                                println(s"[ContestedClose] Pre-submission validation passed")
+                                        }
+                                    case _ => ()
+                                }
 
                                 // Submit directly to blockchain (unilateral action)
                                 provider.submit(tx).await() match {
@@ -1320,6 +1376,17 @@ object InteractiveDemo {
                                             )
                                         } else {
                                             println(s"[ContestedClose] WARNING: Transaction not confirmed after $maxAttempts attempts")
+                                            // Check transaction status on Blockfrost
+                                            provider match {
+                                                case bf: cosmex.cardano.BlockfrostProvider =>
+                                                    bf.getTransactionStatus(txHash.toHex) match {
+                                                        case Right(status) =>
+                                                            println(s"[ContestedClose] Transaction status: $status")
+                                                        case Left(err) =>
+                                                            println(s"[ContestedClose] Could not check status: $err")
+                                                    }
+                                                case _ => ()
+                                            }
                                             println(s"[ContestedClose] Updating channelRef anyway - you may need to wait before using 'timeout'")
                                             clientState = Some(state.copy(channelRef = newChannelRef))
                                         }
@@ -1334,6 +1401,21 @@ object InteractiveDemo {
                                     println(
                                       s"[ContestedClose] ERROR: ${e.getMessage}"
                                     )
+                                    // Extract and print Plutus trace logs if available
+                                    def findPlutusLogs(t: Throwable): Option[Array[String]] = {
+                                        t match {
+                                            case pe: scalus.cardano.ledger.PlutusScriptEvaluationException =>
+                                                Some(pe.logs)
+                                            case _ if t.getCause != null => findPlutusLogs(t.getCause)
+                                            case _ => None
+                                        }
+                                    }
+                                    findPlutusLogs(e) match {
+                                        case Some(logs) if logs.nonEmpty =>
+                                            println(s"[ContestedClose] Plutus trace logs:")
+                                            logs.foreach(log => println(s"[ContestedClose]   $log"))
+                                        case _ => ()
+                                    }
                                     e.printStackTrace()
                             }
                     }
@@ -1342,6 +1424,11 @@ object InteractiveDemo {
                 def timeout(): Unit = {
                     if !isConnected then {
                         println("[Timeout] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    if isRebalancing then {
+                        println("[Timeout] ERROR: Rebalancing in progress - wait for completion!")
                         return
                     }
 
@@ -1412,13 +1499,28 @@ object InteractiveDemo {
 
                                 val tx = txbuilder.timeout(
                                   provider,
+                                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
                                   state.channelRef,
                                   onChainState,
-                                  Instant.now()
+                                  exchangeParams.contestationPeriodInMilliseconds
                                 )
                                 println(
                                   s"[Timeout] Transaction built: ${tx.id.toHex.take(16)}..."
                                 )
+
+                                // Pre-submission validation
+                                provider match {
+                                    case bf: cosmex.cardano.BlockfrostProvider =>
+                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                            case Left(err) =>
+                                                println(s"[Timeout] PRE-SUBMISSION VALIDATION FAILED: $err")
+                                                println(s"[Timeout] Aborting submission to avoid silent rejection")
+                                                return
+                                            case Right(_) =>
+                                                println(s"[Timeout] Pre-submission validation passed")
+                                        }
+                                    case _ => ()
+                                }
 
                                 provider.submit(tx).await() match {
                                     case Right(txHash) =>
@@ -1483,6 +1585,21 @@ object InteractiveDemo {
                                 case Success(_) => ()
                                 case Failure(e) =>
                                     println(s"[Timeout] ERROR: ${e.getMessage}")
+                                    // Extract and print Plutus trace logs if available
+                                    def findPlutusLogs(t: Throwable): Option[Array[String]] = {
+                                        t match {
+                                            case pe: scalus.cardano.ledger.PlutusScriptEvaluationException =>
+                                                Some(pe.logs)
+                                            case _ if t.getCause != null => findPlutusLogs(t.getCause)
+                                            case _ => None
+                                        }
+                                    }
+                                    findPlutusLogs(e) match {
+                                        case Some(logs) if logs.nonEmpty =>
+                                            println(s"[Timeout] Plutus trace logs:")
+                                            logs.foreach(log => println(s"[Timeout]   $log"))
+                                        case _ => ()
+                                    }
                                     e.printStackTrace()
                             }
                     }
@@ -1491,6 +1608,11 @@ object InteractiveDemo {
                 def payout(): Unit = {
                     if !isConnected then {
                         println("[Payout] ERROR: Not connected to the exchange!")
+                        return
+                    }
+
+                    if isRebalancing then {
+                        println("[Payout] ERROR: Rebalancing in progress - wait for completion!")
                         return
                     }
 
@@ -1583,6 +1705,20 @@ object InteractiveDemo {
                                 println(
                                   s"[Payout] Transaction built: ${tx.id.toHex.take(16)}..."
                                 )
+
+                                // Pre-submission validation
+                                provider match {
+                                    case bf: cosmex.cardano.BlockfrostProvider =>
+                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                            case Left(err) =>
+                                                println(s"[Payout] PRE-SUBMISSION VALIDATION FAILED: $err")
+                                                println(s"[Payout] Aborting submission to avoid silent rejection")
+                                                return
+                                            case Right(_) =>
+                                                println(s"[Payout] Pre-submission validation passed")
+                                        }
+                                    case _ => ()
+                                }
 
                                 provider.submit(tx).await() match {
                                     case Right(txHash) =>

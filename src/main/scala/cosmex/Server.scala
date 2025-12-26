@@ -31,6 +31,7 @@ enum ClientRequest derives ReadWriter:
     case GetState(clientId: ClientId)
     case FixBalance(clientId: ClientId)
     case SignRebalance(clientId: ClientId, signedTx: Transaction)
+    case SignSnapshot(clientId: ClientId, signedSnapshot: SignedSnapshot)
 
 end ClientRequest
 
@@ -85,6 +86,7 @@ enum ClientResponse derives ReadWriter:
     case RebalanceRequired(tx: Transaction)
     case RebalanceComplete(snapshot: SignedSnapshot, newChannelRef: TransactionInput)
     case RebalanceAborted(reason: String)
+    case SnapshotToSign(snapshot: SignedSnapshot, clientTxOutRef: TxOutRef)
 
 enum ServerEvent derives ReadWriter:
     case ClientEvent(clientId: Int, action: ClientRequest)
@@ -104,6 +106,7 @@ enum ChannelStatus derives ReadWriter:
 case class ClientState(
     latestSnapshot: SignedSnapshot,
     channelRef: TransactionInput,
+    clientTxOutRef: TxOutRef, // Immutable: set when channel opens, used for signing
     lockedValue: Value,
     status: ChannelStatus,
     clientPubKey: ByteString // Client's public key for signature verification and rebalancing
@@ -116,6 +119,7 @@ case class ClientRecord(
 
 case class OpenChannelInfo(
     channelRef: TransactionInput,
+    clientTxOutRef: TxOutRef, // Immutable channel identifier, used for signing
     amount: Value,
     tx: Transaction,
     snapshot: SignedSnapshot,
@@ -177,6 +181,7 @@ class Server(
                         val clientState = ClientState(
                           latestSnapshot = bothSignedSnapshot,
                           channelRef = openChannelInfo.channelRef,
+                          clientTxOutRef = openChannelInfo.clientTxOutRef,
                           lockedValue = openChannelInfo.amount,
                           status = ChannelStatus.PendingOpen,
                           clientPubKey = openChannelInfo.clientPubKey
@@ -369,11 +374,12 @@ class Server(
 
         Right(
           OpenChannelInfo(
-            TransactionInput(tx.id, outputIdx),
-            depositAmount,
-            tx,
-            snapshot,
-            clientPubKey
+            channelRef = TransactionInput(tx.id, outputIdx),
+            clientTxOutRef = clientTxOutRef,
+            amount = depositAmount,
+            tx = tx,
+            snapshot = snapshot,
+            clientPubKey = clientPubKey
           )
         )
     }
@@ -559,31 +565,30 @@ class Server(
                   snapshotVersion = currentSnapshot.snapshotVersion + 1
                 )
 
-                // Extract client TxOutRef
-                val clientTxOutRef = TxOutRef(
-                  TxId(clientState.channelRef.transactionId),
-                  clientState.channelRef.index
-                )
+                // Use immutable clientTxOutRef from ClientState (not derived from channelRef!)
+                val clientTxOutRef = clientState.clientTxOutRef
 
-                // Sign snapshot (need both client and exchange signatures)
-                // For now, we'll create a SignedSnapshot with empty client signature
-                // In a real scenario, client would sign first
-                val signedSnapshot = SignedSnapshot(
+                // Create exchange-signed snapshot (client signature still empty)
+                val exchangeSignedSnapshot = SignedSnapshot(
                   signedSnapshot = newSnapshot,
-                  snapshotClientSignature = ByteString.empty, // Client should sign
+                  snapshotClientSignature = ByteString.empty,
                   snapshotExchangeSignature = ByteString.empty
                 )
+                val withExchangeSig = signSnapshot(clientTxOutRef, exchangeSignedSnapshot)
 
-                val bothSignedSnapshot = signSnapshot(clientTxOutRef, signedSnapshot)
-
-                // Update stored state
-                val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
+                // Store snapshot with exchange signature (client will sign and update)
+                val updatedState = clientState.copy(latestSnapshot = withExchangeSig)
                 clientStates.put(clientId, updatedState)
+
+                // Send SnapshotToSign to client for signing (per whitepaper protocol)
+                clientChannels.get(clientId).foreach { channel =>
+                    channel.send(ClientResponse.SnapshotToSign(withExchangeSig, clientTxOutRef))
+                }
 
                 // Update counterparty states for matched trades
                 updateCounterpartyStates(clientId, matchResult.trades)
 
-                Right((longOrderId, bothSignedSnapshot, matchResult.trades))
+                Right((longOrderId, withExchangeSig, matchResult.trades))
     }
 
     /** Update counterparty states after trades are executed.
@@ -616,21 +621,24 @@ class Server(
                           snapshotVersion = currentSnapshot.snapshotVersion + 1
                         )
 
-                        val counterpartyTxOutRef = TxOutRef(
-                          TxId(counterpartyState.channelRef.transactionId),
-                          counterpartyState.channelRef.index
-                        )
+                        // Use immutable clientTxOutRef from ClientState
+                        val counterpartyTxOutRef = counterpartyState.clientTxOutRef
 
-                        val signedSnapshot = SignedSnapshot(
+                        val exchangeSignedSnapshot = SignedSnapshot(
                           signedSnapshot = newSnapshot,
                           snapshotClientSignature = ByteString.empty,
                           snapshotExchangeSignature = ByteString.empty
                         )
 
-                        val bothSignedSnapshot = signSnapshot(counterpartyTxOutRef, signedSnapshot)
+                        val withExchangeSig = signSnapshot(counterpartyTxOutRef, exchangeSignedSnapshot)
                         val updatedCounterpartyState =
-                            counterpartyState.copy(latestSnapshot = bothSignedSnapshot)
+                            counterpartyState.copy(latestSnapshot = withExchangeSig)
                         clientStates.put(counterpartyClientId, updatedCounterpartyState)
+
+                        // Send SnapshotToSign to counterparty for signing
+                        clientChannels.get(counterpartyClientId).foreach { channel =>
+                            channel.send(ClientResponse.SnapshotToSign(withExchangeSig, counterpartyTxOutRef))
+                        }
                     }
                 }
             }
@@ -724,6 +732,51 @@ class Server(
                 clientStates.put(clientId, updatedState)
 
                 Right(bothSignedSnapshot)
+    }
+
+    /** Handle client-signed snapshot (per whitepaper protocol).
+      * Client signs the snapshot after receiving SnapshotToSign.
+      * We verify the signature and update the stored snapshot.
+      */
+    def handleSignSnapshot(
+        clientId: ClientId,
+        clientSignedSnapshot: SignedSnapshot
+    ): Either[(String, String), Unit] = {
+        clientStates.get(clientId) match
+            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
+            case Some(clientState) =>
+                // Verify the snapshot version matches what we expect
+                val expectedVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
+                val receivedVersion = clientSignedSnapshot.signedSnapshot.snapshotVersion
+                if receivedVersion != expectedVersion then
+                    return Left(
+                      (
+                        ErrorCode.InvalidSnapshot,
+                        s"Snapshot version mismatch: expected $expectedVersion, got $receivedVersion"
+                      )
+                    )
+
+                // Verify client signature
+                val clientTxOutRef = clientState.clientTxOutRef
+                if !verifyClientSignature(
+                      clientState.clientPubKey,
+                      clientTxOutRef,
+                      clientSignedSnapshot
+                    )
+                then return Left((ErrorCode.InvalidSnapshot, "Invalid client signature"))
+
+                // Update stored snapshot with client signature (now BothSigned)
+                val bothSignedSnapshot = clientSignedSnapshot.copy(
+                  snapshotExchangeSignature =
+                      clientState.latestSnapshot.snapshotExchangeSignature
+                )
+                val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
+                clientStates.put(clientId, updatedState)
+
+                println(
+                  s"[Server] Stored BothSignedSnapshot v${bothSignedSnapshot.signedSnapshot.snapshotVersion} for $clientId"
+                )
+                Right(())
     }
 
     def getLatestSnapshot(clientId: ClientId): Option[SignedSnapshot] = {
@@ -1024,6 +1077,14 @@ class Server(
                         clientChannels.get(clientId).foreach { channel =>
                             channel.send(
                               ClientResponse.RebalanceComplete(clientState.latestSnapshot, newChannelRef)
+                            )
+                            // Also send SnapshotToSign so client can sign the current snapshot
+                            // (per whitepaper: after rebalance, client signs new snapshot)
+                            channel.send(
+                              ClientResponse.SnapshotToSign(
+                                clientState.latestSnapshot,
+                                clientState.clientTxOutRef
+                              )
                             )
                         }
                     }

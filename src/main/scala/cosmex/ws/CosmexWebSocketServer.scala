@@ -210,6 +210,7 @@ object CosmexWebSocketServer {
                         val clientState = ClientState(
                           latestSnapshot = signedSnapshot,
                           channelRef = channelRef,
+                          clientTxOutRef = openChannelInfo.clientTxOutRef,
                           lockedValue = actualDeposit,
                           status = ChannelStatus.PendingOpen,
                           clientPubKey = openChannelInfo.clientPubKey
@@ -502,6 +503,15 @@ object CosmexWebSocketServer {
                 server.handleSignRebalance(clientId, signedTx) match {
                     case Right(_) =>
                         // Response will be sent asynchronously when all signatures collected
+                        List.empty
+                    case Left((code, error)) =>
+                        List(ClientResponse.Error(code, error))
+                }
+
+            case ClientRequest.SignSnapshot(clientId, signedSnapshot) =>
+                server.handleSignSnapshot(clientId, signedSnapshot) match {
+                    case Right(_) =>
+                        // Snapshot stored successfully, no response needed
                         List.empty
                     case Left((code, error)) =>
                         List(ClientResponse.Error(code, error))

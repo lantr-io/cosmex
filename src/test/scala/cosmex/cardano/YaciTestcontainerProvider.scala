@@ -326,6 +326,16 @@ class YaciTestcontainerProvider private (
         Left(new RuntimeException("getCurrentSlot() not yet implemented"))
     }
 
+    /** Fetch latest protocol parameters (required by Provider trait) */
+    override def fetchLatestParams(using ExecutionContext): Future[ProtocolParams] = {
+        Future {
+            getProtocolParams() match {
+                case Right(params) => params
+                case Left(err) => throw err
+            }
+        }
+    }
+
     /** Get protocol parameters from yaci-devkit
       *
       * Uses BackendService to fetch current protocol parameters, then converts to JSON for Scalus's

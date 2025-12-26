@@ -420,6 +420,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceClientState = ClientState(
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          clientTxOutRef = aliceClientTxOutRef,
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -465,6 +466,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          clientTxOutRef = bobClientTxOutRef,
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = bobPubKey
@@ -585,6 +587,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceClientState = ClientState(
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          clientTxOutRef = aliceClientTxOutRef,
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -619,6 +622,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          clientTxOutRef = bobClientTxOutRef,
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = bobPubKey
@@ -722,6 +726,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceClientState = ClientState(
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          clientTxOutRef = aliceClientTxOutRef,
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -776,6 +781,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          clientTxOutRef = bobClientTxOutRef,
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = bobPubKey
@@ -829,6 +835,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceClientState = ClientState(
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          clientTxOutRef = aliceClientTxOutRef,
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -880,6 +887,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = TransactionInput(bobOpenChannelTx.id, 0),
+          clientTxOutRef = bobClientTxOutRef,
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = bobPubKey
@@ -959,6 +967,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobClientState = ClientState(
           latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
           channelRef = bobChannelRef,
+          clientTxOutRef = bobClientTxOutRef,
           lockedValue = bobActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = bobPubKey
@@ -1015,6 +1024,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceClientState = ClientState(
           latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
           channelRef = TransactionInput(aliceOpenChannelTx.id, 0),
+          clientTxOutRef = aliceClientTxOutRef,
           lockedValue = aliceActualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -1098,6 +1108,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val clientState = ClientState(
           latestSnapshot = bothSignedSnapshot,
           channelRef = channelRef,
+          clientTxOutRef = clientTxOutRef,
           lockedValue = actualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -1182,6 +1193,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val clientState = ClientState(
           latestSnapshot = bothSignedSnapshot,
           channelRef = channelRef,
+          clientTxOutRef = clientTxOutRef,
           lockedValue = actualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -1277,7 +1289,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val timeoutTx =
             try {
-                txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+                txbuilder.timeout(provider, new scalus.cardano.wallet.BloxbeanAccount(clientAccount), contestUtxo.input, contestDatum, exchangeParams.contestationPeriodInMilliseconds)
             } catch {
                 case e: scalus.cardano.txbuilder.TxBuilderException =>
                     println(s"TxBuilder exception during timeout: ${e.getMessage}")
@@ -1418,6 +1430,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val clientState = ClientState(
           latestSnapshot = bothSignedSnapshot,
           channelRef = channelRef,
+          clientTxOutRef = clientTxOutRef,
           lockedValue = actualDeposit,
           status = ChannelStatus.Open,
           clientPubKey = clientPubKey
@@ -1517,7 +1530,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val timeout1Tx =
             try {
-                txbuilder.timeout(provider, contestUtxo.input, contestDatum, timeAfterContest)
+                txbuilder.timeout(provider, new scalus.cardano.wallet.BloxbeanAccount(clientAccount), contestUtxo.input, contestDatum, exchangeParams.contestationPeriodInMilliseconds)
             } catch {
                 case e: scalus.cardano.txbuilder.TxBuilderException =>
                     println(s"TxBuilder exception during timeout: ${e.getMessage}")
@@ -1570,9 +1583,10 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val timeout2Tx = txbuilder.timeout(
           provider,
+          new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
           tradesContestUtxo.input,
           tradesContestDatum,
-          timeAfterTradesContest
+          exchangeParams.contestationPeriodInMilliseconds
         )
         val signedTimeout2Tx = signTransaction(clientAccount, timeout2Tx)
         val timeout2Result = provider.submit(signedTimeout2Tx).await()

@@ -114,7 +114,12 @@ object MultiClientTestHelpers {
             case Success(ClientResponse.ChannelPending(_)) =>
                 // Ignore stale ChannelPending (can arrive out of order with MockLedgerApi)
                 println(s"[$name] Ignoring stale ChannelPending, retrying...")
-                handleStaleChannelPending(client, name)
+                handleAsyncMessages(client, name)
+
+            case Success(ClientResponse.SnapshotToSign(_, _)) =>
+                // SnapshotToSign is sent async after order creation - ignore and wait for OrderCreated
+                println(s"[$name] Ignoring async SnapshotToSign, retrying...")
+                handleAsyncMessages(client, name)
 
             case Success(ClientResponse.Error(code, msg)) =>
                 throw new RuntimeException(s"[$name] Order creation failed [$code]: $msg")
@@ -127,12 +132,16 @@ object MultiClientTestHelpers {
         }
     }
 
-    private def handleStaleChannelPending(client: SimpleWebSocketClient, name: String): Unit = {
+    private def handleAsyncMessages(client: SimpleWebSocketClient, name: String): Unit = {
         client.receiveMessage(timeoutSeconds = 10) match {
             case Success(msgJson) =>
                 read[ClientResponse](msgJson) match {
                     case ClientResponse.OrderCreated(orderId) =>
                         println(s"[$name] ✓ Order created! OrderID: $orderId")
+                    case ClientResponse.SnapshotToSign(_, _) =>
+                        // Keep waiting for OrderCreated
+                        println(s"[$name] Ignoring async SnapshotToSign, retrying...")
+                        handleAsyncMessages(client, name)
                     case ClientResponse.Error(code, msg) =>
                         throw new RuntimeException(s"[$name] Order creation failed [$code]: $msg")
                     case other =>
