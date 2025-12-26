@@ -306,8 +306,9 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                             client.sendMessage(ClientRequest.SignRebalance(clientId, signedTx))
                             println(s"[$name] ✓ Signed rebalance transaction sent")
 
-                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                        case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
                             println(s"[$name] ✓ Rebalancing complete! Version: ${snapshot.signedSnapshot.snapshotVersion}")
+                            println(s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
                             done = true
 
                         case Success(ClientResponse.RebalanceAborted(reason)) =>

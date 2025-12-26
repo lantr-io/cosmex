@@ -255,10 +255,11 @@ object MultiClientTestHelpers {
                         case Success(ClientResponse.RebalanceRequired(tx)) =>
                             signAndSendRebalance(client, account, clientId, tx, name)
 
-                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                        case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
                             println(
                               s"[$name] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
                             )
+                            println(s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
                             rebalanceComplete = true
 
                         case Success(ClientResponse.RebalanceAborted(reason)) =>

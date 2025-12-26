@@ -309,9 +309,9 @@ Both `AliceDemo` and `BobDemo` connect to the server started in Terminal 1.
 
 **Terminal 2 (Alice):**
 ```
-Alice> connect ada 100
+Alice> connect ada 200
 [Connect] Opening channel with exchange...
-[Connect] Depositing: 100 ADA
+[Connect] Depositing: 200 ADA
 [Connect] ✓ Channel pending, txId: 8e9f0a1b...
 [Connect] ✓ Channel opened successfully!
 
@@ -323,15 +323,22 @@ Channel Status:    Open
 Snapshot Version:  1
 
 Balance:
-  ADA:             100.000000
+  ADA:             200.000000
 ============================================================
 ```
 
-**Terminal 3 (Bob):**
+**Terminal 3 (Bob) - First mint tokens, then connect:**
 ```
-Bob> connect ada 100
+Bob> mint GOLD 1000
+[Mint] Minting 1000 units of token 'GOLD'...
+[Mint] ✓ Transaction submitted: 3f7a2b1c...
+[Mint] Waiting for confirmation...
+[Mint] ✓ Minted token policy ID: a3b4c5d6e7f8...
+[Mint] ✓ Registered token as tradeable asset: GOLD
+
+Bob> connect ada 100 gold 500
 [Connect] Opening channel with exchange...
-[Connect] Depositing: 100 ADA
+[Connect] Depositing: 100 ADA + tokens
 [Connect] ✓ Channel opened successfully!
 
 Bob> get-state
@@ -343,27 +350,42 @@ Snapshot Version:  1
 
 Balance:
   ADA:             100.000000
+  GOLD             500
 ============================================================
 ```
 
-Now both parties have channels. Let's trade using the built-in USDM stablecoin:
+Now both parties have channels. Bob has GOLD tokens to sell.
 
-**Terminal 3 (Bob) - Creates a sell order:**
+**Important: Alice must register GOLD with Bob's policy ID before trading!**
+
+Bob's mint output showed a policy ID (e.g., `a3b4c5d6e7f8...`). Alice needs to register this:
+
+**Terminal 2 (Alice) - Register Bob's GOLD token:**
 ```
-Bob> sell ada usdm 50 2
-[Order] Creating SELL order: 50 ADA/USDM @ 2
+Alice> register gold a3b4c5d6e7f8... gold
+[Register] ✓ Registered asset: GOLD
+[Register]   Policy ID: a3b4c5d6e7f8...
+[Register]   Asset Name: 676f6c64
+```
+
+Replace `a3b4c5d6e7f8...` with the actual policy ID from Bob's mint output.
+
+**Terminal 3 (Bob) - Creates a sell order for GOLD:**
+```
+Bob> sell gold ada 50 2
+[Order] Creating SELL order: 50 GOLD/ADA @ 2
 [Order] ✓ Order request sent to exchange
 
-[Notification] ✓ Order created! OrderID: 1
+[Notification] ✓ Order created! OrderID: 0
 ```
 
 **Terminal 2 (Alice) - Creates a matching buy order:**
 ```
-Alice> buy ada usdm 50 2
-[Order] Creating BUY order: 50 ADA/USDM @ 2
+Alice> buy gold ada 50 2
+[Order] Creating BUY order: 50 GOLD/ADA @ 2
 [Order] ✓ Order request sent to exchange
 
-[Notification] ✓ Order created! OrderID: 2
+[Notification] ✓ Order created! OrderID: 1
 [Notification] ✓✓ Order executed! Trade amount: 50, price: 2
 ```
 
@@ -371,6 +393,8 @@ Both parties should now see the trade execution notification:
 ```
 [Notification] ✓✓ Order executed! Trade amount: 50, price: 2
 ```
+
+Trade: Alice pays 100 ADA (50 GOLD * 2 ADA/GOLD), receives 50 GOLD from Bob.
 
 ### Part 2: Verify Balances Changed
 
@@ -384,7 +408,8 @@ Channel Status:    Open
 Snapshot Version:  3
 
 Balance:
-  ADA:             150.000000    <- Alice now has 50 more ADA
+  ADA:             100.000000    <- Alice paid 100 ADA (200 - 100)
+  GOLD             50            <- Alice received 50 GOLD
 ============================================================
 ```
 
@@ -398,7 +423,8 @@ Channel Status:    Open
 Snapshot Version:  3
 
 Balance:
-  ADA:             50.000000     <- Bob now has 50 less ADA
+  ADA:             200.000000    <- Bob received 100 ADA (100 + 100)
+  GOLD             450           <- Bob sold 50 GOLD (500 - 50)
 ============================================================
 ```
 

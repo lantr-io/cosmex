@@ -83,7 +83,7 @@ enum ClientResponse derives ReadWriter:
     )
     case RebalanceStarted
     case RebalanceRequired(tx: Transaction)
-    case RebalanceComplete(snapshot: SignedSnapshot)
+    case RebalanceComplete(snapshot: SignedSnapshot, newChannelRef: TransactionInput)
     case RebalanceAborted(reason: String)
 
 enum ServerEvent derives ReadWriter:
@@ -127,7 +127,10 @@ case class RebalancingContext(
     startTime: Instant,
     affectedClients: Set[ClientId],
     rebalanceTx: Transaction,
-    collectedSignatures: Map[ClientId, Transaction]
+    collectedSignatures: Map[ClientId, Transaction],
+    // Maps ClientId to their output index in the rebalance transaction
+    // Used to update channelRef after confirmation
+    clientOutputIndices: Map[ClientId, Int] = Map.empty
 )
 
 class Server(
@@ -891,12 +894,22 @@ class Server(
                 return Left((ErrorCode.RebalancingFailed, s"Failed to build rebalance transaction: ${e.getMessage}"))
         }
 
+        // Compute client-to-output-index mapping
+        // Outputs are sorted by TxOutRef (same as in CosmexTransactions.rebalance)
+        val sortedChannelUtxos = channelUtxos.sortBy { case (_, utxo, _) =>
+            (utxo.input.transactionId.toHex, utxo.input.index)
+        }
+        val clientOutputIndices = sortedChannelUtxos.zipWithIndex.map { case ((clientId, _, _), idx) =>
+            clientId -> idx
+        }.toMap
+
         // Set rebalancing state
         val context = RebalancingContext(
           startTime = Instant.now(),
           affectedClients = affectedClients,
           rebalanceTx = rebalanceTx,
-          collectedSignatures = Map.empty
+          collectedSignatures = Map.empty,
+          clientOutputIndices = clientOutputIndices
         )
 
         if !rebalancingState.compareAndSet(None, Some(context)) then
@@ -986,26 +999,31 @@ class Server(
             case Right(_) =>
                 println(s"[Server] Rebalance transaction confirmed!")
 
-                // Update client states with new locked values
+                // Update client states with new locked values and channelRef
                 context.affectedClients.foreach { clientId =>
                     clientStates.get(clientId).foreach { clientState =>
                         // Find the new output for this client in the transaction
-                        // For now, we assume locked value matches snapshot total after rebalancing
                         val tradingState =
                             clientState.latestSnapshot.signedSnapshot.snapshotTradingState
                         val newLockedValue = tradingState.tsClientBalance +
                             tradingState.tsExchangeBalance +
                             CosmexValidator.lockedInOrders(tradingState.tsOrders)
 
+                        // Get the new channelRef from the rebalance transaction
+                        val outputIndex = context.clientOutputIndices.getOrElse(clientId, 0)
+                        val newChannelRef = TransactionInput(finalTx.id, outputIndex)
+                        println(s"[Server] Updating channelRef for $clientId: ${newChannelRef.transactionId.toHex.take(16)}...#$outputIndex")
+
                         val updatedState = clientState.copy(
-                          lockedValue = newLockedValue.toLedgerValue
+                          lockedValue = newLockedValue.toLedgerValue,
+                          channelRef = newChannelRef
                         )
                         clientStates.put(clientId, updatedState)
 
-                        // Send completion notification
+                        // Send completion notification with new channelRef
                         clientChannels.get(clientId).foreach { channel =>
                             channel.send(
-                              ClientResponse.RebalanceComplete(clientState.latestSnapshot)
+                              ClientResponse.RebalanceComplete(clientState.latestSnapshot, newChannelRef)
                             )
                         }
                     }

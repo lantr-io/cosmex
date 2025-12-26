@@ -1009,9 +1009,12 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                                                        case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
                                                             println(s"\n[Rebalance] ✓ Rebalancing complete!")
                                                             println(s"[Rebalance] New snapshot version: ${snapshot.signedSnapshot.snapshotVersion}")
+                                                            println(s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                                                            // Update local client state with new channelRef
+                                                            clientState = clientState.map(_.copy(channelRef = newChannelRef))
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
@@ -1583,10 +1586,13 @@ object InteractiveDemo {
                                         )
                                         signAndSendRebalance(cId, tx)
 
-                                    case Success(ClientResponse.RebalanceComplete(snapshot)) =>
+                                    case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
                                         println(
                                           s"[Rebalance] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
                                         )
+                                        println(s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                                        // Update local client state with new channelRef
+                                        clientState = clientState.map(_.copy(channelRef = newChannelRef))
                                         rebalanceComplete = true
 
                                     case Success(ClientResponse.RebalanceAborted(reason)) =>
