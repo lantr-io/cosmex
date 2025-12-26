@@ -757,8 +757,8 @@ class Server(
     }
 
     def sendTx(tx: Transaction): Unit = {
-        // Use longer timeout for real blockchains (30s)
-        provider.submitAndWait(tx, maxAttempts = 30, delayMs = 1000) match {
+        // Use 3 minute timeout for preprod: ~20s block time + Blockfrost indexing delay
+        provider.submitAndWait(tx, maxAttempts = 180, delayMs = 1000) match {
             case Left(error) => println(s"[Server] Transaction submission failed: $error")
             case Right(_) => println(s"[Server] Transaction confirmed: ${tx.id.toHex.take(16)}...")
         }
@@ -969,7 +969,8 @@ class Server(
 
         println(s"[Server] Submitting rebalance transaction: ${finalTx.id.toHex.take(16)}...")
 
-        provider.submitAndWait(finalTx, maxAttempts = 30, delayMs = 1000) match {
+        // Use 3 minute timeout for preprod: ~20s block time + Blockfrost indexing delay
+        provider.submitAndWait(finalTx, maxAttempts = 180, delayMs = 1000) match {
             case Left(error) =>
                 println(s"[Server] Rebalance transaction failed: $error")
                 // Notify clients of failure
