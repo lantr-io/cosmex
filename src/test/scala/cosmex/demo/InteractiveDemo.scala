@@ -769,9 +769,11 @@ object InteractiveDemo {
 
                     println(s"[Connect] Found script output at index: $channelOutputIdx")
 
-                    // Create client ID and connect (use first UTxO as channel identifier)
+                    // Create client ID from the channel OUTPUT (matches server's ClientId)
+                    // The server uses TransactionInput(tx.id, outputIdx) as the ClientId
                     val primaryUtxo = depositUtxos.head
-                    val cId = ClientId(primaryUtxo.input)
+                    val channelRef = TransactionInput(openChannelTx.id, channelOutputIdx)
+                    val cId = ClientId(channelRef)
                     val wsUrl =
                         s"ws://localhost:$port/ws/${cId.txOutRef.transactionId.toHex}/${cId.txOutRef.index}"
 
