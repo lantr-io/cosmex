@@ -379,9 +379,11 @@ class CosmexTransactions(
     ): Transaction = {
         val scriptAddress = Address(network, Credential.ScriptHash(script.scriptHash))
 
-        // Calculate validity times
+        // Calculate validity times with buffer for clock skew between server and blockchain
+        // Start 60 seconds in the past to ensure the tx is immediately valid
+        val adjustedStart = validityStart.minusSeconds(60)
         val validityEnd = validityStart.plusSeconds(600) // 10 minutes validity window
-        println(s"[rebalance] validityStart: $validityStart, validityEnd: $validityEnd")
+        println(s"[rebalance] validityStart: $adjustedStart (adjusted -60s), validityEnd: $validityEnd")
 
         // CRITICAL: Sort channelData by TxOutRef to match Cardano's input ordering.
         // The validator uses input index to find the corresponding output, expecting
@@ -413,7 +415,7 @@ class CosmexTransactions(
 
         // Set validity and complete the transaction
         withOutputs
-            .validFrom(validityStart)
+            .validFrom(adjustedStart)
             .validTo(validityEnd)
             .complete(provider, sponsor = sponsor)
             .await()
