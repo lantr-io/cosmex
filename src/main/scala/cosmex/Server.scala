@@ -1058,8 +1058,9 @@ class Server(
                         // Find the new output for this client in the transaction
                         val tradingState =
                             clientState.latestSnapshot.signedSnapshot.snapshotTradingState
+                        // New locked value = client balance + locked in orders
+                        // exchangeBalance is NOT included - it's internal accounting
                         val newLockedValue = tradingState.tsClientBalance +
-                            tradingState.tsExchangeBalance +
                             CosmexValidator.lockedInOrders(tradingState.tsOrders)
 
                         // Get the new channelRef from the rebalance transaction
@@ -1067,22 +1068,43 @@ class Server(
                         val newChannelRef = TransactionInput(finalTx.id, outputIndex)
                         println(s"[Server] Updating channelRef for $clientId: ${newChannelRef.transactionId.toHex.take(16)}...#$outputIndex")
 
+                        // After rebalance, exchangeBalance is reset to zero (debts settled on-chain)
+                        import scalus.ledger.api.v3.Value as V3Value
+                        val newTradingState = TradingState(
+                          tsClientBalance = tradingState.tsClientBalance,
+                          tsExchangeBalance = V3Value.zero,  // Reset to zero after rebalance
+                          tsOrders = tradingState.tsOrders
+                        )
+                        val currentSnapshot = clientState.latestSnapshot.signedSnapshot
+                        val newSnapshot = Snapshot(
+                          snapshotTradingState = newTradingState,
+                          snapshotPendingTx = currentSnapshot.snapshotPendingTx,
+                          snapshotVersion = currentSnapshot.snapshotVersion + 1
+                        )
+                        val newSignedSnapshot = SignedSnapshot(
+                          signedSnapshot = newSnapshot,
+                          snapshotClientSignature = ByteString.empty,
+                          snapshotExchangeSignature = ByteString.empty
+                        )
+                        val withExchangeSig = signSnapshot(clientState.clientTxOutRef, newSignedSnapshot)
+
                         val updatedState = clientState.copy(
                           lockedValue = newLockedValue.toLedgerValue,
-                          channelRef = newChannelRef
+                          channelRef = newChannelRef,
+                          latestSnapshot = withExchangeSig
                         )
                         clientStates.put(clientId, updatedState)
 
                         // Send completion notification with new channelRef
                         clientChannels.get(clientId).foreach { channel =>
                             channel.send(
-                              ClientResponse.RebalanceComplete(clientState.latestSnapshot, newChannelRef)
+                              ClientResponse.RebalanceComplete(withExchangeSig, newChannelRef)
                             )
-                            // Also send SnapshotToSign so client can sign the current snapshot
+                            // Also send SnapshotToSign so client can sign the new snapshot
                             // (per whitepaper: after rebalance, client signs new snapshot)
                             channel.send(
                               ClientResponse.SnapshotToSign(
-                                clientState.latestSnapshot,
+                                withExchangeSig,
                                 clientState.clientTxOutRef
                               )
                             )

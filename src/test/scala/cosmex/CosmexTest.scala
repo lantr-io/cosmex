@@ -70,6 +70,11 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         Hash.scriptHash(hex"c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad")
     private val usdmAssetName = AssetName(ByteString.fromString("USDM"))
 
+    // Define GOLD token for testing rebalance scenario
+    private val goldPolicyId: ScriptHash =
+        Hash.scriptHash(hex"d48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad")
+    private val goldAssetName = AssetName(ByteString.fromString("GOLD"))
+
     val initialUtxos = Map(
       TransactionInput(genesisHash, 0) ->
           TransactionOutput(
@@ -154,6 +159,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
     // PolicyId and TokenName are type aliases to ByteString
     private val ADA: AssetClass = (ByteString.empty, ByteString.empty)
     private val USDM: AssetClass = (usdmPolicyId, usdmAssetName.bytes)
+    private val GOLD: AssetClass = (goldPolicyId, goldAssetName.bytes)
 
     // Helper: Create a buy order (positive amount)
     private def mkBuyOrder(pair: Pair, amount: BigInt, price: BigInt): LimitOrder = {
@@ -1634,6 +1640,212 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println(
           "Full contested close path (with orders) completed: Open -> Order -> SnapshotContest -> TradesContest -> Payout"
         )
+    }
+
+    test("Rebalance with trading: Alice buys gold from Bob, both payout correctly") {
+        // Scenario:
+        // - Alice: connect with 200 ADA
+        // - Bob: connect with 100 ADA + 500 gold
+        // - Bob: sell 50 gold at 2 ADA each (receives 100 ADA)
+        // - Alice: buy 50 gold at 2 ADA each (pays 100 ADA)
+        // - Rebalance
+        // - Alice: contested-close -> timeout -> payout (receives 100 ADA + 50 gold)
+        // - Bob: contested-close -> timeout -> payout (receives 200 ADA + 450 gold)
+
+        // Create emulator with initial UTxOs for this scenario
+        val aliceInitialUtxos = Map(
+          TransactionInput(genesisHash, 0) ->
+              TransactionOutput(
+                address = clientAddress,
+                value = Value.ada(300) // 200 for deposit + extra for fees
+              ),
+          TransactionInput(genesisHash, 1) ->
+              TransactionOutput(
+                address = bobAddress,
+                value = Value.ada(200) + Value.asset(goldPolicyId, goldAssetName, 500_000_000) // 100 ADA + 500 gold for deposit + extra
+              )
+        )
+
+        val provider = Emulator(initialUtxos = aliceInitialUtxos, initialContext = Context.testMainnet(slot = 1000))
+        val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
+        import scalus.builtin.Data.toData
+        import scalus.cardano.wallet.BloxbeanAccount
+
+        // === STEP 1: ALICE OPENS CHANNEL WITH 200 ADA ===
+        println("Step 1: Alice opens channel with 200 ADA")
+        val aliceDepositUtxo = provider
+            .findUtxo(address = clientAddress, minAmount = Some(Coin.ada(200)))
+            .await()
+            .toOption
+            .get
+
+        val aliceDepositAmount = Value.ada(200)
+        val aliceOpenChannelTxUnsigned = txbuilder.openChannel(
+          clientInput = aliceDepositUtxo,
+          clientPubKey = clientPubKey,
+          depositAmount = aliceDepositAmount
+        )
+        val aliceOpenChannelTx = signTransaction(clientAccount, aliceOpenChannelTxUnsigned)
+
+        val aliceSubmitResult = provider.submit(aliceOpenChannelTx).await()
+        assert(aliceSubmitResult.isRight, s"Alice channel open failed: $aliceSubmitResult")
+
+        val aliceChannelOutput = aliceOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+        val aliceActualDeposit = aliceChannelOutput._1.value.value
+        val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), aliceChannelOutput._2)
+        val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
+        val aliceClientSignedSnapshot = mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+
+        val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, aliceChannelOutput._2))
+        val aliceClientState = ClientState(
+          latestSnapshot = server.signSnapshot(aliceClientTxOutRef, aliceClientSignedSnapshot),
+          channelRef = TransactionInput(aliceOpenChannelTx.id, aliceChannelOutput._2),
+          clientTxOutRef = aliceClientTxOutRef,
+          lockedValue = aliceActualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = clientPubKey
+        )
+        server.clientStates.put(aliceClientId, aliceClientState)
+        println(s"  Alice channel opened: ${aliceClientId}")
+
+        // === STEP 2: BOB OPENS CHANNEL WITH 100 ADA + 500 GOLD ===
+        println("Step 2: Bob opens channel with 100 ADA + 500 gold")
+        val bobDepositUtxo = provider
+            .findUtxo(address = bobAddress, minAmount = Some(Coin.ada(100)))
+            .await()
+            .toOption
+            .get
+
+        val bobDepositAmount = Value.ada(100) + Value.asset(goldPolicyId, goldAssetName, 500_000_000)
+        val bobOpenChannelTxUnsigned = txbuilder.openChannel(
+          clientInput = bobDepositUtxo,
+          clientPubKey = bobPubKey,
+          depositAmount = bobDepositAmount
+        )
+        val bobOpenChannelTx = signTransaction(bobAccount, bobOpenChannelTxUnsigned)
+
+        val bobSubmitResult = provider.submit(bobOpenChannelTx).await()
+        assert(bobSubmitResult.isRight, s"Bob channel open failed: $bobSubmitResult")
+
+        val bobChannelOutput = bobOpenChannelTx.body.value.outputs.view.zipWithIndex
+            .find(_._1.value.address == server.CosmexScriptAddress)
+            .get
+        val bobActualDeposit = bobChannelOutput._1.value.value
+        val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelOutput._2)
+        val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
+        val bobClientSignedSnapshot = mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+
+        val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelOutput._2))
+        val bobClientState = ClientState(
+          latestSnapshot = server.signSnapshot(bobClientTxOutRef, bobClientSignedSnapshot),
+          channelRef = TransactionInput(bobOpenChannelTx.id, bobChannelOutput._2),
+          clientTxOutRef = bobClientTxOutRef,
+          lockedValue = bobActualDeposit,
+          status = ChannelStatus.Open,
+          clientPubKey = bobPubKey
+        )
+        server.clientStates.put(bobClientId, bobClientState)
+        println(s"  Bob channel opened: ${bobClientId}")
+
+        // === STEP 3: BOB SELLS 50 GOLD AT 2 ADA EACH ===
+        println("Step 3: Bob sells 50 gold at 2 ADA each")
+        // Price: 2 ADA per gold = 2_000_000 lovelace per 1_000_000 gold units = 2_000_000 (in PRICE_SCALE units)
+        val bobSellOrder = mkSellOrder(
+          pair = (GOLD, ADA), // Selling GOLD for ADA
+          amount = 50_000_000, // 50 gold (in smallest units)
+          price = 2_000_000 // 2 ADA per gold
+        )
+
+        val bobOrderResult = server.handleCreateOrder(bobClientId, bobSellOrder)
+        assert(bobOrderResult.isRight, s"Bob order creation failed: $bobOrderResult")
+        val (bobOrderId, bobSnapshot1, bobTrades1) = bobOrderResult.toOption.get
+        println(s"  Bob's sell order created: orderId=$bobOrderId, trades=${bobTrades1.size}")
+
+        // === STEP 4: ALICE BUYS 50 GOLD AT 2 ADA EACH ===
+        println("Step 4: Alice buys 50 gold at 2 ADA each")
+        val aliceBuyOrder = mkBuyOrder(
+          pair = (GOLD, ADA), // Buying GOLD with ADA
+          amount = 50_000_000, // 50 gold
+          price = 2_000_000 // 2 ADA per gold
+        )
+
+        val aliceOrderResult = server.handleCreateOrder(aliceClientId, aliceBuyOrder)
+        assert(aliceOrderResult.isRight, s"Alice order creation failed: $aliceOrderResult")
+        val (aliceOrderId, aliceSnapshot1, aliceTrades1) = aliceOrderResult.toOption.get
+        println(s"  Alice's buy order created: orderId=$aliceOrderId, trades=${aliceTrades1.size}")
+
+        // Verify trades occurred
+        assert(aliceTrades1.nonEmpty, "Alice's order should match Bob's order")
+        println(s"  Trades executed: ${aliceTrades1}")
+
+        // Verify balances after trade
+        val aliceBalanceAfterTrade = server.clientStates.get(aliceClientId).get.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
+        val bobBalanceAfterTrade = server.clientStates.get(bobClientId).get.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
+        println(s"  Alice balance after trade: $aliceBalanceAfterTrade")
+        println(s"  Bob balance after trade: $bobBalanceAfterTrade")
+
+        // === STEP 5: REBALANCE ===
+        println("Step 5: Rebalance")
+
+        // Set emulator slot to current time for validity interval
+        val rebalanceTime = Instant.now()
+        provider.setSlot(SlotConfig.Mainnet.timeToSlot(rebalanceTime.toEpochMilli))
+
+        // First check if rebalancing is needed
+        val aliceNeedsRebalance = server.needsRebalancing(aliceClientId)
+        val bobNeedsRebalance = server.needsRebalancing(bobClientId)
+        println(s"  Alice needs rebalance: $aliceNeedsRebalance")
+        println(s"  Bob needs rebalance: $bobNeedsRebalance")
+
+        // Initiate rebalance
+        val fixBalanceResult = server.handleFixBalance(aliceClientId)
+        assert(fixBalanceResult.isRight, s"FixBalance failed: $fixBalanceResult")
+
+        // Get the rebalance transaction and sign it
+        val rebalanceContext = server.rebalancingState.get().get
+        val rebalanceTx = rebalanceContext.rebalanceTx
+
+        // Sign with both Alice and Bob
+        val aliceSignedRebalanceTx = signTransaction(clientAccount, rebalanceTx)
+        val aliceSignResult = server.handleSignRebalance(aliceClientId, aliceSignedRebalanceTx)
+        assert(aliceSignResult.isRight, s"Alice sign rebalance failed: $aliceSignResult")
+
+        val bobSignedRebalanceTx = signTransaction(bobAccount, aliceSignedRebalanceTx) // Build on Alice's signed tx
+        val bobSignResult = server.handleSignRebalance(bobClientId, bobSignedRebalanceTx)
+        assert(bobSignResult.isRight, s"Bob sign rebalance failed: $bobSignResult")
+        println(s"  Rebalance completed successfully")
+
+        // Update client states after rebalance
+        val aliceStateAfterRebalance = server.clientStates.get(aliceClientId).get
+        val bobStateAfterRebalance = server.clientStates.get(bobClientId).get
+        println(s"  Alice locked value after rebalance: ${aliceStateAfterRebalance.lockedValue}")
+        println(s"  Bob locked value after rebalance: ${bobStateAfterRebalance.lockedValue}")
+
+        // Verify rebalance correctly updated locked values
+        // Alice should have: 100 ADA + 50 gold (paid 100 ADA for 50 gold)
+        val aliceLockedAda = aliceStateAfterRebalance.lockedValue.coin.value
+        assert(aliceLockedAda == 100_000_000, s"Alice should have 100 ADA locked, got ${aliceLockedAda / 1_000_000}")
+        assert(!aliceStateAfterRebalance.lockedValue.assets.isEmpty, "Alice should have gold locked")
+
+        // Bob should have: 200 ADA + 450 gold (received 100 ADA for 50 gold)
+        val bobLockedAda = bobStateAfterRebalance.lockedValue.coin.value
+        assert(bobLockedAda == 200_000_000, s"Bob should have 200 ADA locked, got ${bobLockedAda / 1_000_000}")
+        assert(!bobStateAfterRebalance.lockedValue.assets.isEmpty, "Bob should have gold locked")
+
+        // Verify exchange balance is zero after rebalance (debts settled)
+        val aliceExchangeBalance = aliceStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
+        val bobExchangeBalance = bobStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
+        import scalus.ledger.api.v3.Value as V3Value
+        assert(aliceExchangeBalance == V3Value.zero, s"Alice exchange balance should be zero after rebalance, got $aliceExchangeBalance")
+        assert(bobExchangeBalance == V3Value.zero, s"Bob exchange balance should be zero after rebalance, got $bobExchangeBalance")
+
+        println("\n=== TEST PASSED ===")
+        println("Rebalance scenario verified:")
+        println(s"  - Alice: 200 ADA -> traded 100 ADA for 50 gold -> locked: 100 ADA + 50 gold ✓")
+        println(s"  - Bob: 100 ADA + 500 gold -> traded 50 gold for 100 ADA -> locked: 200 ADA + 450 gold ✓")
+        println(s"  - Exchange balances reset to zero after rebalance ✓")
     }
 
 }

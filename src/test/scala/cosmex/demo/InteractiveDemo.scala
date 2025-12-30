@@ -1342,8 +1342,28 @@ object InteractiveDemo {
                                           s"[ContestedClose] Check on Cardanoscan: https://preprod.cardanoscan.io/transaction/${txHash.toHex}"
                                         )
 
-                                        // Update channel ref to the new UTxO
-                                        val newChannelRef = TransactionInput(txHash, 0)
+                                        // Find actual script output index (not hardcoded 0)
+                                        val cosmexScriptAddress = Address(
+                                          scalusNetwork,
+                                          Credential.ScriptHash(txbuilder.script.scriptHash)
+                                        )
+                                        val scriptOutputIdx = tx.body.value.outputs.view
+                                            .map(_.value)
+                                            .zipWithIndex
+                                            .find(_._1.address == cosmexScriptAddress)
+                                            .map(_._2)
+                                            .getOrElse {
+                                                println(s"[ContestedClose] ERROR: Could not find script output in transaction")
+                                                tx.body.value.outputs.toSeq.zipWithIndex.foreach {
+                                                    case (out, idx) =>
+                                                        println(s"[ContestedClose]   Output $idx: ${out.value.address}")
+                                                }
+                                                throw new RuntimeException("Could not find Cosmex script output in contested-close transaction")
+                                            }
+                                        println(s"[ContestedClose] Script output at index: $scriptOutputIdx")
+
+                                        // Update channel ref with correct index
+                                        val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
 
                                         // Wait for UTxO to be indexed before returning
                                         println(s"[ContestedClose] Waiting for confirmation...")
@@ -1461,6 +1481,22 @@ object InteractiveDemo {
                                     }
                                 }
                                 if (channelUtxo == null) {
+                                    // Check if the transaction exists but UTxO was consumed
+                                    println(s"[Timeout] Channel UTxO not found. Checking transaction status...")
+                                    provider match {
+                                        case bf: cosmex.cardano.BlockfrostProvider =>
+                                            bf.getTransactionStatus(state.channelRef.transactionId.toHex) match {
+                                                case Right(status) =>
+                                                    println(s"[Timeout] Transaction status: $status")
+                                                    if (status.contains("confirmed") || status.contains("valid")) {
+                                                        println(s"[Timeout] Transaction was confirmed but UTxO not found at index ${state.channelRef.index}.")
+                                                        println(s"[Timeout] The channel may already be in PayoutState - try 'payout' command.")
+                                                    }
+                                                case Left(err) =>
+                                                    println(s"[Timeout] Could not check transaction status: $err")
+                                            }
+                                        case _ => ()
+                                    }
                                     throw new RuntimeException(
                                       s"Channel UTxO not found after $maxAttempts attempts: ${state.channelRef}"
                                     )
@@ -1528,8 +1564,28 @@ object InteractiveDemo {
                                           s"[Timeout] ✓ Transaction submitted! TX ID: ${txHash.toHex}"
                                         )
 
-                                        // Update channel ref
-                                        val newChannelRef = TransactionInput(txHash, 0)
+                                        // Find actual script output index (not hardcoded 0)
+                                        val cosmexScriptAddress = Address(
+                                          scalusNetwork,
+                                          Credential.ScriptHash(txbuilder.script.scriptHash)
+                                        )
+                                        val scriptOutputIdx = tx.body.value.outputs.view
+                                            .map(_.value)
+                                            .zipWithIndex
+                                            .find(_._1.address == cosmexScriptAddress)
+                                            .map(_._2)
+                                            .getOrElse {
+                                                println(s"[Timeout] ERROR: Could not find script output in transaction")
+                                                tx.body.value.outputs.toSeq.zipWithIndex.foreach {
+                                                    case (out, idx) =>
+                                                        println(s"[Timeout]   Output $idx: ${out.value.address}")
+                                                }
+                                                throw new RuntimeException("Could not find Cosmex script output in timeout transaction")
+                                            }
+                                        println(s"[Timeout] Script output at index: $scriptOutputIdx")
+
+                                        // Update channel ref with correct index
+                                        val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
                                         clientState = Some(state.copy(channelRef = newChannelRef))
 
                                         // Fetch and display new state
@@ -1662,15 +1718,8 @@ object InteractiveDemo {
                                 // Check we're in PayoutState
                                 onChainState.channelState match {
                                     case OnChainChannelState.PayoutState(clientBalance, _) =>
-                                        val adaBalance = clientBalance
-                                            .quantityOf(
-                                              scalus.builtin.ByteString.empty,
-                                              scalus.builtin.ByteString.empty
-                                            )
-                                            .toLong
-                                        println(
-                                          s"[Payout] Client balance to withdraw: ${adaBalance / 1_000_000} ADA"
-                                        )
+                                        // Show full balance including tokens
+                                        println(s"[Payout] Client balance to withdraw: $clientBalance")
                                     case OnChainChannelState.SnapshotContestState(_, _, _, _) =>
                                         println(
                                           s"[Payout] ERROR: Channel is in SnapshotContestState."
@@ -1729,9 +1778,29 @@ object InteractiveDemo {
                                           s"[Payout] ✓ Funds have been returned to your wallet!"
                                         )
 
-                                        // Channel is now closed
-                                        isConnected = false
-                                        clientState = None
+                                        // Check if this was a partial payout (script output still exists)
+                                        val cosmexScriptAddress = Address(
+                                          scalusNetwork,
+                                          Credential.ScriptHash(txbuilder.script.scriptHash)
+                                        )
+                                        val maybeScriptOutputIdx = tx.body.value.outputs.view
+                                            .map(_.value)
+                                            .zipWithIndex
+                                            .find(_._1.address == cosmexScriptAddress)
+                                            .map(_._2)
+
+                                        maybeScriptOutputIdx match {
+                                            case Some(scriptOutputIdx) =>
+                                                // Partial payout - channel still exists
+                                                println(s"[Payout] Partial payout - channel still open at index $scriptOutputIdx")
+                                                val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
+                                                clientState = Some(state.copy(channelRef = newChannelRef))
+                                            case None =>
+                                                // Full payout - channel is now closed
+                                                println(s"[Payout] Full payout - channel closed")
+                                                isConnected = false
+                                                clientState = None
+                                        }
                                     case Left(error) =>
                                         println(
                                           s"[Payout] ERROR: Transaction submission failed: $error"
