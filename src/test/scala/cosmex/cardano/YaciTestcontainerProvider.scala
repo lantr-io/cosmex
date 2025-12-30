@@ -331,7 +331,7 @@ class YaciTestcontainerProvider private (
         Future {
             getProtocolParams() match {
                 case Right(params) => params
-                case Left(err) => throw err
+                case Left(err)     => throw err
             }
         }
     }

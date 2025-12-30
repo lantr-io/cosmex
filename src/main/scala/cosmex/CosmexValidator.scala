@@ -161,8 +161,8 @@ object CosmexValidator extends DataParameterizedValidator {
     /** Try to find the output that corresponds to a given clientTxOutRef.
       *
       * For multi-input transactions (like rebalance), index-based output matching doesn't work
-      * because non-script inputs (sponsor UTxOs) may be present. Instead, we find the output
-      * by matching the clientTxOutRef stored in its datum.
+      * because non-script inputs (sponsor UTxOs) may be present. Instead, we find the output by
+      * matching the clientTxOutRef stored in its datum.
       *
       * @param outputs
       *   List of transaction outputs
@@ -211,7 +211,7 @@ object CosmexValidator extends DataParameterizedValidator {
     ): TxOut = {
         tryFindOwnOutput(outputs, expectedAddress, clientTxOutRef) match
             case scalus.prelude.Option.Some(txOut) => txOut
-            case scalus.prelude.Option.None =>
+            case scalus.prelude.Option.None        =>
                 // Fall back to index-based matching for payout/close scenarios
                 outputs !! fallbackIndex
     }

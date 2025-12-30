@@ -151,10 +151,12 @@ class JsonCodecsTest extends AnyFunSuite {
           depositAmount = Value.ada(100L)
         )
 
-        val clientId = ClientId(TransactionInput(
-          TransactionHash.fromByteString(ByteString.fromHex("1" * 64)),
-          0
-        ))
+        val clientId = ClientId(
+          TransactionInput(
+            TransactionHash.fromByteString(ByteString.fromHex("1" * 64)),
+            0
+          )
+        )
 
         val request: ClientRequest = ClientRequest.SignRebalance(clientId, tx)
 
@@ -170,7 +172,7 @@ class JsonCodecsTest extends AnyFunSuite {
         assert(requestBack.isInstanceOf[ClientRequest.SignRebalance])
         val (cidBack, txBack) = requestBack match {
             case ClientRequest.SignRebalance(c, t) => (c, t)
-            case _ => fail("Expected SignRebalance")
+            case _                                 => fail("Expected SignRebalance")
         }
         assert(txBack.id == tx.id, s"Transaction ID mismatch")
         assert(cidBack.txOutRef == clientId.txOutRef)

@@ -34,15 +34,17 @@ import scala.util.{Failure, Success, Try}
   *   6. Rebalancing completes - on-chain values now match snapshot balances
   *   7. Final state is verified
   *
-  * IMPORTANT: This test uses GOLD/ADA trading pair (not ADA/ADA) to ensure balances
-  * actually change after trades, which is required to trigger the rebalancing code path.
+  * IMPORTANT: This test uses GOLD/ADA trading pair (not ADA/ADA) to ensure balances actually change
+  * after trades, which is required to trigger the rebalancing code path.
   */
 class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
 
     // Create a mock GOLD token for testing
     // In real scenarios, this would be minted on-chain
     private val goldPolicyId: ScriptHash =
-        Hash.scriptHash(ByteString.fromHex("1234567890abcdef1234567890abcdef1234567890abcdef12345678"))
+        Hash.scriptHash(
+          ByteString.fromHex("1234567890abcdef1234567890abcdef1234567890abcdef12345678")
+        )
     private val goldAssetName = AssetName(ByteString.fromString("GOLD"))
     private val goldAsset: (ByteString, ByteString) = (goldPolicyId, goldAssetName.bytes)
     private val adaAsset: (ByteString, ByteString) = (ByteString.empty, ByteString.empty)
@@ -83,7 +85,10 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
             val genesisHash = TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
             val initialUtxos = Map(
               TransactionInput(genesisHash, 0) ->
-                  TransactionOutput(address = aliceAddress, value = aliceInitialValue + Value.ada(50)),
+                  TransactionOutput(
+                    address = aliceAddress,
+                    value = aliceInitialValue + Value.ada(50)
+                  ),
               TransactionInput(genesisHash, 1) ->
                   TransactionOutput(address = bobAddress, value = bobInitialValue + Value.ada(50))
             )
@@ -187,7 +192,8 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                     println("\n=== Phase 3: Rebalancing ===")
 
                     // Advance emulator slot to current time (time passed during trading)
-                    val rebalanceSlot = SlotConfig.Mainnet.timeToSlot(java.time.Instant.now().toEpochMilli)
+                    val rebalanceSlot =
+                        SlotConfig.Mainnet.timeToSlot(java.time.Instant.now().toEpochMilli)
                     provider.setSlot(rebalanceSlot)
 
                     // Alice triggers rebalancing
@@ -218,7 +224,9 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                     println("\nVerified:")
                     println("  - Both clients opened channels successfully")
                     println("  - GOLD/ADA orders were created and matched")
-                    println("  - Trade executed: 50 GOLD moved from Bob to Alice, 50 ADA moved from Alice to Bob")
+                    println(
+                      "  - Trade executed: 50 GOLD moved from Bob to Alice, 50 ADA moved from Alice to Bob"
+                    )
                     println("  - Rebalancing synchronized on-chain values with snapshot balances")
                     println("  - Final state verified")
                     println("\nExpected final balances after trade:")
@@ -272,7 +280,8 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
         val channelOutputRef = TransactionInput(openChannelTx.id, 0)
         val clientId = ClientId(channelOutputRef)
 
-        val wsUrl = s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
+        val wsUrl =
+            s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
         val client = SimpleWebSocketClient(wsUrl)
 
         // Snapshot's clientTxOutRef is the INPUT being spent (not the output)
@@ -310,8 +319,12 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                             println(s"[$name] ✓ Signed rebalance transaction sent")
 
                         case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
-                            println(s"[$name] ✓ Rebalancing complete! Version: ${snapshot.signedSnapshot.snapshotVersion}")
-                            println(s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                            println(
+                              s"[$name] ✓ Rebalancing complete! Version: ${snapshot.signedSnapshot.snapshotVersion}"
+                            )
+                            println(
+                              s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}"
+                            )
                             done = true
 
                         case Success(ClientResponse.RebalanceAborted(reason)) =>
@@ -364,7 +377,9 @@ class TradingRebalancePayoutTest extends AnyFunSuite with Matchers {
                             println(s"[$name] ✓ State received:")
                             println(s"[$name]   Status: $status")
                             println(s"[$name]   Snapshot version: $version")
-                            println(s"[$name]   ADA Balance: ${adaBalance.toDouble / 1_000_000.0} ADA")
+                            println(
+                              s"[$name]   ADA Balance: ${adaBalance.toDouble / 1_000_000.0} ADA"
+                            )
                             println(s"[$name]   GOLD Balance: $goldBalance GOLD")
                             println(s"[$name]   Active orders: ${orders.size}")
                             done = true

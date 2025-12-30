@@ -1295,7 +1295,13 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val timeoutTx =
             try {
-                txbuilder.timeout(provider, new scalus.cardano.wallet.BloxbeanAccount(clientAccount), contestUtxo.input, contestDatum, exchangeParams.contestationPeriodInMilliseconds)
+                txbuilder.timeout(
+                  provider,
+                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
+                  contestUtxo.input,
+                  contestDatum,
+                  exchangeParams.contestationPeriodInMilliseconds
+                )
             } catch {
                 case e: scalus.cardano.txbuilder.TxBuilderException =>
                     println(s"TxBuilder exception during timeout: ${e.getMessage}")
@@ -1536,7 +1542,13 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
 
         val timeout1Tx =
             try {
-                txbuilder.timeout(provider, new scalus.cardano.wallet.BloxbeanAccount(clientAccount), contestUtxo.input, contestDatum, exchangeParams.contestationPeriodInMilliseconds)
+                txbuilder.timeout(
+                  provider,
+                  new scalus.cardano.wallet.BloxbeanAccount(clientAccount),
+                  contestUtxo.input,
+                  contestDatum,
+                  exchangeParams.contestationPeriodInMilliseconds
+                )
             } catch {
                 case e: scalus.cardano.txbuilder.TxBuilderException =>
                     println(s"TxBuilder exception during timeout: ${e.getMessage}")
@@ -1662,11 +1674,18 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
           TransactionInput(genesisHash, 1) ->
               TransactionOutput(
                 address = bobAddress,
-                value = Value.ada(200) + Value.asset(goldPolicyId, goldAssetName, 500_000_000) // 100 ADA + 500 gold for deposit + extra
+                value = Value.ada(200) + Value.asset(
+                  goldPolicyId,
+                  goldAssetName,
+                  500_000_000
+                ) // 100 ADA + 500 gold for deposit + extra
               )
         )
 
-        val provider = Emulator(initialUtxos = aliceInitialUtxos, initialContext = Context.testMainnet(slot = 1000))
+        val provider = Emulator(
+          initialUtxos = aliceInitialUtxos,
+          initialContext = Context.testMainnet(slot = 1000)
+        )
         val server = Server(cardanoInfo, exchangeParams, provider, exchangePrivKey)
         import scalus.builtin.Data.toData
         import scalus.cardano.wallet.BloxbeanAccount
@@ -1696,7 +1715,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceActualDeposit = aliceChannelOutput._1.value.value
         val aliceClientTxOutRef = TxOutRef(TxId(aliceOpenChannelTx.id), aliceChannelOutput._2)
         val aliceInitialSnapshot = mkInitialSnapshot(aliceActualDeposit)
-        val aliceClientSignedSnapshot = mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
+        val aliceClientSignedSnapshot =
+            mkClientSignedSnapshot(clientAccount, aliceClientTxOutRef, aliceInitialSnapshot)
 
         val aliceClientId = ClientId(TransactionInput(aliceOpenChannelTx.id, aliceChannelOutput._2))
         val aliceClientState = ClientState(
@@ -1718,7 +1738,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
             .toOption
             .get
 
-        val bobDepositAmount = Value.ada(100) + Value.asset(goldPolicyId, goldAssetName, 500_000_000)
+        val bobDepositAmount =
+            Value.ada(100) + Value.asset(goldPolicyId, goldAssetName, 500_000_000)
         val bobOpenChannelTxUnsigned = txbuilder.openChannel(
           clientInput = bobDepositUtxo,
           clientPubKey = bobPubKey,
@@ -1735,7 +1756,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val bobActualDeposit = bobChannelOutput._1.value.value
         val bobClientTxOutRef = TxOutRef(TxId(bobOpenChannelTx.id), bobChannelOutput._2)
         val bobInitialSnapshot = mkInitialSnapshot(bobActualDeposit)
-        val bobClientSignedSnapshot = mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
+        val bobClientSignedSnapshot =
+            mkClientSignedSnapshot(bobAccount, bobClientTxOutRef, bobInitialSnapshot)
 
         val bobClientId = ClientId(TransactionInput(bobOpenChannelTx.id, bobChannelOutput._2))
         val bobClientState = ClientState(
@@ -1781,8 +1803,20 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         println(s"  Trades executed: ${aliceTrades1}")
 
         // Verify balances after trade
-        val aliceBalanceAfterTrade = server.clientStates.get(aliceClientId).get.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
-        val bobBalanceAfterTrade = server.clientStates.get(bobClientId).get.latestSnapshot.signedSnapshot.snapshotTradingState.tsClientBalance
+        val aliceBalanceAfterTrade = server.clientStates
+            .get(aliceClientId)
+            .get
+            .latestSnapshot
+            .signedSnapshot
+            .snapshotTradingState
+            .tsClientBalance
+        val bobBalanceAfterTrade = server.clientStates
+            .get(bobClientId)
+            .get
+            .latestSnapshot
+            .signedSnapshot
+            .snapshotTradingState
+            .tsClientBalance
         println(s"  Alice balance after trade: $aliceBalanceAfterTrade")
         println(s"  Bob balance after trade: $bobBalanceAfterTrade")
 
@@ -1812,7 +1846,8 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val aliceSignResult = server.handleSignRebalance(aliceClientId, aliceSignedRebalanceTx)
         assert(aliceSignResult.isRight, s"Alice sign rebalance failed: $aliceSignResult")
 
-        val bobSignedRebalanceTx = signTransaction(bobAccount, aliceSignedRebalanceTx) // Build on Alice's signed tx
+        val bobSignedRebalanceTx =
+            signTransaction(bobAccount, aliceSignedRebalanceTx) // Build on Alice's signed tx
         val bobSignResult = server.handleSignRebalance(bobClientId, bobSignedRebalanceTx)
         assert(bobSignResult.isRight, s"Bob sign rebalance failed: $bobSignResult")
         println(s"  Rebalance completed successfully")
@@ -1826,25 +1861,44 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         // Verify rebalance correctly updated locked values
         // Alice should have: 100 ADA + 50 gold (paid 100 ADA for 50 gold)
         val aliceLockedAda = aliceStateAfterRebalance.lockedValue.coin.value
-        assert(aliceLockedAda == 100_000_000, s"Alice should have 100 ADA locked, got ${aliceLockedAda / 1_000_000}")
-        assert(!aliceStateAfterRebalance.lockedValue.assets.isEmpty, "Alice should have gold locked")
+        assert(
+          aliceLockedAda == 100_000_000,
+          s"Alice should have 100 ADA locked, got ${aliceLockedAda / 1_000_000}"
+        )
+        assert(
+          !aliceStateAfterRebalance.lockedValue.assets.isEmpty,
+          "Alice should have gold locked"
+        )
 
         // Bob should have: 200 ADA + 450 gold (received 100 ADA for 50 gold)
         val bobLockedAda = bobStateAfterRebalance.lockedValue.coin.value
-        assert(bobLockedAda == 200_000_000, s"Bob should have 200 ADA locked, got ${bobLockedAda / 1_000_000}")
+        assert(
+          bobLockedAda == 200_000_000,
+          s"Bob should have 200 ADA locked, got ${bobLockedAda / 1_000_000}"
+        )
         assert(!bobStateAfterRebalance.lockedValue.assets.isEmpty, "Bob should have gold locked")
 
         // Verify exchange balance is zero after rebalance (debts settled)
-        val aliceExchangeBalance = aliceStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
-        val bobExchangeBalance = bobStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
+        val aliceExchangeBalance =
+            aliceStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
+        val bobExchangeBalance =
+            bobStateAfterRebalance.latestSnapshot.signedSnapshot.snapshotTradingState.tsExchangeBalance
         import scalus.ledger.api.v3.Value as V3Value
-        assert(aliceExchangeBalance == V3Value.zero, s"Alice exchange balance should be zero after rebalance, got $aliceExchangeBalance")
-        assert(bobExchangeBalance == V3Value.zero, s"Bob exchange balance should be zero after rebalance, got $bobExchangeBalance")
+        assert(
+          aliceExchangeBalance == V3Value.zero,
+          s"Alice exchange balance should be zero after rebalance, got $aliceExchangeBalance"
+        )
+        assert(
+          bobExchangeBalance == V3Value.zero,
+          s"Bob exchange balance should be zero after rebalance, got $bobExchangeBalance"
+        )
 
         println("\n=== TEST PASSED ===")
         println("Rebalance scenario verified:")
         println(s"  - Alice: 200 ADA -> traded 100 ADA for 50 gold -> locked: 100 ADA + 50 gold ✓")
-        println(s"  - Bob: 100 ADA + 500 gold -> traded 50 gold for 100 ADA -> locked: 200 ADA + 450 gold ✓")
+        println(
+          s"  - Bob: 100 ADA + 500 gold -> traded 50 gold for 100 ADA -> locked: 200 ADA + 450 gold ✓"
+        )
         println(s"  - Exchange balances reset to zero after rebalance ✓")
     }
 

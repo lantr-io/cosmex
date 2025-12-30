@@ -192,7 +192,12 @@ class Server(
                         sendTx(tx)
 
                         // Reply with the both-signed snapshot and channelRef
-                        reply(ClientResponse.ChannelOpened(bothSignedSnapshot, openChannelInfo.channelRef))
+                        reply(
+                          ClientResponse.ChannelOpened(
+                            bothSignedSnapshot,
+                            openChannelInfo.channelRef
+                          )
+                        )
                     case Left(error) =>
                         reply(ClientResponse.Error(ErrorCode.InvalidTransaction, error))
             case _ => List.empty
@@ -413,11 +418,11 @@ class Server(
 
     /** Validate that the client has sufficient balance for the order.
       *
-      * For SELL orders (orderAmount < 0): need base asset (|orderAmount|)
-      * For BUY orders (orderAmount > 0): need quote asset (orderAmount * orderPrice / PRICE_SCALE)
+      * For SELL orders (orderAmount < 0): need base asset (|orderAmount|) For BUY orders
+      * (orderAmount > 0): need quote asset (orderAmount * orderPrice / PRICE_SCALE)
       *
-      * Note: Uses tsClientBalance directly because existing orders have already
-      * had their locked amounts deducted from tsClientBalance (pre-deduction model).
+      * Note: Uses tsClientBalance directly because existing orders have already had their locked
+      * amounts deducted from tsClientBalance (pre-deduction model).
       */
     def validateOrderBalance(
         tradingState: TradingState,
@@ -591,9 +596,8 @@ class Server(
                 Right((longOrderId, withExchangeSig, matchResult.trades))
     }
 
-    /** Update counterparty states after trades are executed.
-      * For each trade, finds the counterparty (owner of the matched order) and
-      * updates their trading state with the trade result.
+    /** Update counterparty states after trades are executed. For each trade, finds the counterparty
+      * (owner of the matched order) and updates their trading state with the trade result.
       */
     def updateCounterpartyStates(initiatingClientId: ClientId, trades: List[Trade]): Unit = {
         import CosmexValidator.applyTrade
@@ -630,14 +634,17 @@ class Server(
                           snapshotExchangeSignature = ByteString.empty
                         )
 
-                        val withExchangeSig = signSnapshot(counterpartyTxOutRef, exchangeSignedSnapshot)
+                        val withExchangeSig =
+                            signSnapshot(counterpartyTxOutRef, exchangeSignedSnapshot)
                         val updatedCounterpartyState =
                             counterpartyState.copy(latestSnapshot = withExchangeSig)
                         clientStates.put(counterpartyClientId, updatedCounterpartyState)
 
                         // Send SnapshotToSign to counterparty for signing
                         clientChannels.get(counterpartyClientId).foreach { channel =>
-                            channel.send(ClientResponse.SnapshotToSign(withExchangeSig, counterpartyTxOutRef))
+                            channel.send(
+                              ClientResponse.SnapshotToSign(withExchangeSig, counterpartyTxOutRef)
+                            )
                         }
                     }
                 }
@@ -734,16 +741,15 @@ class Server(
                 Right(bothSignedSnapshot)
     }
 
-    /** Handle client-signed snapshot (per whitepaper protocol).
-      * Client signs the snapshot after receiving SnapshotToSign.
-      * We verify the signature and update the stored snapshot.
+    /** Handle client-signed snapshot (per whitepaper protocol). Client signs the snapshot after
+      * receiving SnapshotToSign. We verify the signature and update the stored snapshot.
       */
     def handleSignSnapshot(
         clientId: ClientId,
         clientSignedSnapshot: SignedSnapshot
     ): Either[(String, String), Unit] = {
         clientStates.get(clientId) match
-            case None => Left((ErrorCode.ClientNotFound, "Client not found"))
+            case None              => Left((ErrorCode.ClientNotFound, "Client not found"))
             case Some(clientState) =>
                 // Verify the snapshot version matches what we expect
                 val expectedVersion = clientState.latestSnapshot.signedSnapshot.snapshotVersion
@@ -767,8 +773,7 @@ class Server(
 
                 // Update stored snapshot with client signature (now BothSigned)
                 val bothSignedSnapshot = clientSignedSnapshot.copy(
-                  snapshotExchangeSignature =
-                      clientState.latestSnapshot.snapshotExchangeSignature
+                  snapshotExchangeSignature = clientState.latestSnapshot.snapshotExchangeSignature
                 )
                 val updatedState = clientState.copy(latestSnapshot = bothSignedSnapshot)
                 clientStates.put(clientId, updatedState)
@@ -913,47 +918,58 @@ class Server(
         // Debug: print channel data being rebalanced
         println(s"[Server] Rebalancing ${channelDataWithOnChainState.size} channels:")
         channelDataWithOnChainState.foreach { case (utxo, onChainState, tradingState) =>
-            println(s"[Server]   Channel UTxO: ${utxo.input.transactionId.toHex.take(16)}...#${utxo.input.index}")
-            println(s"[Server]     clientTxOutRef: ${onChainState.clientTxOutRef.id.hash.toHex.take(16)}...#${onChainState.clientTxOutRef.idx}")
+            println(
+              s"[Server]   Channel UTxO: ${utxo.input.transactionId.toHex.take(16)}...#${utxo.input.index}"
+            )
+            println(
+              s"[Server]     clientTxOutRef: ${onChainState.clientTxOutRef.id.hash.toHex.take(16)}...#${onChainState.clientTxOutRef.idx}"
+            )
         }
 
-        val rebalanceTx = try {
-            txBuilder.rebalance(
-              provider,
-              channelDataWithOnChainState,
-              exchangeParams.exchangePkh,
-              sponsor = sponsorAddress
-            )
-        } catch {
-            case e: Exception =>
-                println(s"[Server] Rebalance transaction build FAILED: ${e.getMessage}")
-                // Extract trace logs from EvaluationFailure if present
-                var cause = e.getCause
-                while cause != null do {
-                    println(s"[Server]   Cause: ${cause.getClass.getName}")
-                    try {
-                        val logsField = cause.getClass.getDeclaredField("logs")
-                        logsField.setAccessible(true)
-                        val logs = logsField.get(cause).asInstanceOf[Array[String]]
-                        if logs != null && logs.nonEmpty then {
-                            println(s"[Server]   TRACE LOGS from Plutus evaluation:")
-                            logs.foreach(log => println(s"[Server]     $log"))
+        val rebalanceTx =
+            try {
+                txBuilder.rebalance(
+                  provider,
+                  channelDataWithOnChainState,
+                  exchangeParams.exchangePkh,
+                  sponsor = sponsorAddress
+                )
+            } catch {
+                case e: Exception =>
+                    println(s"[Server] Rebalance transaction build FAILED: ${e.getMessage}")
+                    // Extract trace logs from EvaluationFailure if present
+                    var cause = e.getCause
+                    while cause != null do {
+                        println(s"[Server]   Cause: ${cause.getClass.getName}")
+                        try {
+                            val logsField = cause.getClass.getDeclaredField("logs")
+                            logsField.setAccessible(true)
+                            val logs = logsField.get(cause).asInstanceOf[Array[String]]
+                            if logs != null && logs.nonEmpty then {
+                                println(s"[Server]   TRACE LOGS from Plutus evaluation:")
+                                logs.foreach(log => println(s"[Server]     $log"))
+                            }
+                        } catch {
+                            case _: NoSuchFieldException => // No logs field in this exception
                         }
-                    } catch {
-                        case _: NoSuchFieldException => // No logs field in this exception
+                        cause = cause.getCause
                     }
-                    cause = cause.getCause
-                }
-                return Left((ErrorCode.RebalancingFailed, s"Failed to build rebalance transaction: ${e.getMessage}"))
-        }
+                    return Left(
+                      (
+                        ErrorCode.RebalancingFailed,
+                        s"Failed to build rebalance transaction: ${e.getMessage}"
+                      )
+                    )
+            }
 
         // Compute client-to-output-index mapping
         // Outputs are sorted by TxOutRef (same as in CosmexTransactions.rebalance)
         val sortedChannelUtxos = channelUtxos.sortBy { case (_, utxo, _) =>
             (utxo.input.transactionId.toHex, utxo.input.index)
         }
-        val clientOutputIndices = sortedChannelUtxos.zipWithIndex.map { case ((clientId, _, _), idx) =>
-            clientId -> idx
+        val clientOutputIndices = sortedChannelUtxos.zipWithIndex.map {
+            case ((clientId, _, _), idx) =>
+                clientId -> idx
         }.toMap
 
         // Set rebalancing state
@@ -1066,13 +1082,15 @@ class Server(
                         // Get the new channelRef from the rebalance transaction
                         val outputIndex = context.clientOutputIndices.getOrElse(clientId, 0)
                         val newChannelRef = TransactionInput(finalTx.id, outputIndex)
-                        println(s"[Server] Updating channelRef for $clientId: ${newChannelRef.transactionId.toHex.take(16)}...#$outputIndex")
+                        println(
+                          s"[Server] Updating channelRef for $clientId: ${newChannelRef.transactionId.toHex.take(16)}...#$outputIndex"
+                        )
 
                         // After rebalance, exchangeBalance is reset to zero (debts settled on-chain)
                         import scalus.ledger.api.v3.Value as V3Value
                         val newTradingState = TradingState(
                           tsClientBalance = tradingState.tsClientBalance,
-                          tsExchangeBalance = V3Value.zero,  // Reset to zero after rebalance
+                          tsExchangeBalance = V3Value.zero, // Reset to zero after rebalance
                           tsOrders = tradingState.tsOrders
                         )
                         val currentSnapshot = clientState.latestSnapshot.signedSnapshot
@@ -1086,7 +1104,8 @@ class Server(
                           snapshotClientSignature = ByteString.empty,
                           snapshotExchangeSignature = ByteString.empty
                         )
-                        val withExchangeSig = signSnapshot(clientState.clientTxOutRef, newSignedSnapshot)
+                        val withExchangeSig =
+                            signSnapshot(clientState.clientTxOutRef, newSignedSnapshot)
 
                         val updatedState = clientState.copy(
                           lockedValue = newLockedValue.toLedgerValue,

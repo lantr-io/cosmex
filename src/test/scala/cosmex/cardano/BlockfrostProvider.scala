@@ -42,7 +42,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
         case BlockfrostProvider.MainnetUrl => BlockfrostProvider.NetworkType.Mainnet
         case BlockfrostProvider.PreprodUrl => BlockfrostProvider.NetworkType.Preprod
         case BlockfrostProvider.PreviewUrl => BlockfrostProvider.NetworkType.Preview
-        case _ => BlockfrostProvider.NetworkType.Unknown
+        case _                             => BlockfrostProvider.NetworkType.Unknown
     }
 
     /** Submit a transaction to the blockchain */
@@ -58,7 +58,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
             println(s"[BlockfrostProvider] Submitting transaction:")
             println(s"[BlockfrostProvider]   Computed TX ID: $computedTxId")
             println(s"[BlockfrostProvider]   TX CBOR size: ${txCbor.length} bytes")
-            println(s"[BlockfrostProvider]   Inputs: ${tx.body.value.inputs.toSeq.map(i => s"${i.transactionId.toHex.take(16)}...#${i.index}").mkString(", ")}")
+            println(
+              s"[BlockfrostProvider]   Inputs: ${tx.body.value.inputs.toSeq.map(i => s"${i.transactionId.toHex.take(16)}...#${i.index}").mkString(", ")}"
+            )
             println(s"[BlockfrostProvider]   Outputs: ${tx.body.value.outputs.size}")
 
             Try {
@@ -78,7 +80,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                         println(s"[BlockfrostProvider]   Computed: $computedTxId")
                         println(s"[BlockfrostProvider]   Blockfrost returned: $responseText")
                     }
-                    println(s"[BlockfrostProvider] Transaction accepted by Blockfrost: ${responseText.take(16)}...")
+                    println(
+                      s"[BlockfrostProvider] Transaction accepted by Blockfrost: ${responseText.take(16)}..."
+                    )
                     Right(tx.id)
                 } else {
                     // Now we can access the response body with the actual rejection reason
@@ -95,7 +99,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                     }.getOrElse(errorBody)
 
                     Left(
-                      SubmitError.NodeError(s"Transaction submission failed (${response.statusCode}): $errorMsg")
+                      SubmitError.NodeError(
+                        s"Transaction submission failed (${response.statusCode}): $errorMsg"
+                      )
                     )
                 }
             }.toEither.left.map(e => SubmitError.NetworkError(e.getMessage, Some(e))).flatten
@@ -126,12 +132,14 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 val json = ujson.read(response.text())
                 val blockHeight = json.obj.get("block_height").map(_.num.toLong)
                 val blockTime = json.obj.get("block_time").map(_.num.toLong)
-                Right(s"Confirmed in block ${blockHeight.getOrElse("?")} at time ${blockTime.getOrElse("?")}")
+                Right(
+                  s"Confirmed in block ${blockHeight.getOrElse("?")} at time ${blockTime.getOrElse("?")}"
+                )
             } else if response.statusCode == 404 then {
                 // Check mempool
                 checkMempool(txHash) match {
                     case Right(mempoolStatus) => Right(s"Not on chain. $mempoolStatus")
-                    case Left(err) => Right(s"Not on chain. Mempool check failed: $err")
+                    case Left(err)            => Right(s"Not on chain. Mempool check failed: $err")
                 }
             } else {
                 Left(s"Error checking status: ${response.statusCode} - ${response.text()}")
@@ -350,7 +358,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 val json = ujson.read(response.text())
                 val slot = json("slot").num.toLong
                 val time = json("time").num.toLong
-                println(s"[BlockfrostProvider] Current blockchain: slot=$slot, time=$time (${java.time.Instant.ofEpochSecond(time)})")
+                println(
+                  s"[BlockfrostProvider] Current blockchain: slot=$slot, time=$time (${java.time.Instant.ofEpochSecond(time)})"
+                )
                 (slot, time)
             } else {
                 throw RuntimeException(
@@ -364,7 +374,9 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
         }
     }
 
-    /** Validate transaction before submission - checks validity interval against current blockchain state */
+    /** Validate transaction before submission - checks validity interval against current blockchain
+      * state
+      */
     def validateBeforeSubmit(tx: Transaction, slotConfig: SlotConfig): Either[String, Unit] = {
         getLatestBlock() match {
             case Left(err) =>
@@ -382,16 +394,24 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 val validToTime = slotConfig.slotToTime(validToSlot)
 
                 println(s"[BlockfrostProvider] TX validity interval:")
-                println(s"[BlockfrostProvider]   From: slot $validFromSlot (${java.time.Instant.ofEpochMilli(validFromTime)})")
-                println(s"[BlockfrostProvider]   To:   slot $validToSlot (${java.time.Instant.ofEpochMilli(validToTime)})")
+                println(
+                  s"[BlockfrostProvider]   From: slot $validFromSlot (${java.time.Instant.ofEpochMilli(validFromTime)})"
+                )
+                println(
+                  s"[BlockfrostProvider]   To:   slot $validToSlot (${java.time.Instant.ofEpochMilli(validToTime)})"
+                )
                 println(s"[BlockfrostProvider]   Current: slot $currentSlot")
 
                 if currentSlot < validFromSlot then {
                     val diff = validFromSlot - currentSlot
-                    Left(s"Transaction validity not started yet! Current slot $currentSlot < validFrom $validFromSlot (diff: $diff slots)")
+                    Left(
+                      s"Transaction validity not started yet! Current slot $currentSlot < validFrom $validFromSlot (diff: $diff slots)"
+                    )
                 } else if currentSlot > validToSlot then {
                     val diff = currentSlot - validToSlot
-                    Left(s"Transaction validity expired! Current slot $currentSlot > validTo $validToSlot (diff: $diff slots)")
+                    Left(
+                      s"Transaction validity expired! Current slot $currentSlot > validTo $validToSlot (diff: $diff slots)"
+                    )
                 } else {
                     println(s"[BlockfrostProvider] ✓ Validity interval OK")
                     Right(())
@@ -404,7 +424,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
         Future {
             getProtocolParams() match {
                 case Right(params) => params
-                case Left(err) => throw err
+                case Left(err)     => throw err
             }
         }
     }
@@ -428,14 +448,22 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
                 val params = ProtocolParams.fromBlockfrostJson(response.text())
                 val parsedMem = params.executionUnitPrices.priceMemory
                 val parsedStep = params.executionUnitPrices.priceSteps
-                println(s"[BlockfrostProvider] Parsed priceMemory: $parsedMem (${parsedMem.numerator}/${parsedMem.denominator} = ${parsedMem.toDouble})")
-                println(s"[BlockfrostProvider] Parsed priceSteps: $parsedStep (${parsedStep.numerator}/${parsedStep.denominator} = ${parsedStep.toDouble})")
+                println(
+                  s"[BlockfrostProvider] Parsed priceMemory: $parsedMem (${parsedMem.numerator}/${parsedMem.denominator} = ${parsedMem.toDouble})"
+                )
+                println(
+                  s"[BlockfrostProvider] Parsed priceSteps: $parsedStep (${parsedStep.numerator}/${parsedStep.denominator} = ${parsedStep.toDouble})"
+                )
 
                 // Check for precision loss
                 if math.abs(rawPriceMem - parsedMem.toDouble) > 1e-15 then
-                    println(s"[BlockfrostProvider] WARNING: price_mem precision loss! Raw=$rawPriceMem, Parsed=${parsedMem.toDouble}, Diff=${rawPriceMem - parsedMem.toDouble}")
+                    println(
+                      s"[BlockfrostProvider] WARNING: price_mem precision loss! Raw=$rawPriceMem, Parsed=${parsedMem.toDouble}, Diff=${rawPriceMem - parsedMem.toDouble}"
+                    )
                 if math.abs(rawPriceStep - parsedStep.toDouble) > 1e-15 then
-                    println(s"[BlockfrostProvider] WARNING: price_step precision loss! Raw=$rawPriceStep, Parsed=${parsedStep.toDouble}, Diff=${rawPriceStep - parsedStep.toDouble}")
+                    println(
+                      s"[BlockfrostProvider] WARNING: price_step precision loss! Raw=$rawPriceStep, Parsed=${parsedStep.toDouble}, Diff=${rawPriceStep - parsedStep.toDouble}"
+                    )
 
                 params
             } else {
@@ -452,6 +480,7 @@ class BlockfrostProvider(apiKey: String, baseUrl: String)
 }
 
 object BlockfrostProvider {
+
     /** Network type enumeration */
     enum NetworkType {
         case Mainnet, Preprod, Preview, Unknown

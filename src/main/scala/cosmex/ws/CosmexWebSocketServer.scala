@@ -69,7 +69,9 @@ object CosmexWebSocketServer {
                               s"[Server] Sent async order execution: Order ID ${trade.orderId}"
                             )
                         case ClientResponse.ChannelOpened(_, channelRef) =>
-                            println(s"[Server] Sent async ChannelOpened, channelRef: ${channelRef.transactionId.toHex.take(16)}...#${channelRef.index}")
+                            println(
+                              s"[Server] Sent async ChannelOpened, channelRef: ${channelRef.transactionId.toHex.take(16)}...#${channelRef.index}"
+                            )
                         case ClientResponse.RebalanceRequired(tx) =>
                             println(s"[Server] Sending RebalanceRequired:")
                             println(s"[Server]   TX ID: ${tx.id.toHex.take(16)}...")
@@ -180,7 +182,11 @@ object CosmexWebSocketServer {
       * Most requests return a single response, but CreateOrder returns OrderCreated followed by
       * OrderExecuted for each trade (ensures correct ordering)
       */
-    def handleRequest(server: Server, wsClientId: ClientId, request: ClientRequest): List[ClientResponse] = {
+    def handleRequest(
+        server: Server,
+        wsClientId: ClientId,
+        request: ClientRequest
+    ): List[ClientResponse] = {
         given Server = server
         val responses = request match {
             case ClientRequest.OpenChannel(tx, snapshot) =>
@@ -219,16 +225,27 @@ object CosmexWebSocketServer {
 
                         // Debug: Check server-side CBOR before submission
                         val serverTxCbor = tx.toCbor
-                        val serverFirstByte = serverTxCbor.headOption.map(b => f"${b & 0xff}%02x").getOrElse("??")
+                        val serverFirstByte =
+                            serverTxCbor.headOption.map(b => f"${b & 0xff}%02x").getOrElse("??")
                         println(s"[Server] TX CBOR first byte: 0x$serverFirstByte (should be 0x84)")
                         println(s"[Server] TX CBOR length: ${serverTxCbor.length} bytes")
-                        println(s"[Server] TX CBOR first 100 bytes: ${serverTxCbor.take(100).map(b => f"${b & 0xff}%02x").mkString}")
-                        println(s"[Server] TX CBOR last 20 bytes: ${serverTxCbor.takeRight(20).map(b => f"${b & 0xff}%02x").mkString}")
-                        println(s"[Server] TX isValid: ${tx.isValid}, auxiliaryData: ${tx.auxiliaryData}")
+                        println(
+                          s"[Server] TX CBOR first 100 bytes: ${serverTxCbor.take(100).map(b => f"${b & 0xff}%02x").mkString}"
+                        )
+                        println(
+                          s"[Server] TX CBOR last 20 bytes: ${serverTxCbor.takeRight(20).map(b => f"${b & 0xff}%02x").mkString}"
+                        )
+                        println(
+                          s"[Server] TX isValid: ${tx.isValid}, auxiliaryData: ${tx.auxiliaryData}"
+                        )
                         println(s"[Server] TX body inputs: ${tx.body.value.inputs.toSeq.size}")
                         println(s"[Server] TX body outputs: ${tx.body.value.outputs.size}")
-                        println(s"[Server] TX witnessSet vkeys: ${tx.witnessSet.vkeyWitnesses.toSeq.size}")
-                        println(s"[Server] Full TX CBOR hex: ${serverTxCbor.map(b => f"${b & 0xff}%02x").mkString}")
+                        println(
+                          s"[Server] TX witnessSet vkeys: ${tx.witnessSet.vkeyWitnesses.toSeq.size}"
+                        )
+                        println(
+                          s"[Server] Full TX CBOR hex: ${serverTxCbor.map(b => f"${b & 0xff}%02x").mkString}"
+                        )
 
                         // Submit transaction to blockchain (non-blocking)
                         server.provider.submit(tx).await() match {
@@ -280,7 +297,10 @@ object CosmexWebSocketServer {
                                                   ChannelStatus.Open
                                                 )
                                                 channel.send(
-                                                  ClientResponse.ChannelOpened(signedSnapshot, channelRef)
+                                                  ClientResponse.ChannelOpened(
+                                                    signedSnapshot,
+                                                    channelRef
+                                                  )
                                                 )
                                                 confirmed = true
                                             case Left(_) =>

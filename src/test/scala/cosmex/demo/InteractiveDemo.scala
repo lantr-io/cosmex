@@ -133,7 +133,7 @@ object InteractiveDemo {
             var isConnected = false
             var mintedPolicyId: Option[ByteString] = None
             var clientState: Option[ClientState] = None
-            var isRebalancing = false  // Track if rebalancing is in progress
+            var isRebalancing = false // Track if rebalancing is in progress
 
             // Track spent UTxOs to filter them out from Blockfrost queries (indexing delay)
             val spentUtxos = scala.collection.mutable.Set[TransactionInput]()
@@ -263,13 +263,15 @@ object InteractiveDemo {
                             val genesisHash =
                                 TransactionHash.fromByteString(ByteString.fromHex("0" * 64))
                             val genesisInput = TransactionInput(genesisHash, 0)
-                            Seq(Utxo(
-                              input = genesisInput,
-                              output = TransactionOutput(
-                                address = clientAddress,
-                                value = clientInitialValue + Value.lovelace(100_000_000L)
+                            Seq(
+                              Utxo(
+                                input = genesisInput,
+                                output = TransactionOutput(
+                                  address = clientAddress,
+                                  value = clientInitialValue + Value.lovelace(100_000_000L)
+                                )
                               )
-                            ))
+                            )
 
                         case "yaci-devkit" | "yaci" | "preprod" | "preview" =>
                             import scalus.cardano.address.ShelleyAddress
@@ -282,21 +284,25 @@ object InteractiveDemo {
                             def hasRequiredTokens(utxoValue: Value): Boolean = {
                                 // If no tokens required, always true
                                 if requiredTokens == Value.lovelace(0) ||
-                                   requiredTokens == Value.lovelace(requiredTokens.coin.value) then
-                                    true
+                                    requiredTokens == Value.lovelace(requiredTokens.coin.value)
+                                then true
                                 else
                                     // Check that UTxO has at least the required amount of each token
-                                    requiredTokens.assets.assets.forall { case (policyId, requiredAssets) =>
-                                        utxoValue.assets.assets.get(policyId) match {
-                                            case None => false // UTxO doesn't have this policy
-                                            case Some(utxoAssets) =>
-                                                requiredAssets.forall { case (assetName, requiredAmount) =>
-                                                    utxoAssets.get(assetName) match {
-                                                        case None => false // UTxO doesn't have this asset
-                                                        case Some(utxoAmount) => utxoAmount >= requiredAmount
+                                    requiredTokens.assets.assets.forall {
+                                        case (policyId, requiredAssets) =>
+                                            utxoValue.assets.assets.get(policyId) match {
+                                                case None => false // UTxO doesn't have this policy
+                                                case Some(utxoAssets) =>
+                                                    requiredAssets.forall {
+                                                        case (assetName, requiredAmount) =>
+                                                            utxoAssets.get(assetName) match {
+                                                                case None =>
+                                                                    false // UTxO doesn't have this asset
+                                                                case Some(utxoAmount) =>
+                                                                    utxoAmount >= requiredAmount
+                                                            }
                                                     }
-                                                }
-                                        }
+                                            }
                                     }
                             }
 
@@ -305,8 +311,10 @@ object InteractiveDemo {
                                 requiredTokens != Value.lovelace(requiredTokens.coin.value)
 
                             // Retry configuration for waiting on token indexing
-                            val maxRetries = if needsTokens then 12 else 1  // 12 retries * 5 seconds = 60 seconds max
-                            val retryDelayMs = 5000  // 5 seconds between retries
+                            val maxRetries =
+                                if needsTokens then 12
+                                else 1 // 12 retries * 5 seconds = 60 seconds max
+                            val retryDelayMs = 5000 // 5 seconds between retries
 
                             def tryFindUtxos(attempt: Int): Either[Throwable, Seq[Utxo]] = {
                                 provider
@@ -334,21 +342,29 @@ object InteractiveDemo {
                                             }
                                             (wt, ao)
                                         } else {
-                                            (Map.empty[TransactionInput, TransactionOutput], allUnspent)
+                                            (
+                                              Map.empty[TransactionInput, TransactionOutput],
+                                              allUnspent
+                                            )
                                         }
 
                                         if needsTokens && withTokens.isEmpty then {
                                             // Tokens needed but not found - retry if we have attempts left
                                             if attempt < maxRetries then {
-                                                val waitSeconds = (maxRetries - attempt) * retryDelayMs / 1000
-                                                println(s"[$partyName] Waiting for token UTxO to be indexed... (attempt $attempt/$maxRetries, ~${waitSeconds}s remaining)")
+                                                val waitSeconds =
+                                                    (maxRetries - attempt) * retryDelayMs / 1000
+                                                println(
+                                                  s"[$partyName] Waiting for token UTxO to be indexed... (attempt $attempt/$maxRetries, ~${waitSeconds}s remaining)"
+                                                )
                                                 Thread.sleep(retryDelayMs)
                                                 tryFindUtxos(attempt + 1)
                                             } else {
-                                                Left(new RuntimeException(
-                                                  s"No UTxO found with required tokens after $maxRetries attempts. " +
-                                                  s"The mint transaction may not be confirmed yet."
-                                                ))
+                                                Left(
+                                                  new RuntimeException(
+                                                    s"No UTxO found with required tokens after $maxRetries attempts. " +
+                                                        s"The mint transaction may not be confirmed yet."
+                                                  )
+                                                )
                                             }
                                         } else {
                                             // Start with UTxOs that have required tokens
@@ -356,7 +372,8 @@ object InteractiveDemo {
                                             var total = collected.map(_._2.value.coin.value).sum
 
                                             // Add ADA-only UTxOs if we need more ADA
-                                            val sortedAdaOnly = adaOnly.toSeq.sortBy(-_._2.value.coin.value)
+                                            val sortedAdaOnly =
+                                                adaOnly.toSeq.sortBy(-_._2.value.coin.value)
                                             val adaIter = sortedAdaOnly.iterator
                                             while total < requiredAmount && adaIter.hasNext do {
                                                 val utxo = adaIter.next()
@@ -365,13 +382,16 @@ object InteractiveDemo {
                                             }
 
                                             if total < requiredAmount then {
-                                                Left(new RuntimeException(
-                                                  s"Insufficient funds: need ${requiredAmount / 1_000_000} ADA, " +
-                                                  s"have ${total / 1_000_000} ADA across ${collected.size} UTxOs"
-                                                ))
+                                                Left(
+                                                  new RuntimeException(
+                                                    s"Insufficient funds: need ${requiredAmount / 1_000_000} ADA, " +
+                                                        s"have ${total / 1_000_000} ADA across ${collected.size} UTxOs"
+                                                  )
+                                                )
                                             } else {
-                                                val result = collected.reverse.map { case (input, output) =>
-                                                    Utxo(input, output)
+                                                val result = collected.reverse.map {
+                                                    case (input, output) =>
+                                                        Utxo(input, output)
                                                 }
 
                                                 println(
@@ -733,12 +753,18 @@ object InteractiveDemo {
                     // Debug: Print CBOR details to diagnose serialization issues
                     val txCbor = openChannelTx.toCbor
                     val firstByte = txCbor.headOption.map(b => f"${b & 0xff}%02x").getOrElse("??")
-                    println(s"[DEBUG] TX CBOR first byte: 0x$firstByte (should be 0x84 for 4-element array)")
+                    println(
+                      s"[DEBUG] TX CBOR first byte: 0x$firstByte (should be 0x84 for 4-element array)"
+                    )
                     println(s"[DEBUG] TX CBOR length: ${txCbor.length} bytes")
-                    println(s"[DEBUG] TX CBOR first 50 bytes: ${txCbor.take(50).map(b => f"${b & 0xff}%02x").mkString}")
+                    println(
+                      s"[DEBUG] TX CBOR first 50 bytes: ${txCbor.take(50).map(b => f"${b & 0xff}%02x").mkString}"
+                    )
                     println(s"[DEBUG] TX isValid: ${openChannelTx.isValid}")
                     println(s"[DEBUG] TX auxiliaryData: ${openChannelTx.auxiliaryData}")
-                    println(s"[DEBUG] TX witnessSet.vkeyWitnesses count: ${openChannelTx.witnessSet.vkeyWitnesses.toSeq.size}")
+                    println(
+                      s"[DEBUG] TX witnessSet.vkeyWitnesses count: ${openChannelTx.witnessSet.vkeyWitnesses.toSeq.size}"
+                    )
 
                     // Find the actual output index for the Cosmex script output
                     val cosmexScriptAddress = Address(
@@ -833,7 +859,9 @@ object InteractiveDemo {
                             read[ClientResponse](responseJson) match {
                                 case ClientResponse.ChannelOpened(snapshot, serverChannelRef) =>
                                     println(s"[Connect] ✓ Channel opened successfully!")
-                                    println(s"[Connect] Server channelRef: ${serverChannelRef.transactionId.toHex.take(16)}...#${serverChannelRef.index}")
+                                    println(
+                                      s"[Connect] Server channelRef: ${serverChannelRef.transactionId.toHex.take(16)}...#${serverChannelRef.index}"
+                                    )
                                     isConnected = true
                                     // Store client state using the server's channelRef
                                     clientState = Some(
@@ -928,8 +956,12 @@ object InteractiveDemo {
                                                             println("\n" + "=" * 60)
                                                             println("Client State")
                                                             println("=" * 60)
-                                                            println(s"Channel Status:    $channelStatus")
-                                                            println(s"Snapshot Version:  $snapshotVersion")
+                                                            println(
+                                                              s"Channel Status:    $channelStatus"
+                                                            )
+                                                            println(
+                                                              s"Snapshot Version:  $snapshotVersion"
+                                                            )
                                                             println()
                                                             println("Balance:")
                                                             val adaBalance = balance.quantityOf(
@@ -941,9 +973,13 @@ object InteractiveDemo {
                                                             )
                                                             balance.toSortedMap.toList.foreach {
                                                                 case (policyId, assets) =>
-                                                                    if policyId.bytes.nonEmpty then {
+                                                                    if policyId.bytes.nonEmpty
+                                                                    then {
                                                                         assets.toList.foreach {
-                                                                            case (assetName, amount) =>
+                                                                            case (
+                                                                                  assetName,
+                                                                                  amount
+                                                                                ) =>
                                                                                 val symbol =
                                                                                     new String(
                                                                                       assetName.bytes,
@@ -966,7 +1002,8 @@ object InteractiveDemo {
                                                                             if order.orderAmount > 0
                                                                             then "BUY"
                                                                             else "SELL"
-                                                                        val amount = order.orderAmount.abs
+                                                                        val amount =
+                                                                            order.orderAmount.abs
                                                                         println(
                                                                           s"  #${orderId.toString.padTo(6, ' ')} ${side.padTo(4, ' ')} ${amount.toString.reverse.padTo(10, ' ').reverse} @ ${order.orderPrice}"
                                                                         )
@@ -976,15 +1013,25 @@ object InteractiveDemo {
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.RebalanceStarted) =>
+                                                        case Success(
+                                                              ClientResponse.RebalanceStarted
+                                                            ) =>
                                                             isRebalancing = true
-                                                            println(s"\n[Rebalance] Rebalancing started by server")
+                                                            println(
+                                                              s"\n[Rebalance] Rebalancing started by server"
+                                                            )
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.RebalanceRequired(tx)) =>
-                                                            println(s"\n[Rebalance] Received transaction to sign")
-                                                            println(s"[Rebalance] TX ID: ${tx.id.toHex.take(16)}...")
+                                                        case Success(
+                                                              ClientResponse.RebalanceRequired(tx)
+                                                            ) =>
+                                                            println(
+                                                              s"\n[Rebalance] Received transaction to sign"
+                                                            )
+                                                            println(
+                                                              s"[Rebalance] TX ID: ${tx.id.toHex.take(16)}..."
+                                                            )
                                                             // Sign and send the transaction
                                                             clientId match {
                                                                 case Some(cId) =>
@@ -992,71 +1039,146 @@ object InteractiveDemo {
                                                                     import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration
                                                                     import com.bloxbean.cardano.client.transaction.util.TransactionBytes
 
-                                                                    val hdKeyPair = clientAccount.hdKeyPair()
-                                                                    val txBytes = TransactionBytes(tx.toCbor)
-                                                                    val txBodyHash = Blake2bUtil.blake2bHash256(txBytes.getTxBodyBytes)
-                                                                    val signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider
-                                                                    val signature = signingProvider.signExtended(txBodyHash, hdKeyPair.getPrivateKey.getKeyData)
+                                                                    val hdKeyPair =
+                                                                        clientAccount.hdKeyPair()
+                                                                    val txBytes =
+                                                                        TransactionBytes(tx.toCbor)
+                                                                    val txBodyHash =
+                                                                        Blake2bUtil.blake2bHash256(
+                                                                          txBytes.getTxBodyBytes
+                                                                        )
+                                                                    val signingProvider =
+                                                                        CryptoConfiguration.INSTANCE.getSigningProvider
+                                                                    val signature = signingProvider
+                                                                        .signExtended(
+                                                                          txBodyHash,
+                                                                          hdKeyPair.getPrivateKey.getKeyData
+                                                                        )
 
                                                                     val witness = VKeyWitness(
-                                                                      signature = ByteString.fromArray(signature),
-                                                                      vkey = ByteString.fromArray(hdKeyPair.getPublicKey.getKeyData.take(32))
+                                                                      signature =
+                                                                          ByteString.fromArray(
+                                                                            signature
+                                                                          ),
+                                                                      vkey = ByteString.fromArray(
+                                                                        hdKeyPair.getPublicKey.getKeyData
+                                                                            .take(32)
+                                                                      )
                                                                     )
-                                                                    val witnessSet = tx.witnessSet.copy(
-                                                                      vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
-                                                                    )
-                                                                    val signedTx = tx.copy(witnessSet = witnessSet)
+                                                                    val witnessSet =
+                                                                        tx.witnessSet.copy(
+                                                                          vkeyWitnesses =
+                                                                              scalus.cardano.ledger.TaggedSortedSet
+                                                                                  .from(
+                                                                                    Seq(witness)
+                                                                                  )
+                                                                        )
+                                                                    val signedTx =
+                                                                        tx.copy(witnessSet =
+                                                                            witnessSet
+                                                                        )
 
-                                                                    println(s"[Rebalance] Sending signed transaction...")
-                                                                    client.sendMessage(ClientRequest.SignRebalance(cId, signedTx))
+                                                                    println(
+                                                                      s"[Rebalance] Sending signed transaction..."
+                                                                    )
+                                                                    client.sendMessage(
+                                                                      ClientRequest.SignRebalance(
+                                                                        cId,
+                                                                        signedTx
+                                                                      )
+                                                                    )
                                                                 case None =>
-                                                                    println(s"[Rebalance] ERROR: No client ID for signing")
+                                                                    println(
+                                                                      s"[Rebalance] ERROR: No client ID for signing"
+                                                                    )
                                                             }
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
+                                                        case Success(
+                                                              ClientResponse.RebalanceComplete(
+                                                                snapshot,
+                                                                newChannelRef
+                                                              )
+                                                            ) =>
                                                             isRebalancing = false
-                                                            println(s"\n[Rebalance] ✓ Rebalancing complete!")
-                                                            println(s"[Rebalance] Server snapshot version: ${snapshot.signedSnapshot.snapshotVersion}")
-                                                            println(s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                                                            println(
+                                                              s"\n[Rebalance] ✓ Rebalancing complete!"
+                                                            )
+                                                            println(
+                                                              s"[Rebalance] Server snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
+                                                            )
+                                                            println(
+                                                              s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}"
+                                                            )
                                                             // Only update channelRef, NOT latestSnapshot
                                                             // The server's snapshot may have empty client signature (not signed by client)
                                                             // Keep the client's existing signed snapshot for contested-close
-                                                            clientState = clientState.map(_.copy(
+                                                            clientState = clientState.map(
+                                                              _.copy(
                                                                 channelRef = newChannelRef
-                                                            ))
+                                                              )
+                                                            )
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.RebalanceAborted(reason)) =>
+                                                        case Success(
+                                                              ClientResponse.RebalanceAborted(
+                                                                reason
+                                                              )
+                                                            ) =>
                                                             isRebalancing = false
-                                                            println(s"\n[Rebalance] Aborted: $reason")
+                                                            println(
+                                                              s"\n[Rebalance] Aborted: $reason"
+                                                            )
                                                             print(s"$partyName> ")
                                                             System.out.flush()
 
-                                                        case Success(ClientResponse.SnapshotToSign(exchangeSignedSnapshot, snapshotClientTxOutRef)) =>
+                                                        case Success(
+                                                              ClientResponse.SnapshotToSign(
+                                                                exchangeSignedSnapshot,
+                                                                snapshotClientTxOutRef
+                                                              )
+                                                            ) =>
                                                             // Server requests client signature on snapshot (per whitepaper protocol)
-                                                            println(s"\n[Snapshot] Received snapshot v${exchangeSignedSnapshot.signedSnapshot.snapshotVersion} to sign")
+                                                            println(
+                                                              s"\n[Snapshot] Received snapshot v${exchangeSignedSnapshot.signedSnapshot.snapshotVersion} to sign"
+                                                            )
                                                             clientId match {
                                                                 case Some(cId) =>
                                                                     // Sign the snapshot using existing DemoHelpers function
-                                                                    val clientSignedSnapshot = mkClientSignedSnapshot(
-                                                                        clientAccount,
-                                                                        snapshotClientTxOutRef,
-                                                                        exchangeSignedSnapshot.signedSnapshot
-                                                                    )
+                                                                    val clientSignedSnapshot =
+                                                                        mkClientSignedSnapshot(
+                                                                          clientAccount,
+                                                                          snapshotClientTxOutRef,
+                                                                          exchangeSignedSnapshot.signedSnapshot
+                                                                        )
                                                                     // Combine with exchange signature to create BothSignedSnapshot
-                                                                    val bothSignedSnapshot = clientSignedSnapshot.copy(
-                                                                        snapshotExchangeSignature = exchangeSignedSnapshot.snapshotExchangeSignature
-                                                                    )
+                                                                    val bothSignedSnapshot =
+                                                                        clientSignedSnapshot.copy(
+                                                                          snapshotExchangeSignature =
+                                                                              exchangeSignedSnapshot.snapshotExchangeSignature
+                                                                        )
                                                                     // Send back to server
-                                                                    client.sendMessage(ClientRequest.SignSnapshot(cId, bothSignedSnapshot))
+                                                                    client.sendMessage(
+                                                                      ClientRequest.SignSnapshot(
+                                                                        cId,
+                                                                        bothSignedSnapshot
+                                                                      )
+                                                                    )
                                                                     // Update local state with BothSignedSnapshot
-                                                                    clientState = clientState.map(_.copy(latestSnapshot = bothSignedSnapshot))
-                                                                    println(s"[Snapshot] Signed and stored snapshot v${bothSignedSnapshot.signedSnapshot.snapshotVersion}")
+                                                                    clientState = clientState.map(
+                                                                      _.copy(latestSnapshot =
+                                                                          bothSignedSnapshot
+                                                                      )
+                                                                    )
+                                                                    println(
+                                                                      s"[Snapshot] Signed and stored snapshot v${bothSignedSnapshot.signedSnapshot.snapshotVersion}"
+                                                                    )
                                                                 case None =>
-                                                                    println(s"[Snapshot] ERROR: No client ID for signing")
+                                                                    println(
+                                                                      s"[Snapshot] ERROR: No client ID for signing"
+                                                                    )
                                                             }
                                                             print(s"$partyName> ")
                                                             System.out.flush()
@@ -1071,8 +1193,12 @@ object InteractiveDemo {
 
                                                         case Failure(e) =>
                                                             // Log parse failures with details
-                                                            println(s"\n[Notification] Parse failure: ${e.getMessage}")
-                                                            println(s"[Notification] Message length was: ${msgJson.length} bytes")
+                                                            println(
+                                                              s"\n[Notification] Parse failure: ${e.getMessage}"
+                                                            )
+                                                            println(
+                                                              s"[Notification] Message length was: ${msgJson.length} bytes"
+                                                            )
                                                             print(s"$partyName> ")
                                                             System.out.flush()
                                                     }
@@ -1176,8 +1302,7 @@ object InteractiveDemo {
                     val scaledPrice =
                         if decimalDiff >= 0 then
                             BigInt(price) * BigInt(10).pow(decimalDiff) * PRICE_SCALE
-                        else
-                            BigInt(price) * PRICE_SCALE / BigInt(10).pow(-decimalDiff)
+                        else BigInt(price) * PRICE_SCALE / BigInt(10).pow(-decimalDiff)
 
                     val order = LimitOrder(
                       orderPair = (base, quote),
@@ -1287,8 +1412,12 @@ object InteractiveDemo {
                     }
 
                     if isRebalancing then {
-                        println("[ContestedClose] ERROR: Rebalancing in progress - wait for completion!")
-                        println("[ContestedClose] The channelRef will change after rebalance completes.")
+                        println(
+                          "[ContestedClose] ERROR: Rebalancing in progress - wait for completion!"
+                        )
+                        println(
+                          "[ContestedClose] The channelRef will change after rebalance completes."
+                        )
                         return
                     }
 
@@ -1320,11 +1449,17 @@ object InteractiveDemo {
                                     case bf: cosmex.cardano.BlockfrostProvider =>
                                         bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
                                             case Left(err) =>
-                                                println(s"[ContestedClose] PRE-SUBMISSION VALIDATION FAILED: $err")
-                                                println(s"[ContestedClose] Aborting submission to avoid silent rejection")
+                                                println(
+                                                  s"[ContestedClose] PRE-SUBMISSION VALIDATION FAILED: $err"
+                                                )
+                                                println(
+                                                  s"[ContestedClose] Aborting submission to avoid silent rejection"
+                                                )
                                                 return
                                             case Right(_) =>
-                                                println(s"[ContestedClose] Pre-submission validation passed")
+                                                println(
+                                                  s"[ContestedClose] Pre-submission validation passed"
+                                                )
                                         }
                                     case _ => ()
                                 }
@@ -1353,41 +1488,55 @@ object InteractiveDemo {
                                             .find(_._1.address == cosmexScriptAddress)
                                             .map(_._2)
                                             .getOrElse {
-                                                println(s"[ContestedClose] ERROR: Could not find script output in transaction")
+                                                println(
+                                                  s"[ContestedClose] ERROR: Could not find script output in transaction"
+                                                )
                                                 tx.body.value.outputs.toSeq.zipWithIndex.foreach {
                                                     case (out, idx) =>
-                                                        println(s"[ContestedClose]   Output $idx: ${out.value.address}")
+                                                        println(
+                                                          s"[ContestedClose]   Output $idx: ${out.value.address}"
+                                                        )
                                                 }
-                                                throw new RuntimeException("Could not find Cosmex script output in contested-close transaction")
+                                                throw new RuntimeException(
+                                                  "Could not find Cosmex script output in contested-close transaction"
+                                                )
                                             }
-                                        println(s"[ContestedClose] Script output at index: $scriptOutputIdx")
+                                        println(
+                                          s"[ContestedClose] Script output at index: $scriptOutputIdx"
+                                        )
 
                                         // Update channel ref with correct index
-                                        val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
+                                        val newChannelRef =
+                                            TransactionInput(txHash, scriptOutputIdx)
 
                                         // Wait for UTxO to be indexed before returning
                                         println(s"[ContestedClose] Waiting for confirmation...")
                                         var confirmed = false
                                         var attempts = 0
-                                        val maxAttempts = 60  // 60 attempts * 2s = 120s max wait
-                                        while (!confirmed && attempts < maxAttempts) {
+                                        val maxAttempts = 60 // 60 attempts * 2s = 120s max wait
+                                        while !confirmed && attempts < maxAttempts do {
                                             provider.findUtxo(newChannelRef).await() match {
                                                 case Right(_) =>
                                                     confirmed = true
-                                                    println(s"[ContestedClose] ✓ Transaction confirmed after ${attempts + 1} attempt(s)")
+                                                    println(
+                                                      s"[ContestedClose] ✓ Transaction confirmed after ${attempts + 1} attempt(s)"
+                                                    )
                                                 case Left(_) =>
                                                     attempts += 1
-                                                    if (attempts < maxAttempts) {
-                                                        if (attempts % 10 == 0) {
-                                                            println(s"[ContestedClose] Still waiting for confirmation... (attempt $attempts/$maxAttempts)")
+                                                    if attempts < maxAttempts then {
+                                                        if attempts % 10 == 0 then {
+                                                            println(
+                                                              s"[ContestedClose] Still waiting for confirmation... (attempt $attempts/$maxAttempts)"
+                                                            )
                                                         }
                                                         Thread.sleep(2000)
                                                     }
                                             }
                                         }
 
-                                        if (confirmed) {
-                                            clientState = Some(state.copy(channelRef = newChannelRef))
+                                        if confirmed then {
+                                            clientState =
+                                                Some(state.copy(channelRef = newChannelRef))
                                             println(
                                               s"[ContestedClose] Channel is now in SnapshotContestState."
                                             )
@@ -1395,20 +1544,29 @@ object InteractiveDemo {
                                               s"[ContestedClose] After the contest period, use 'timeout' to advance."
                                             )
                                         } else {
-                                            println(s"[ContestedClose] WARNING: Transaction not confirmed after $maxAttempts attempts")
+                                            println(
+                                              s"[ContestedClose] WARNING: Transaction not confirmed after $maxAttempts attempts"
+                                            )
                                             // Check transaction status on Blockfrost
                                             provider match {
                                                 case bf: cosmex.cardano.BlockfrostProvider =>
                                                     bf.getTransactionStatus(txHash.toHex) match {
                                                         case Right(status) =>
-                                                            println(s"[ContestedClose] Transaction status: $status")
+                                                            println(
+                                                              s"[ContestedClose] Transaction status: $status"
+                                                            )
                                                         case Left(err) =>
-                                                            println(s"[ContestedClose] Could not check status: $err")
+                                                            println(
+                                                              s"[ContestedClose] Could not check status: $err"
+                                                            )
                                                     }
                                                 case _ => ()
                                             }
-                                            println(s"[ContestedClose] Updating channelRef anyway - you may need to wait before using 'timeout'")
-                                            clientState = Some(state.copy(channelRef = newChannelRef))
+                                            println(
+                                              s"[ContestedClose] Updating channelRef anyway - you may need to wait before using 'timeout'"
+                                            )
+                                            clientState =
+                                                Some(state.copy(channelRef = newChannelRef))
                                         }
                                     case Left(error) =>
                                         println(
@@ -1426,7 +1584,8 @@ object InteractiveDemo {
                                         t match {
                                             case pe: scalus.cardano.ledger.PlutusScriptEvaluationException =>
                                                 Some(pe.logs)
-                                            case _ if t.getCause != null => findPlutusLogs(t.getCause)
+                                            case _ if t.getCause != null =>
+                                                findPlutusLogs(t.getCause)
                                             case _ => None
                                         }
                                     }
@@ -1462,38 +1621,56 @@ object InteractiveDemo {
 
                             Try {
                                 // Fetch the channel UTxO with retry (Blockfrost indexing can be slow)
-                                println(s"[Timeout] Looking up channel UTxO (may take a moment for indexing)...")
+                                println(
+                                  s"[Timeout] Looking up channel UTxO (may take a moment for indexing)..."
+                                )
                                 var channelUtxo: Utxo = null
                                 var attempts = 0
-                                val maxAttempts = 30  // 30 attempts * 2s = 60s max wait
-                                while (channelUtxo == null && attempts < maxAttempts) {
+                                val maxAttempts = 30 // 30 attempts * 2s = 60s max wait
+                                while channelUtxo == null && attempts < maxAttempts do {
                                     provider.findUtxo(state.channelRef).await() match {
                                         case Right(utxo) =>
                                             channelUtxo = utxo
                                         case Left(_) =>
                                             attempts += 1
-                                            if (attempts < maxAttempts) {
-                                                if (attempts % 5 == 0) {
-                                                    println(s"[Timeout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)")
+                                            if attempts < maxAttempts then {
+                                                if attempts % 5 == 0 then {
+                                                    println(
+                                                      s"[Timeout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)"
+                                                    )
                                                 }
                                                 Thread.sleep(2000)
                                             }
                                     }
                                 }
-                                if (channelUtxo == null) {
+                                if channelUtxo == null then {
                                     // Check if the transaction exists but UTxO was consumed
-                                    println(s"[Timeout] Channel UTxO not found. Checking transaction status...")
+                                    println(
+                                      s"[Timeout] Channel UTxO not found. Checking transaction status..."
+                                    )
                                     provider match {
                                         case bf: cosmex.cardano.BlockfrostProvider =>
-                                            bf.getTransactionStatus(state.channelRef.transactionId.toHex) match {
+                                            bf.getTransactionStatus(
+                                              state.channelRef.transactionId.toHex
+                                            ) match {
                                                 case Right(status) =>
-                                                    println(s"[Timeout] Transaction status: $status")
-                                                    if (status.contains("confirmed") || status.contains("valid")) {
-                                                        println(s"[Timeout] Transaction was confirmed but UTxO not found at index ${state.channelRef.index}.")
-                                                        println(s"[Timeout] The channel may already be in PayoutState - try 'payout' command.")
+                                                    println(
+                                                      s"[Timeout] Transaction status: $status"
+                                                    )
+                                                    if status.contains("confirmed") || status
+                                                            .contains("valid")
+                                                    then {
+                                                        println(
+                                                          s"[Timeout] Transaction was confirmed but UTxO not found at index ${state.channelRef.index}."
+                                                        )
+                                                        println(
+                                                          s"[Timeout] The channel may already be in PayoutState - try 'payout' command."
+                                                        )
                                                     }
                                                 case Left(err) =>
-                                                    println(s"[Timeout] Could not check transaction status: $err")
+                                                    println(
+                                                      s"[Timeout] Could not check transaction status: $err"
+                                                    )
                                             }
                                         case _ => ()
                                     }
@@ -1549,11 +1726,17 @@ object InteractiveDemo {
                                     case bf: cosmex.cardano.BlockfrostProvider =>
                                         bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
                                             case Left(err) =>
-                                                println(s"[Timeout] PRE-SUBMISSION VALIDATION FAILED: $err")
-                                                println(s"[Timeout] Aborting submission to avoid silent rejection")
+                                                println(
+                                                  s"[Timeout] PRE-SUBMISSION VALIDATION FAILED: $err"
+                                                )
+                                                println(
+                                                  s"[Timeout] Aborting submission to avoid silent rejection"
+                                                )
                                                 return
                                             case Right(_) =>
-                                                println(s"[Timeout] Pre-submission validation passed")
+                                                println(
+                                                  s"[Timeout] Pre-submission validation passed"
+                                                )
                                         }
                                     case _ => ()
                                 }
@@ -1575,17 +1758,26 @@ object InteractiveDemo {
                                             .find(_._1.address == cosmexScriptAddress)
                                             .map(_._2)
                                             .getOrElse {
-                                                println(s"[Timeout] ERROR: Could not find script output in transaction")
+                                                println(
+                                                  s"[Timeout] ERROR: Could not find script output in transaction"
+                                                )
                                                 tx.body.value.outputs.toSeq.zipWithIndex.foreach {
                                                     case (out, idx) =>
-                                                        println(s"[Timeout]   Output $idx: ${out.value.address}")
+                                                        println(
+                                                          s"[Timeout]   Output $idx: ${out.value.address}"
+                                                        )
                                                 }
-                                                throw new RuntimeException("Could not find Cosmex script output in timeout transaction")
+                                                throw new RuntimeException(
+                                                  "Could not find Cosmex script output in timeout transaction"
+                                                )
                                             }
-                                        println(s"[Timeout] Script output at index: $scriptOutputIdx")
+                                        println(
+                                          s"[Timeout] Script output at index: $scriptOutputIdx"
+                                        )
 
                                         // Update channel ref with correct index
-                                        val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
+                                        val newChannelRef =
+                                            TransactionInput(txHash, scriptOutputIdx)
                                         clientState = Some(state.copy(channelRef = newChannelRef))
 
                                         // Fetch and display new state
@@ -1646,7 +1838,8 @@ object InteractiveDemo {
                                         t match {
                                             case pe: scalus.cardano.ledger.PlutusScriptEvaluationException =>
                                                 Some(pe.logs)
-                                            case _ if t.getCause != null => findPlutusLogs(t.getCause)
+                                            case _ if t.getCause != null =>
+                                                findPlutusLogs(t.getCause)
                                             case _ => None
                                         }
                                     }
@@ -1682,25 +1875,29 @@ object InteractiveDemo {
 
                             Try {
                                 // Fetch the channel UTxO with retry (Blockfrost indexing can be slow)
-                                println(s"[Payout] Looking up channel UTxO (may take a moment for indexing)...")
+                                println(
+                                  s"[Payout] Looking up channel UTxO (may take a moment for indexing)..."
+                                )
                                 var channelUtxo: Utxo = null
                                 var attempts = 0
-                                val maxAttempts = 30  // 30 attempts * 2s = 60s max wait
-                                while (channelUtxo == null && attempts < maxAttempts) {
+                                val maxAttempts = 30 // 30 attempts * 2s = 60s max wait
+                                while channelUtxo == null && attempts < maxAttempts do {
                                     provider.findUtxo(state.channelRef).await() match {
                                         case Right(utxo) =>
                                             channelUtxo = utxo
                                         case Left(_) =>
                                             attempts += 1
-                                            if (attempts < maxAttempts) {
-                                                if (attempts % 5 == 0) {
-                                                    println(s"[Payout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)")
+                                            if attempts < maxAttempts then {
+                                                if attempts % 5 == 0 then {
+                                                    println(
+                                                      s"[Payout] Still waiting for UTxO to be indexed... (attempt $attempts/$maxAttempts)"
+                                                    )
                                                 }
                                                 Thread.sleep(2000)
                                             }
                                     }
                                 }
-                                if (channelUtxo == null) {
+                                if channelUtxo == null then {
                                     throw new RuntimeException(
                                       s"Channel UTxO not found after $maxAttempts attempts: ${state.channelRef}"
                                     )
@@ -1719,7 +1916,9 @@ object InteractiveDemo {
                                 onChainState.channelState match {
                                     case OnChainChannelState.PayoutState(clientBalance, _) =>
                                         // Show full balance including tokens
-                                        println(s"[Payout] Client balance to withdraw: $clientBalance")
+                                        println(
+                                          s"[Payout] Client balance to withdraw: $clientBalance"
+                                        )
                                     case OnChainChannelState.SnapshotContestState(_, _, _, _) =>
                                         println(
                                           s"[Payout] ERROR: Channel is in SnapshotContestState."
@@ -1760,11 +1959,17 @@ object InteractiveDemo {
                                     case bf: cosmex.cardano.BlockfrostProvider =>
                                         bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
                                             case Left(err) =>
-                                                println(s"[Payout] PRE-SUBMISSION VALIDATION FAILED: $err")
-                                                println(s"[Payout] Aborting submission to avoid silent rejection")
+                                                println(
+                                                  s"[Payout] PRE-SUBMISSION VALIDATION FAILED: $err"
+                                                )
+                                                println(
+                                                  s"[Payout] Aborting submission to avoid silent rejection"
+                                                )
                                                 return
                                             case Right(_) =>
-                                                println(s"[Payout] Pre-submission validation passed")
+                                                println(
+                                                  s"[Payout] Pre-submission validation passed"
+                                                )
                                         }
                                     case _ => ()
                                 }
@@ -1792,9 +1997,13 @@ object InteractiveDemo {
                                         maybeScriptOutputIdx match {
                                             case Some(scriptOutputIdx) =>
                                                 // Partial payout - channel still exists
-                                                println(s"[Payout] Partial payout - channel still open at index $scriptOutputIdx")
-                                                val newChannelRef = TransactionInput(txHash, scriptOutputIdx)
-                                                clientState = Some(state.copy(channelRef = newChannelRef))
+                                                println(
+                                                  s"[Payout] Partial payout - channel still open at index $scriptOutputIdx"
+                                                )
+                                                val newChannelRef =
+                                                    TransactionInput(txHash, scriptOutputIdx)
+                                                clientState =
+                                                    Some(state.copy(channelRef = newChannelRef))
                                             case None =>
                                                 // Full payout - channel is now closed
                                                 println(s"[Payout] Full payout - channel closed")
@@ -1826,15 +2035,21 @@ object InteractiveDemo {
                             println("[Rebalance] ERROR: No client ID available!")
                         case Some(cId) =>
                             println(s"\n[Rebalance] Initiating rebalancing...")
-                            println(s"[Rebalance] This will sync on-chain locked values with snapshot balances.")
+                            println(
+                              s"[Rebalance] This will sync on-chain locked values with snapshot balances."
+                            )
                             println(s"[Rebalance] Sending FixBalance request...")
 
                             client.sendMessage(ClientRequest.FixBalance(cId)) match {
                                 case Success(_) =>
-                                    println(s"[Rebalance] Request sent. The background listener will handle signing.")
+                                    println(
+                                      s"[Rebalance] Request sent. The background listener will handle signing."
+                                    )
                                     println(s"[Rebalance] Watch for [Rebalance] messages...")
                                 case Failure(e) =>
-                                    println(s"[Rebalance] ERROR: Failed to send request: ${e.getMessage}")
+                                    println(
+                                      s"[Rebalance] ERROR: Failed to send request: ${e.getMessage}"
+                                    )
                             }
                     }
                 }
@@ -1849,8 +2064,12 @@ object InteractiveDemo {
                         client.receiveMessage(timeoutSeconds = 2) match {
                             case Success(msgJson) =>
                                 println(s"[Rebalance] Raw message length: ${msgJson.length} bytes")
-                                println(s"[Rebalance] Raw message (first 300 chars): ${msgJson.take(300)}")
-                                println(s"[Rebalance] Raw message (last 100 chars): ${msgJson.takeRight(100)}")
+                                println(
+                                  s"[Rebalance] Raw message (first 300 chars): ${msgJson.take(300)}"
+                                )
+                                println(
+                                  s"[Rebalance] Raw message (last 100 chars): ${msgJson.takeRight(100)}"
+                                )
                                 Try(read[ClientResponse](msgJson)) match {
                                     case Success(ClientResponse.RebalanceRequired(tx)) =>
                                         println(
@@ -1858,13 +2077,18 @@ object InteractiveDemo {
                                         )
                                         signAndSendRebalance(cId, tx)
 
-                                    case Success(ClientResponse.RebalanceComplete(snapshot, newChannelRef)) =>
+                                    case Success(
+                                          ClientResponse.RebalanceComplete(snapshot, newChannelRef)
+                                        ) =>
                                         println(
                                           s"[Rebalance] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
                                         )
-                                        println(s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                                        println(
+                                          s"[Rebalance] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}"
+                                        )
                                         // Update local client state with new channelRef
-                                        clientState = clientState.map(_.copy(channelRef = newChannelRef))
+                                        clientState =
+                                            clientState.map(_.copy(channelRef = newChannelRef))
                                         rebalanceComplete = true
 
                                     case Success(ClientResponse.RebalanceAborted(reason)) =>
@@ -1955,7 +2179,9 @@ object InteractiveDemo {
                 )
                 println("  timeout                     - Advance state after contest period")
                 println("  payout                      - Withdraw funds (after contested close)")
-                println("  rebalance                   - Sync on-chain values with snapshot balances")
+                println(
+                  "  rebalance                   - Sync on-chain values with snapshot balances"
+                )
                 println("  help                        - Show this help")
                 println("  quit                        - Exit the demo")
                 println()
@@ -2115,9 +2341,12 @@ object InteractiveDemo {
                                 } else {
                                     // Send request - response will be handled by background listener
                                     client.sendMessage(ClientRequest.GetState(clientId.get)) match {
-                                        case Success(_) => () // Response handled by background listener
+                                        case Success(_) =>
+                                            () // Response handled by background listener
                                         case Failure(e) =>
-                                            println(s"[State] ERROR: Failed to send request: ${e.getMessage}")
+                                            println(
+                                              s"[State] ERROR: Failed to send request: ${e.getMessage}"
+                                            )
                                     }
                                 }
 

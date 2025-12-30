@@ -14,6 +14,7 @@ import java.time.Instant
 import scala.concurrent.ExecutionContext.Implicits.global
 
 object CosmexTransactions {
+
     /** Default validity window for transactions (1 minute for demo) */
     val DefaultValiditySeconds: Int = 60
 }
@@ -74,7 +75,8 @@ class CosmexTransactions(
         val initialState = OnChainState(
           clientPkh = PubKeyHash(platform.blake2b_224(clientPubKey)),
           clientPubKey = clientPubKey,
-          clientTxOutRef = TxOutRef(TxId(primaryInput.input.transactionId), primaryInput.input.index),
+          clientTxOutRef =
+              TxOutRef(TxId(primaryInput.input.transactionId), primaryInput.input.index),
           channelState = OnChainChannelState.OpenState
         )
 
@@ -92,7 +94,8 @@ class CosmexTransactions(
             // Calculate what remains after deposit (tokens should be preserved)
             val rawRemainingValue = totalInputValue - depositAmount
             // Filter out zero and negative token amounts (subtraction can leave these)
-            val remainingValue = Value(rawRemainingValue.coin, rawRemainingValue.assets.onlyPositive)
+            val remainingValue =
+                Value(rawRemainingValue.coin, rawRemainingValue.assets.onlyPositive)
 
             // If there's remaining value (tokens + ADA), send it back explicitly
             if remainingValue.coin.value > 0 || remainingValue != Value.lovelace(
@@ -274,7 +277,10 @@ class CosmexTransactions(
       * @return
       *   Transaction that transitions channel to SnapshotContestState
       */
-    /** @param validitySeconds Time until validity expires. Use 1 for tests (instant), 60+ for preprod (block production delay) */
+    /** @param validitySeconds
+      *   Time until validity expires. Use 1 for tests (instant), 60+ for preprod (block production
+      *   delay)
+      */
     def contestedClose(
         provider: Provider,
         clientAccount: Account,
@@ -301,9 +307,15 @@ class CosmexTransactions(
 
         // VALIDATION: Log on-chain state for debugging
         val onChainClientTxOutRef = currentOnChainState.clientTxOutRef
-        println(s"[contestedClose] On-chain clientTxOutRef: ${onChainClientTxOutRef.id.hash.toHex.take(16)}...#${onChainClientTxOutRef.idx}")
-        println(s"[contestedClose] On-chain clientPkh: ${currentOnChainState.clientPkh.hash.toHex.take(16)}...")
-        println(s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}")
+        println(
+          s"[contestedClose] On-chain clientTxOutRef: ${onChainClientTxOutRef.id.hash.toHex.take(16)}...#${onChainClientTxOutRef.idx}"
+        )
+        println(
+          s"[contestedClose] On-chain clientPkh: ${currentOnChainState.clientPkh.hash.toHex.take(16)}..."
+        )
+        println(
+          s"[contestedClose] Snapshot version: ${clientState.latestSnapshot.signedSnapshot.snapshotVersion}"
+        )
 
         // Use the client's key hash from the on-chain state for consistency
         val addrKeyHash = AddrKeyHash(currentOnChainState.clientPkh.hash)
@@ -401,8 +413,11 @@ class CosmexTransactions(
         // Preprod blockchain time can be behind real UTC by 2+ minutes
         val BlockchainTimeDriftBufferSeconds = 180
         val adjustedStart = validityStart.minusSeconds(BlockchainTimeDriftBufferSeconds)
-        val validityEnd = validityStart.plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds)
-        println(s"[rebalance] validityStart: $adjustedStart (adjusted -${BlockchainTimeDriftBufferSeconds}s), validityEnd: $validityEnd")
+        val validityEnd =
+            validityStart.plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds)
+        println(
+          s"[rebalance] validityStart: $adjustedStart (adjusted -${BlockchainTimeDriftBufferSeconds}s), validityEnd: $validityEnd"
+        )
 
         // CRITICAL: Sort channelData by TxOutRef to match Cardano's input ordering.
         // The validator uses input index to find the corresponding output, expecting
@@ -414,7 +429,8 @@ class CosmexTransactions(
 
         // Collect all signatories needed (all clients + exchange)
         val clientPkhs = sortedChannelData.map(_._2.clientPkh)
-        val allSignatories = (clientPkhs :+ exchangePkh).distinct.map(pkh => AddrKeyHash(pkh.hash)).toSet
+        val allSignatories =
+            (clientPkhs :+ exchangePkh).distinct.map(pkh => AddrKeyHash(pkh.hash)).toSet
 
         // Build the transaction using TxBuilder which handles collateral
         // First add all spends (order doesn't matter, they get sorted anyway)
@@ -423,15 +439,16 @@ class CosmexTransactions(
         }
 
         // Then add all outputs IN SORTED ORDER to match input ordering
-        val withOutputs = sortedChannelData.foldLeft(withSpends) { case (b, (_, onChainState, tradingState)) =>
-            // Calculate new locked value from snapshot: client balance + locked in orders
-            // NOTE: exchangeBalance is NOT included - it's internal accounting that nets to zero
-            // across all channels. After rebalance, each channel should hold exactly what the
-            // client is entitled to (their balance + their pending orders).
-            val newLockedValue = tradingState.tsClientBalance +
-                CosmexValidator.lockedInOrders(tradingState.tsOrders)
+        val withOutputs = sortedChannelData.foldLeft(withSpends) {
+            case (b, (_, onChainState, tradingState)) =>
+                // Calculate new locked value from snapshot: client balance + locked in orders
+                // NOTE: exchangeBalance is NOT included - it's internal accounting that nets to zero
+                // across all channels. After rebalance, each channel should hold exactly what the
+                // client is entitled to (their balance + their pending orders).
+                val newLockedValue = tradingState.tsClientBalance +
+                    CosmexValidator.lockedInOrders(tradingState.tsOrders)
 
-            b.payTo(scriptAddress, newLockedValue.toLedgerValue, onChainState.toData)
+                b.payTo(scriptAddress, newLockedValue.toLedgerValue, onChainState.toData)
         }
 
         // Set validity and complete the transaction
@@ -507,7 +524,8 @@ class CosmexTransactions(
         // Use max of deadline and (current time - 180s buffer for blockchain time drift)
         // The buffer accounts for preprod blockchain time being behind real UTC
         val nowWithBufferMs = Instant.now().toEpochMilli - 180_000
-        val validityStartInstant = Instant.ofEpochMilli(Math.max(minValidityStartMs, nowWithBufferMs))
+        val validityStartInstant =
+            Instant.ofEpochMilli(Math.max(minValidityStartMs, nowWithBufferMs))
         // Validity end must be after validity start (add default validity + buffer)
         val validityEndInstant = validityStartInstant.plusSeconds(DefaultValiditySeconds + 180)
         val validityEndSlot = env.slotConfig.timeToSlot(validityEndInstant.toEpochMilli)
@@ -515,9 +533,15 @@ class CosmexTransactions(
 
         println(s"[timeout] contestStartMs: $contestStartMs")
         println(s"[timeout] contestationPeriodMs: $contestationPeriodMs")
-        println(s"[timeout] timeoutDeadlineMs: $timeoutDeadlineMs (${Instant.ofEpochMilli(timeoutDeadlineMs)})")
-        println(s"[timeout] minValidityStartMs: $minValidityStartMs, nowWithBufferMs: $nowWithBufferMs")
-        println(s"[timeout] validityStart: ${validityStartInstant.toEpochMilli} (${validityStartInstant})")
+        println(
+          s"[timeout] timeoutDeadlineMs: $timeoutDeadlineMs (${Instant.ofEpochMilli(timeoutDeadlineMs)})"
+        )
+        println(
+          s"[timeout] minValidityStartMs: $minValidityStartMs, nowWithBufferMs: $nowWithBufferMs"
+        )
+        println(
+          s"[timeout] validityStart: ${validityStartInstant.toEpochMilli} (${validityStartInstant})"
+        )
         println(s"[timeout] validityEnd (round-tripped): $validityEnd")
 
         // Compute the new state based on current state
@@ -656,8 +680,12 @@ class CosmexTransactions(
               )
             )
 
-        println(s"[payout] Selected collateral UTxO: ${collateralUtxo.input.transactionId.toHex.take(16)}...#${collateralUtxo.input.index}")
-        println(s"[payout] Collateral value: ${collateralUtxo.output.value.coin.value / 1_000_000.0} ADA")
+        println(
+          s"[payout] Selected collateral UTxO: ${collateralUtxo.input.transactionId.toHex.take(16)}...#${collateralUtxo.input.index}"
+        )
+        println(
+          s"[payout] Collateral value: ${collateralUtxo.output.value.coin.value / 1_000_000.0} ADA"
+        )
 
         if isFilled then
             // Full payout - client takes all funds, channel closes completely
@@ -671,7 +699,11 @@ class CosmexTransactions(
                 .collaterals(collateralUtxo)
                 .payTo(payoutAddress, channelUtxo.output.value)
                 .validFrom(validityStart)
-                .validTo(Instant.now().plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds))
+                .validTo(
+                  Instant
+                      .now()
+                      .plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds)
+                )
                 .complete(provider, sponsor = payoutAddress)
                 .await()
                 .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))
@@ -705,7 +737,11 @@ class CosmexTransactions(
                 .payTo(payoutAddress, availableForPaymentLedger)
                 .payTo(scriptAddress, newOutputValue, newState.toData)
                 .validFrom(Instant.now().minusSeconds(BlockchainTimeDriftBufferSeconds))
-                .validTo(Instant.now().plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds))
+                .validTo(
+                  Instant
+                      .now()
+                      .plusSeconds(DefaultValiditySeconds + BlockchainTimeDriftBufferSeconds)
+                )
                 .complete(provider, sponsor = payoutAddress)
                 .await()
                 .sign(new TransactionSigner(Set(clientAccount.paymentKeyPair)))

@@ -268,7 +268,9 @@ object MultiClientTestHelpers {
                             println(
                               s"[$name] ✓ Rebalancing complete! Snapshot version: ${snapshot.signedSnapshot.snapshotVersion}"
                             )
-                            println(s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}")
+                            println(
+                              s"[$name] New channel ref: ${newChannelRef.transactionId.toHex.take(16)}...#${newChannelRef.index}"
+                            )
                             rebalanceComplete = true
 
                         case Success(ClientResponse.RebalanceAborted(reason)) =>
