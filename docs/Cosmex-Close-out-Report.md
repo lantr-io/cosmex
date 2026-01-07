@@ -20,21 +20,23 @@
 This project was submitted under the **Cardano Use Cases: Concept** category, which required
 demonstrating a novel use case for Cardano technology.
 
-| Requirement            | How Addressed                                                                                                                                  |
-|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| Novel Cardano Use Case | Developed a Layer-2 order book exchange using star-shaped state channels—a specialized adaptation of Hydra Head protocol optimized for trading |
-| Open Source            | Full codebase published under open source license at https://github.com/lantr-io/cosmex                                                        |
-| Documentation          | Technical Whitepaper and Litepaper published with complete protocol specification                                                              |
-| Proof of Concept       | Working implementation demonstrated on Cardano Preprod testnet with verified transactions                                                      |
+- **Novel Cardano Use Case**: Developed a Layer-2 order book exchange using star-shaped state
+  channels—a specialized adaptation of Hydra Head protocol optimized for trading
+- **Open Source**: Full codebase published under open source license
+  at https://github.com/lantr-io/cosmex
+- **Documentation**: Technical Whitepaper and Litepaper published with complete protocol
+  specification
+- **Proof of Concept**: Working implementation demonstrated on Cardano Preprod testnet with verified
+  transactions
 
 ### Project KPIs
 
-| KPI                           | Status    | Evidence                                                                                                                                                   |
-|-------------------------------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Smart Contract Implementation | Completed | [CosmexValidator.scala](https://github.com/lantr-io/cosmex/blob/main/src/main/scala/cosmex/CosmexValidator.scala) - 4-phase state machine with 7 redeemers |
-| PoC Exchange Server           | Completed | WebSocket server with real-time order matching                                                                                                             |
-| On-chain Channel Operations   | Completed | Verified transactions on Cardano Preprod testnet                                                                                                           |
-| Test Suite                    | Completed | Property-based and unit tests in `/src/test/scala/cosmex/`                                                                                                 |
+- **Smart Contract Implementation
+  **: [CosmexValidator.scala](https://github.com/lantr-io/cosmex/blob/main/src/main/scala/cosmex/CosmexValidator.scala) -
+  4-phase state machine with 7 redeemers
+- **PoC Exchange Server**: WebSocket server with real-time order matching
+- **On-chain Channel Operations**: Verified transactions on Cardano Preprod testnet
+- **Test Suite**: Property-based and unit tests in `/src/test/scala/cosmex/`
 
 ---
 
@@ -86,17 +88,17 @@ This project advances Cardano's L2 ecosystem by providing an alternative to Hydr
 
 ### Whitepaper
 
-| Version       | Date     | Key Changes                                                                                                                                                              |
-|---------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Initial Draft | Jan 2025 | basic concepts: deposit/withdraw flow, contestation period, high-level design                                                                                            |
-| Final v0.1    | Nov 2025 | Expanded with: detailed 4-phase state machine specification, Mermaid diagrams, security model, comparison with Hydra/AMMs, complete protocol flow, rebalancing mechanism |
+- **Initial Draft (Jan 2025)**: Basic concepts: deposit/withdraw flow, contestation period,
+  high-level design
+- **Final v0.1 (Nov 2025)**: Expanded with: detailed 4-phase state machine specification, Mermaid
+  diagrams, security model, comparison with Hydra/AMMs, complete protocol flow, rebalancing
+  mechanism
 
 ### Litepaper
 
-| Version       | Date     | Key Changes                                                                                                                           |
-|---------------|----------|---------------------------------------------------------------------------------------------------------------------------------------|
-| Initial Draft | Jan 2025 | Draft overview emphasizing "provably solvent" and "RealFI" messaging                                                                  |
-| Final v0.1    | Nov 2025 | Restructured as technical summary: added "The Problem" and "The Solution" sections, technology overview, cleaner architecture diagram |
+- **Initial Draft (Jan 2025)**: Draft overview emphasizing "provably solvent" and "RealFI" messaging
+- **Final v0.1 (Nov 2025)**: Restructured as technical summary: added "The Problem" and "The
+  Solution" sections, technology overview, cleaner architecture diagram
 
 ---
 
@@ -104,86 +106,33 @@ This project advances Cardano's L2 ecosystem by providing an alternative to Hydr
 
 ### Technical Insights
 
-1. **Script Size Optimization is Critical**: Early development required intensive optimization to
-   fit the complex state machine within Cardano's script size limits. Initial validator was huge;
-   through careful refactoring (custom ScriptContext, extracting methods, pattern
-   optimizations) we reduced it to ~11730 bytes.
+1. **Script Size Optimization**: Cardano's script size limits required intensive
+   optimization—reducing the validator from ~15200 to ~11730 bytes through custom ScriptContext
+   structures and pattern optimization.
 
-2. **Evolving with Scalus**: The project grew alongside the Scalus compiler, upgrading through 15+
-   versions (0.2-SNAPSHOT → 0.14). While this required ongoing adaptation to API changes, it allowed
-   us to benefit from improved optimizations and the Plutus V3 migration support.
+2. **Evolving with Scalus**: The project upgraded through 15+ Scalus versions (0.2-SNAPSHOT → 0.14),
+   requiring ongoing adaptation but enabling improved optimizations and Plutus V3 migration.
 
-3. **Plutus V3 Migration**: Migrating from Plutus V2 to V3 required significant refactoring but
-   enabled better performance and access to new Plutus features.
+3. **State Channel Design**: The star-shaped topology proved simpler than full mesh networks while
+   providing off-chain trading with on-chain security guarantees.
 
-4. **State Channel Design Trade-offs**: The star-shaped topology (bilateral channels between each
-   client and exchange) proved simpler to implement and reason about than full mesh networks, while
-   still providing the core benefits of off-chain trading with on-chain security.
+4. **L2 Design Space**: Cardano's L2 landscape has room for specialized solutions beyond
+   Hydra—application-specific state channels can offer simpler deployment.
 
-### Integration Challenges
+### Challenges & Solutions
 
-1. **Real Blockchain vs. Emulator**: Testing on actual Cardano testnet (preprod/preview) revealed
-   issues not visible in emulator testing: clock skew handling, slot configuration differences,
-   transaction confirmation timing, and UTxO indexing delays with providers like Blockfrost.
+1. **Protocol Design Iterations**: We explored three solutions for secure channel opening/closing,
+   evaluating trade-offs between security, simplicity, and UX. A Hydrozoa L2-inspired approach
+   remains a candidate for future enhancements.
 
-2. **Multi-Component Coordination**: Integrating the on-chain validator, off-chain server, WebSocket
-   API, and blockchain provider required careful attention to state synchronization, especially
-   during rebalancing and contested close operations.
+2. **Security Edge Cases**: Real-world prototyping exposed edge cases around contestations and
+   withdrawals that required significant hardening effort.
 
-### Ecosystem Observations
+3. **Testnet Integration**: Testing on preprod/preview revealed issues invisible in emulator: clock
+   skew, slot configuration differences, confirmation delays, and Blockfrost indexing lag.
 
-1. **L2 Design Space**: Cardano's L2 landscape has room for specialized solutions beyond
-   general-purpose protocols like Hydra. Application-specific state channels (like COSMEX for
-   trading) can offer simpler deployment while maintaining security guarantees.
-
----
-
-## Challenges Encountered
-
-### Platform Choice and Scalus Evolution
-
-The project was developed using Scalus, a Scala to Plutus compiler. While this enabled type-safe
-development and better tooling than raw Haskell/Plutus, it required continuous adaptation as the
-Scalus project evolved rapidly (15+ version upgrades from 0.2-SNAPSHOT to 0.14 over the project
-lifetime). Each major version brought API changes that required refactoring, though it also
-delivered improved optimizations and features.
-
-### Script Size Constraints
-
-Early development revealed that Cardano's script size limits are a significant constraint for
-complex state machines. Initial implementation required intensive optimization work—reducing the
-validator from ~15200 to ~11730 bytes through techniques like custom ScriptContext structures,
-method
-extraction, and pattern optimization. This was time-consuming but essential for on-chain viability.
-
-### Protocol Design Iterations
-
-The prototyping phase revealed significant complexity in establishing a secure channel opening and
-closing process. We explored three different solutions during the design phase, evaluating
-trade-offs between security, simplicity, and user experience. This iterative design process, while
-time-consuming, resulted in a more robust protocol. A Hydrozoa L2-inspired approach (where both
-parties sign an opening deposit withdrawal transaction, similar to Lightning Network) remains a
-candidate for future protocol enhancements.
-
-### Security Edge Cases
-
-Prototyping under real-world conditions exposed several edge cases—particularly around transaction
-contestations and client withdrawal flows that could potentially be exploited in malicious attacks.
-We invested significant effort to improve both security and stability for these scenarios, which
-contributed to the schedule extension but resulted in a more production-ready implementation.
-
-### Testnet Integration
-
-Testing on actual Cardano testnet (preprod/preview) revealed many issues not visible in emulator
-testing:
-
-- Clock skew between local time and blockchain slot time required buffer adjustments
-- Different slot configurations between networks (preprod vs preview)
-- Transaction confirmation delays and UTxO indexing lag with Blockfrost provider
-- Large WebSocket message handling for signed transaction payloads
-
-These challenges were addressed through iterative development and led to a Delivery Schedule Change
-Request, extending the project timeline while maintaining all original deliverables and objectives.
+These challenges led to a Delivery Schedule Change Request, extending the timeline while maintaining
+all original deliverables.
 
 ---
 
