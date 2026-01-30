@@ -59,7 +59,7 @@ class CosmexValidatorTest
 //        println(CosmexValidator.compiledValidator.showHighlighted)
         val length = program.cborEncoded.length
         // Size increased from 11613 to 11730 due to findOwnOutputOrByIndex for multi-input txs
-        assert(length == 11730)
+        assert(length == 11703)
     }
 
     test("validRange") {

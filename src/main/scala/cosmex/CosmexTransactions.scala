@@ -80,55 +80,17 @@ class CosmexTransactions(
           channelState = OnChainChannelState.OpenState
         )
 
-        // Calculate total input value across all inputs
-        val totalInputValue = clientInputs.map(_.output.value).reduce(_ + _)
-        val hasTokens = totalInputValue != Value.lovelace(totalInputValue.coin.value)
-
         // Build transaction with all inputs
         val builder = clientInputs.foldLeft(TxBuilder(env)) { (b, utxo) =>
             b.spend(utxo)
         }
 
-        if hasTokens then {
-            // If inputs have tokens, we need to explicitly handle them
-            // Calculate what remains after deposit (tokens should be preserved)
-            val rawRemainingValue = totalInputValue - depositAmount
-            // Filter out zero and negative token amounts (subtraction can leave these)
-            val remainingValue =
-                Value(rawRemainingValue.coin, rawRemainingValue.assets.onlyPositive)
-
-            // If there's remaining value (tokens + ADA), send it back explicitly
-            if remainingValue.coin.value > 0 || remainingValue != Value.lovelace(
-                  remainingValue.coin.value
-                )
-            then {
-                builder
-                    .payTo(
-                      address = scriptAddress,
-                      value = depositAmount,
-                      datum = initialState.toData
-                    )
-                    .payTo(address = primaryInput.output.address, value = remainingValue)
-                    .build(changeTo = primaryInput.output.address)
-                    .transaction
-            } else {
-                // All value deposited, just need diff handler for fees
-                builder
-                    .payTo(
-                      address = scriptAddress,
-                      value = depositAmount,
-                      datum = initialState.toData
-                    )
-                    .build(changeTo = primaryInput.output.address)
-                    .transaction
-            }
-        } else {
-            // No tokens - use standard changeTo
-            builder
-                .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
-                .build(changeTo = primaryInput.output.address)
-                .transaction
-        }
+        // Deposit to script and let build(changeTo) handle returning leftover value
+        // (both ADA change and any tokens not included in the deposit)
+        builder
+            .payTo(address = scriptAddress, value = depositAmount, datum = initialState.toData)
+            .build(changeTo = primaryInput.output.address)
+            .transaction
     }
 
     // Convenience method for single input (backwards compatibility)
@@ -648,45 +610,9 @@ class CosmexTransactions(
         // Buffer for blockchain time drift - preprod blockchain time can be behind real UTC
         val BlockchainTimeDriftBufferSeconds = 180
 
-        // Query fresh UTxOs from the payout address for collateral selection
-        // This avoids using stale UTxOs that may have been spent in previous transactions
-        val payoutUtxos = provider
-            .findUtxos(payoutAddress, None, None, None, None)
-            .await()
-            .getOrElse(
-              throw new RuntimeException(
-                s"Failed to query UTxOs for collateral at address: $payoutAddress"
-              )
-            )
-
-        // Find a suitable ADA-only UTxO for collateral (at least 5 ADA)
-        // Must be ADA-only (no tokens) and not the channel UTxO
-        val MinCollateralLovelace = 5_000_000L
-        val collateralUtxo = payoutUtxos
-            .find { case (_, output) =>
-                // Must have at least 5 ADA
-                output.value.coin.value >= MinCollateralLovelace &&
-                // Must be ADA-only (no multi-assets)
-                output.value.assets.isEmpty &&
-                // Must not have a datum (script UTxOs have datums)
-                output.datumOption.isEmpty
-            }
-            .map { case (input, output) => Utxo(input, output) }
-            .getOrElse(
-              throw new RuntimeException(
-                s"No suitable collateral UTxO found at $payoutAddress. " +
-                    s"Need ADA-only UTxO with at least ${MinCollateralLovelace / 1_000_000} ADA. " +
-                    s"Found ${payoutUtxos.size} UTxOs total."
-              )
-            )
-
-        println(
-          s"[payout] Selected collateral UTxO: ${collateralUtxo.input.transactionId.toHex.take(16)}...#${collateralUtxo.input.index}"
-        )
-        println(
-          s"[payout] Collateral value: ${collateralUtxo.output.value.coin.value / 1_000_000.0} ADA"
-        )
-
+        // Let complete() handle collateral selection automatically from sponsor UTxOs.
+        // Explicit .collaterals() reserves the UTxO exclusively, which in Scalus 0.14.2+
+        // prevents complete() from using it for fee coverage.
         if isFilled then
             // Full payout - client takes all funds, channel closes completely
             println(s"[payout] Full payout - channelUtxo.output.value: ${channelUtxo.output.value}")
@@ -696,7 +622,6 @@ class CosmexTransactions(
             val validityStart = Instant.now().minusSeconds(BlockchainTimeDriftBufferSeconds)
             val tx = TxBuilder(env)
                 .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
-                .collaterals(collateralUtxo)
                 .payTo(payoutAddress, channelUtxo.output.value)
                 .validFrom(validityStart)
                 .validTo(
@@ -733,7 +658,6 @@ class CosmexTransactions(
 
             TxBuilder(env)
                 .spend(channelUtxo, Action.Payout, script, Set(addrKeyHash))
-                .collaterals(collateralUtxo)
                 .payTo(payoutAddress, availableForPaymentLedger)
                 .payTo(scriptAddress, newOutputValue, newState.toData)
                 .validFrom(Instant.now().minusSeconds(BlockchainTimeDriftBufferSeconds))

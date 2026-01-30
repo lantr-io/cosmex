@@ -183,21 +183,25 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                     try {
                         println(s"\n[$name] Starting scenario...")
 
-                        // Get UTxO for the client
-                        val depositUtxo = config.blockchain.provider.toLowerCase match {
+                        // Get UTxO(s) for the client
+                        // When txIdFilter is set (e.g., post-minting), collect ALL UTxOs from that
+                        // transaction to ensure enough ADA for fees (token UTxO alone may be too small).
+                        val depositUtxos: Seq[Utxo] = config.blockchain.provider.toLowerCase match {
                             case "mock" if txIdFilter.isEmpty =>
                                 // For MockLedgerApi without prior tx, use the pre-created genesis UTxO
                                 val genesisInput = TransactionInput(genesisHash, clientIndex.toInt)
-                                Utxo(
-                                  input = genesisInput,
-                                  output = TransactionOutput(
-                                    address = address,
-                                    value = initialValue + Value.lovelace(100_000_000L)
+                                Seq(
+                                  Utxo(
+                                    input = genesisInput,
+                                    output = TransactionOutput(
+                                      address = address,
+                                      value = initialValue + Value.lovelace(100_000_000L)
+                                    )
                                   )
                                 )
 
                             case "mock" | "yaci-devkit" | "yaci" | "preprod" | "preview" =>
-                                // For Yaci DevKit / Blockfrost, query the provider for funded UTxOs
+                                // Query the provider for funded UTxOs
                                 import scalus.cardano.address.ShelleyAddress
                                 val addressBech32 =
                                     address.asInstanceOf[ShelleyAddress].toBech32.get
@@ -213,8 +217,8 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         )
                                 }
 
-                                // First try to find all UTxOs at the address for debugging
-                                provider
+                                // Find all UTxOs at the address (filtered by txId if provided)
+                                val allUtxos = provider
                                     .findUtxos(
                                       address = address,
                                       transactionId = txIdFilter,
@@ -236,35 +240,40 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                                 println(s"[$name]   Tokens: ${output.value}")
                                             }
                                         }
-                                    case Left(err) =>
-                                        println(s"[$name] Could not query UTxOs: $err")
-                                }
-
-                                // Find UTxO - filter by txId if provided
-                                provider
-                                    .findUtxo(
-                                      address = address,
-                                      transactionId = txIdFilter,
-                                      datum = None,
-                                      minAmount = Some(
-                                        Coin(2_000_000L)
-                                      ) // Just need minimum UTxO size (~2 ADA)
-                                    )
-                                    .await() match {
-                                    case Right(foundUtxo) =>
-                                        println(
-                                          s"[$name] Using UTxO: ${foundUtxo.input.transactionId.toHex.take(16)}#${foundUtxo.input.index}"
-                                        )
-                                        foundUtxo
+                                        utxos.map { case (input, output) =>
+                                            Utxo(input, output)
+                                        }.toSeq
                                     case Left(err) =>
                                         fail(
-                                          s"[$name] Failed to find funded UTxO: $err"
+                                          s"[$name] Failed to find UTxOs: $err"
                                         )
                                 }
+
+                                if txIdFilter.isDefined then
+                                    // Use ALL UTxOs from the minting transaction so we have
+                                    // enough ADA (token UTxO may only have min ADA)
+                                    println(
+                                      s"[$name] Using all ${allUtxos.size} UTxOs from minting tx"
+                                    )
+                                    allUtxos
+                                else
+                                    // Without txId filter, pick the first UTxO with enough ADA
+                                    val found =
+                                        allUtxos.find(_.output.value.coin.value >= 2_000_000L)
+                                    found match {
+                                        case Some(utxo) =>
+                                            println(
+                                              s"[$name] Using UTxO: ${utxo.input.transactionId.toHex.take(16)}#${utxo.input.index}"
+                                            )
+                                            Seq(utxo)
+                                        case None =>
+                                            fail(s"[$name] Failed to find funded UTxO")
+                                    }
 
                             case other =>
                                 fail(s"Unsupported provider: $other")
                         }
+                        val depositUtxo = depositUtxos.head
 
                         // Optional token minting step for Bob
                         val (finalDepositUtxo, finalDepositAmount) = if mintToken then {
@@ -382,12 +391,10 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             // No minting in this step - determine deposit amount
                             val depositAmount = txIdFilter match {
                                 case Some(_) =>
-                                    // UTxO was found by tx ID (e.g., from preliminary minting step)
-                                    // Use actual UTxO value which may contain minted tokens
-                                    // Reserve some ADA for transaction fees
+                                    // UTxOs from preliminary minting step - compute total across all
                                     val feeReserve = 5_000_000L // 5 ADA for fees
-                                    val utxoValue = depositUtxo.output.value
-                                    utxoValue.copy(coin = Coin(utxoValue.coin.value - feeReserve))
+                                    val totalValue = depositUtxos.map(_.output.value).reduce(_ + _)
+                                    totalValue.copy(coin = Coin(totalValue.coin.value - feeReserve))
                                 case None =>
                                     // No tx filter - use configured initial value
                                     // For yaci-devkit, only deposit ADA (no multiassets in funded UTxOs)
@@ -402,7 +409,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         }
 
                         val unsignedTx = txbuilder.openChannel(
-                          clientInput = finalDepositUtxo,
+                          clientInputs = depositUtxos,
                           clientPubKey = pubKey,
                           depositAmount = finalDepositAmount
                         )
@@ -412,16 +419,14 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                         val openChannelTx = signTransaction(account, unsignedTx)
                         println(s"[$name] Transaction signed successfully")
 
-                        // The ClientId should be based on openChannelTx.id and 0
-                        val clientId = ClientId(finalDepositUtxo.input)
-
-                        // Now construct the WebSocket URL using clientId components
+                        // WebSocket URL uses the first input UTxO as the connection identifier
+                        val wsClientId = ClientId(finalDepositUtxo.input)
                         val wsUrl =
-                            s"ws://localhost:$port/ws/${clientId.txOutRef.transactionId.toHex}/${clientId.txOutRef.index}"
+                            s"ws://localhost:$port/ws/${wsClientId.txOutRef.transactionId.toHex}/${wsClientId.txOutRef.index}"
                         client = SimpleWebSocketClient(wsUrl)
 
                         val clientTxOutRef =
-                            LedgerToPlutusTranslation.getTxOutRefV3(clientId.txOutRef)
+                            LedgerToPlutusTranslation.getTxOutRefV3(wsClientId.txOutRef)
 
                         // Create and sign initial snapshot (must match finalDepositAmount)
                         val initialSnapshot = mkInitialSnapshot(finalDepositAmount)
@@ -429,15 +434,17 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                             mkClientSignedSnapshot(account, clientTxOutRef, initialSnapshot)
 
                         // Open channel and wait for confirmation
+                        // The server returns the actual ClientId (based on channel output ref)
                         println(s"[$name] Opening channel...")
                         val isMockProvider = config.blockchain.provider.toLowerCase == "mock"
-                        openChannel(
+                        val clientId = openChannel(
                           client,
                           openChannelTx,
                           clientSignedSnapshot,
                           isMockProvider,
                           name
                         )
+                        println(s"[$name] Channel opened: $clientId")
 
                         // Create order (use customPair if provided)
                         val orderPair = customPair.getOrElse(orderConfig.getPair())

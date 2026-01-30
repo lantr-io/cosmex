@@ -45,14 +45,16 @@ object MultiClientTestHelpers {
         clientTxOutRef: TxOutRef
     )
 
-    /** Open a channel via WebSocket and wait for confirmation */
+    /** Open a channel via WebSocket and wait for confirmation. Returns the server-assigned ClientId
+      * (based on channel output reference).
+      */
     def openChannel(
         client: SimpleWebSocketClient,
         openChannelTx: Transaction,
         clientSignedSnapshot: cosmex.SignedSnapshot,
         isMockProvider: Boolean,
         name: String
-    ): Unit = {
+    ): ClientId = {
         client.sendMessage(ClientRequest.OpenChannel(openChannelTx, clientSignedSnapshot))
 
         val firstResponse = client.receiveMessage(timeoutSeconds = 10)
@@ -63,8 +65,9 @@ object MultiClientTestHelpers {
                         println(s"[$name] ✓ Channel pending, txId: ${txId.take(16)}...")
                         waitForChannelOpened(client, name)
 
-                    case ClientResponse.ChannelOpened(_, _) if isMockProvider =>
+                    case ClientResponse.ChannelOpened(_, channelRef) if isMockProvider =>
                         println(s"[$name] ✓ Channel opened instantly (mock provider)")
+                        ClientId(channelRef)
 
                     case ClientResponse.Error(code, msg) =>
                         throw new RuntimeException(s"[$name] Channel opening failed [$code]: $msg")
@@ -77,14 +80,15 @@ object MultiClientTestHelpers {
         }
     }
 
-    private def waitForChannelOpened(client: SimpleWebSocketClient, name: String): Unit = {
+    private def waitForChannelOpened(client: SimpleWebSocketClient, name: String): ClientId = {
         println(s"[$name] Waiting for channel confirmation...")
         val openResponse = client.receiveMessage(timeoutSeconds = 200)
         openResponse match {
             case Success(openJson) =>
                 read[ClientResponse](openJson) match {
-                    case ClientResponse.ChannelOpened(_, _) =>
+                    case ClientResponse.ChannelOpened(_, channelRef) =>
                         println(s"[$name] ✓ Channel opened!")
+                        ClientId(channelRef)
                     case ClientResponse.Error(code, msg) =>
                         throw new RuntimeException(
                           s"[$name] Channel confirmation failed [$code]: $msg"
