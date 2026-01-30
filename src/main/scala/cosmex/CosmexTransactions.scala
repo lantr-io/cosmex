@@ -3,7 +3,7 @@ import scalus.builtin.Data.toData
 import scalus.builtin.{platform, ByteString}
 import scalus.cardano.address.*
 import scalus.cardano.ledger.*
-import scalus.cardano.node.Provider
+import scalus.cardano.node.BlockchainProvider
 import scalus.cardano.txbuilder.*
 import scalus.cardano.wallet.Account
 import scalus.utils.await
@@ -218,7 +218,7 @@ class CosmexTransactions(
       *   A signed Transaction that closes the channel and pays out the funds
       */
     def closeChannel(
-        provider: Provider,
+        provider: BlockchainProvider,
         clientAccount: Account,
         payoutAddress: Address,
         clientState: ClientState
@@ -282,7 +282,7 @@ class CosmexTransactions(
       *   delay)
       */
     def contestedClose(
-        provider: Provider,
+        provider: BlockchainProvider,
         clientAccount: Account,
         clientState: ClientState,
         contestStartTime: Instant,
@@ -401,7 +401,7 @@ class CosmexTransactions(
       *   An unsigned Transaction for rebalancing
       */
     def rebalance(
-        provider: Provider,
+        provider: BlockchainProvider,
         channelData: Seq[(Utxo, OnChainState, TradingState)],
         exchangePkh: PubKeyHash,
         sponsor: Address,
@@ -482,7 +482,7 @@ class CosmexTransactions(
       *   An unsigned Transaction that transitions the channel state
       */
     def timeout(
-        provider: Provider,
+        provider: BlockchainProvider,
         clientAccount: Account,
         channelRef: TransactionInput,
         currentState: OnChainState,
@@ -612,7 +612,7 @@ class CosmexTransactions(
       *   A signed Transaction that pays out the client's balance
       */
     def payout(
-        provider: Provider,
+        provider: BlockchainProvider,
         clientAccount: Account,
         payoutAddress: Address,
         channelRef: TransactionInput,

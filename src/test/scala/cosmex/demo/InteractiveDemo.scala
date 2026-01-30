@@ -33,6 +33,21 @@ import java.time.Instant
   * cosmex.demo.InteractiveDemo --external-server" # Connects to external server
   */
 object InteractiveDemo {
+
+    /** Validate transaction validity interval against current time using slot config */
+    private def validateBeforeSubmit(
+        tx: Transaction,
+        slotConfig: SlotConfig
+    ): Either[String, Unit] = {
+        val currentSlot = slotConfig.timeToSlot(System.currentTimeMillis())
+        val validFrom = tx.body.value.validityStartSlot.getOrElse(0L)
+        val validTo = tx.body.value.ttl.getOrElse(Long.MaxValue)
+        println(s"[Validate] Current slot: $currentSlot, validFrom: $validFrom, validTo: $validTo")
+        if currentSlot < validFrom then Left(s"Not started: current=$currentSlot < from=$validFrom")
+        else if currentSlot > validTo then Left(s"Expired: current=$currentSlot > to=$validTo")
+        else Right(())
+    }
+
     // Custom exception with error code and display control
     case class DemoException(
         code: String,
@@ -405,7 +420,7 @@ object InteractiveDemo {
                                                 Right(result)
                                             }
                                         }
-                                    case Left(err) => Left(err)
+                                    case Left(err) => Left(new RuntimeException(err.toString))
                                 }
                             }
 
@@ -568,7 +583,7 @@ object InteractiveDemo {
                     val witnessSet = mintTx.witnessSet.copy(
                       vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                     )
-                    val signedMintTx = mintTx.copy(witnessSet = witnessSet)
+                    val signedMintTx = mintTx.withWitness(witnessSet)
 
                     // Submit
                     provider.submit(signedMintTx).await() match {
@@ -748,7 +763,7 @@ object InteractiveDemo {
                     val witnessSet = unsignedTx.witnessSet.copy(
                       vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                     )
-                    val openChannelTx = unsignedTx.copy(witnessSet = witnessSet)
+                    val openChannelTx = unsignedTx.withWitness(witnessSet)
 
                     // Debug: Print CBOR details to diagnose serialization issues
                     val txCbor = openChannelTx.toCbor
@@ -1074,9 +1089,7 @@ object InteractiveDemo {
                                                                                   )
                                                                         )
                                                                     val signedTx =
-                                                                        tx.copy(witnessSet =
-                                                                            witnessSet
-                                                                        )
+                                                                        tx.withWitness(witnessSet)
 
                                                                     println(
                                                                       s"[Rebalance] Sending signed transaction..."
@@ -1445,23 +1458,19 @@ object InteractiveDemo {
                                 )
 
                                 // Pre-submission validation (check validity interval against blockchain state)
-                                provider match {
-                                    case bf: cosmex.cardano.BlockfrostProvider =>
-                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
-                                            case Left(err) =>
-                                                println(
-                                                  s"[ContestedClose] PRE-SUBMISSION VALIDATION FAILED: $err"
-                                                )
-                                                println(
-                                                  s"[ContestedClose] Aborting submission to avoid silent rejection"
-                                                )
-                                                return
-                                            case Right(_) =>
-                                                println(
-                                                  s"[ContestedClose] Pre-submission validation passed"
-                                                )
-                                        }
-                                    case _ => ()
+                                validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                    case Left(err) =>
+                                        println(
+                                          s"[ContestedClose] PRE-SUBMISSION VALIDATION FAILED: $err"
+                                        )
+                                        println(
+                                          s"[ContestedClose] Aborting submission to avoid silent rejection"
+                                        )
+                                        return
+                                    case Right(_) =>
+                                        println(
+                                          s"[ContestedClose] Pre-submission validation passed"
+                                        )
                                 }
 
                                 // Submit directly to blockchain (unilateral action)
@@ -1547,21 +1556,7 @@ object InteractiveDemo {
                                             println(
                                               s"[ContestedClose] WARNING: Transaction not confirmed after $maxAttempts attempts"
                                             )
-                                            // Check transaction status on Blockfrost
-                                            provider match {
-                                                case bf: cosmex.cardano.BlockfrostProvider =>
-                                                    bf.getTransactionStatus(txHash.toHex) match {
-                                                        case Right(status) =>
-                                                            println(
-                                                              s"[ContestedClose] Transaction status: $status"
-                                                            )
-                                                        case Left(err) =>
-                                                            println(
-                                                              s"[ContestedClose] Could not check status: $err"
-                                                            )
-                                                    }
-                                                case _ => ()
-                                            }
+                                            println(s"[ContestedClose] TX ID: ${txHash.toHex}")
                                             println(
                                               s"[ContestedClose] Updating channelRef anyway - you may need to wait before using 'timeout'"
                                             )
@@ -1646,34 +1641,11 @@ object InteractiveDemo {
                                 if channelUtxo == null then {
                                     // Check if the transaction exists but UTxO was consumed
                                     println(
-                                      s"[Timeout] Channel UTxO not found. Checking transaction status..."
+                                      s"[Timeout] Channel UTxO not found. TX: ${state.channelRef.transactionId.toHex}"
                                     )
-                                    provider match {
-                                        case bf: cosmex.cardano.BlockfrostProvider =>
-                                            bf.getTransactionStatus(
-                                              state.channelRef.transactionId.toHex
-                                            ) match {
-                                                case Right(status) =>
-                                                    println(
-                                                      s"[Timeout] Transaction status: $status"
-                                                    )
-                                                    if status.contains("confirmed") || status
-                                                            .contains("valid")
-                                                    then {
-                                                        println(
-                                                          s"[Timeout] Transaction was confirmed but UTxO not found at index ${state.channelRef.index}."
-                                                        )
-                                                        println(
-                                                          s"[Timeout] The channel may already be in PayoutState - try 'payout' command."
-                                                        )
-                                                    }
-                                                case Left(err) =>
-                                                    println(
-                                                      s"[Timeout] Could not check transaction status: $err"
-                                                    )
-                                            }
-                                        case _ => ()
-                                    }
+                                    println(
+                                      s"[Timeout] The channel may already be in PayoutState - try 'payout' command."
+                                    )
                                     throw new RuntimeException(
                                       s"Channel UTxO not found after $maxAttempts attempts: ${state.channelRef}"
                                     )
@@ -1722,23 +1694,15 @@ object InteractiveDemo {
                                 )
 
                                 // Pre-submission validation
-                                provider match {
-                                    case bf: cosmex.cardano.BlockfrostProvider =>
-                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
-                                            case Left(err) =>
-                                                println(
-                                                  s"[Timeout] PRE-SUBMISSION VALIDATION FAILED: $err"
-                                                )
-                                                println(
-                                                  s"[Timeout] Aborting submission to avoid silent rejection"
-                                                )
-                                                return
-                                            case Right(_) =>
-                                                println(
-                                                  s"[Timeout] Pre-submission validation passed"
-                                                )
-                                        }
-                                    case _ => ()
+                                validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                    case Left(err) =>
+                                        println(s"[Timeout] PRE-SUBMISSION VALIDATION FAILED: $err")
+                                        println(
+                                          s"[Timeout] Aborting submission to avoid silent rejection"
+                                        )
+                                        return
+                                    case Right(_) =>
+                                        println(s"[Timeout] Pre-submission validation passed")
                                 }
 
                                 provider.submit(tx).await() match {
@@ -1955,23 +1919,15 @@ object InteractiveDemo {
                                 )
 
                                 // Pre-submission validation
-                                provider match {
-                                    case bf: cosmex.cardano.BlockfrostProvider =>
-                                        bf.validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
-                                            case Left(err) =>
-                                                println(
-                                                  s"[Payout] PRE-SUBMISSION VALIDATION FAILED: $err"
-                                                )
-                                                println(
-                                                  s"[Payout] Aborting submission to avoid silent rejection"
-                                                )
-                                                return
-                                            case Right(_) =>
-                                                println(
-                                                  s"[Payout] Pre-submission validation passed"
-                                                )
-                                        }
-                                    case _ => ()
+                                validateBeforeSubmit(tx, cardanoInfo.slotConfig) match {
+                                    case Left(err) =>
+                                        println(s"[Payout] PRE-SUBMISSION VALIDATION FAILED: $err")
+                                        println(
+                                          s"[Payout] Aborting submission to avoid silent rejection"
+                                        )
+                                        return
+                                    case Right(_) =>
+                                        println(s"[Payout] Pre-submission validation passed")
                                 }
 
                                 provider.submit(tx).await() match {
@@ -2150,7 +2106,7 @@ object InteractiveDemo {
                     val witnessSet = tx.witnessSet.copy(
                       vkeyWitnesses = scalus.cardano.ledger.TaggedSortedSet.from(Seq(witness))
                     )
-                    val signedTx = tx.copy(witnessSet = witnessSet)
+                    val signedTx = tx.withWitness(witnessSet)
 
                     println(s"[Rebalance] Sending SignRebalance...")
                     client.sendMessage(ClientRequest.SignRebalance(cId, signedTx))

@@ -111,7 +111,7 @@ class CosmexTest extends AnyFunSuite with ScalaCheckPropertyChecks with cosmex.A
         val witnessSet = tx.witnessSet.copy(
           vkeyWitnesses = TaggedSortedSet.from(Seq(witness))
         )
-        tx.copy(witnessSet = witnessSet)
+        tx.withWitness(witnessSet)
     }
 
     // Helper: Create a snapshot and sign it with client key

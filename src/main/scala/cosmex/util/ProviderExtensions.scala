@@ -1,13 +1,13 @@
 package cosmex.util
 
 import scalus.cardano.ledger.{Transaction, TransactionInput}
-import scalus.cardano.node.Provider
+import scalus.cardano.node.BlockchainProvider
 import scalus.utils.await
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
 /** Extension methods for Provider to add utility functionality */
-extension (provider: Provider)
+extension (provider: BlockchainProvider)
     /** Submit transaction and wait for confirmation
       *
       * For MockLedgerApi, this returns immediately as transactions are instant. For real

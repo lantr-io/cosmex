@@ -435,10 +435,11 @@ case class DemoConfig(config: Config) {
       *
       * Note: For mock provider with initial UTxOs, use createMockProvider() instead
       */
-    def createProvider(): scalus.cardano.node.Provider = {
-        import cosmex.cardano.{YaciTestcontainerProvider, BlockfrostProvider}
-        import scalus.cardano.node.Emulator
+    def createProvider(): scalus.cardano.node.BlockchainProvider = {
+        import scalus.cardano.node.{BlockfrostProvider, Emulator}
         import scalus.cardano.ledger.rules.Context
+        import scalus.utils.await
+        import scala.concurrent.ExecutionContext.Implicits.global
 
         // Create context matching the configured network
         def createContext(): Context = {
@@ -460,15 +461,20 @@ case class DemoConfig(config: Config) {
                 Emulator(initialContext = createContext())
 
             case "yaci-devkit" | "yaci" =>
+                import com.bloxbean.cardano.yaci.test.YaciCardanoContainer
                 println(s"[Config] Using Yaci DevKit provider (without initial funding)")
                 println(s"[Config] Use createProviderWithFunding() to provide initial funding")
-                YaciTestcontainerProvider.start()
+                val container = new YaciCardanoContainer()
+                container.start()
+                val apiUrl = container.getYaciStoreApiUrl.stripSuffix("/")
+                println(s"[Config] Yaci Store API URL: $apiUrl")
+                BlockfrostProvider.localYaci(apiUrl).await()
 
             case "preprod" =>
                 blockchain.networkProvider.blockfrost.projectId match {
                     case Some(apiKey) =>
                         println(s"[Config] Using Blockfrost provider for Preprod testnet")
-                        BlockfrostProvider.preprod(apiKey)
+                        BlockfrostProvider.preprod(apiKey).await()
                     case None =>
                         throw new IllegalArgumentException(
                           "BLOCKFROST_PROJECT_ID environment variable not set. " +
@@ -480,7 +486,7 @@ case class DemoConfig(config: Config) {
                 blockchain.networkProvider.blockfrost.projectId match {
                     case Some(apiKey) =>
                         println(s"[Config] Using Blockfrost provider for Preview testnet")
-                        BlockfrostProvider.preview(apiKey)
+                        BlockfrostProvider.preview(apiKey).await()
                     case None =>
                         throw new IllegalArgumentException(
                           "BLOCKFROST_PROJECT_ID environment variable not set. " +
@@ -503,14 +509,15 @@ case class DemoConfig(config: Config) {
       */
     def createProviderWithFunding(
         initialFunding: Seq[(String, Long)]
-    ): scalus.cardano.node.Provider = {
-        import cosmex.cardano.YaciTestcontainerProvider
+    ): scalus.cardano.node.BlockchainProvider = {
+        import scalus.cardano.node.{BlockfrostProvider, Emulator}
+        import scalus.utils.await
+        import scala.concurrent.ExecutionContext.Implicits.global
 
         blockchain.provider.toLowerCase match {
             case "mock" =>
                 // Create MockLedgerApi with initial funding UTxOs
                 println(s"[Config] Using MockLedgerApi provider with initial funding")
-                import scalus.cardano.node.Emulator
                 import scalus.cardano.ledger.rules.Context
                 import scalus.cardano.address.Address
                 import scalus.cardano.ledger.{TransactionInput, TransactionHash, TransactionOutput, Value}
@@ -545,8 +552,80 @@ case class DemoConfig(config: Config) {
                 Emulator(initialUtxos = initialUtxos, initialContext = createContext())
 
             case "yaci-devkit" | "yaci" =>
+                import com.bloxbean.cardano.yaci.test.{Funding, YaciCardanoContainer}
                 println(s"[Config] Using Yaci DevKit provider with initial funding")
-                YaciTestcontainerProvider.start(initialFunding)
+
+                val container = new YaciCardanoContainer()
+                    .withLogConsumer(frame =>
+                        println(s"[YaciContainer] ${frame.getUtf8String.trim}")
+                    )
+
+                // Prepare all funding entries
+                val fundingEntries = initialFunding.map { case (address, amount) =>
+                    val amountInAda = amount / 1_000_000
+                    println(s"[Config] Adding initial funding: $address -> $amountInAda ADA")
+                    new Funding(address, amountInAda)
+                }
+
+                // Add all funding at once
+                val containerWithFunding =
+                    if fundingEntries.nonEmpty then container.withInitialFunding(fundingEntries*)
+                    else container
+
+                containerWithFunding.start()
+
+                val apiUrl = containerWithFunding.getYaciStoreApiUrl.stripSuffix("/")
+                println(s"[Config] Yaci Store API URL: $apiUrl")
+                val provider = BlockfrostProvider.localYaci(apiUrl).await()
+
+                // Poll for initial funding transactions with timeout
+                if initialFunding.nonEmpty then {
+                    println("[Config] Polling for initial funding transactions...")
+                    val maxWaitSeconds = 30
+                    val pollIntervalMs = 2000
+                    val maxAttempts = (maxWaitSeconds * 1000) / pollIntervalMs
+
+                    var attempt = 0
+                    var fundingComplete = false
+
+                    while attempt < maxAttempts && !fundingComplete do {
+                        attempt += 1
+
+                        val addressesWithUtxos = initialFunding.count { case (address, _) =>
+                            val utxoResult = provider
+                                .findUtxos(
+                                  scalus.cardano.address.Address.fromBech32(address)
+                                )
+                                .await()
+                            val hasUtxos = utxoResult.exists(_.nonEmpty)
+                            if attempt == 1 || attempt % 5 == 0 then {
+                                val count = utxoResult.map(_.size).getOrElse(0)
+                                println(s"[Config]   $address: $count UTxOs")
+                            }
+                            hasUtxos
+                        }
+
+                        if addressesWithUtxos == initialFunding.size then {
+                            fundingComplete = true
+                            println(
+                              s"[Config] All ${initialFunding.size} addresses funded successfully"
+                            )
+                        } else {
+                            println(
+                              s"[Config] Attempt $attempt: $addressesWithUtxos/${initialFunding.size} addresses funded, waiting..."
+                            )
+                            Thread.sleep(pollIntervalMs)
+                        }
+                    }
+
+                    if !fundingComplete then {
+                        println(
+                          s"[Config] Warning: Funding may not be complete after ${maxWaitSeconds}s"
+                        )
+                    }
+                }
+
+                provider
 
             case other =>
                 throw new IllegalArgumentException(

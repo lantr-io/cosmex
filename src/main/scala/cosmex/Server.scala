@@ -7,7 +7,7 @@ import scalus.builtin.ToData.tupleToData
 import scalus.builtin.{platform, Builtins, ByteString}
 import scalus.cardano.address.Address
 import scalus.cardano.ledger.*
-import scalus.cardano.node.Provider
+import scalus.cardano.node.BlockchainProvider
 import scalus.ledger.api.v3.{TxId, TxOutRef}
 import scalus.prelude.Eq
 import scalus.utils.await
@@ -140,7 +140,7 @@ case class RebalancingContext(
 class Server(
     env: CardanoInfo,
     exchangeParams: ExchangeParams,
-    val provider: Provider, // Made public for WebSocket server
+    val provider: BlockchainProvider, // Made public for WebSocket server
     exchangePrivKey: ByteString
 ) {
     val program = CosmexContract.mkCosmexProgram(exchangeParams, generateErrorTraces = true)
@@ -279,8 +279,8 @@ class Server(
                 // Add exchange witness to transaction
                 val existingWitnesses = tx.witnessSet.vkeyWitnesses.toSeq
                 val allWitnesses = existingWitnesses :+ exchangeWitness
-                val bothSignedTx = tx.copy(
-                  witnessSet = tx.witnessSet.copy(
+                val bothSignedTx = tx.withWitness(
+                  tx.witnessSet.copy(
                     vkeyWitnesses = TaggedSortedSet.from(allWitnesses)
                   )
                 )
@@ -1045,9 +1045,7 @@ class Server(
         val finalWitnessSet = context.rebalanceTx.witnessSet.copy(
           vkeyWitnesses = TaggedSortedSet.from(allWitnesses :+ exchangeWitness)
         )
-        val finalTx = context.rebalanceTx.copy(
-          witnessSet = finalWitnessSet
-        )
+        val finalTx = context.rebalanceTx.withWitness(finalWitnessSet)
 
         println(s"[Server] Submitting rebalance transaction: ${finalTx.id.toHex.take(16)}...")
 

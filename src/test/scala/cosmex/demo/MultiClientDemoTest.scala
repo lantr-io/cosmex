@@ -237,7 +237,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                             }
                                         }
                                     case Left(err) =>
-                                        println(s"[$name] Could not query UTxOs: ${err.getMessage}")
+                                        println(s"[$name] Could not query UTxOs: $err")
                                 }
 
                                 // Find UTxO - filter by txId if provided
@@ -258,7 +258,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                         foundUtxo
                                     case Left(err) =>
                                         fail(
-                                          s"[$name] Failed to find funded UTxO: ${err.getMessage}"
+                                          s"[$name] Failed to find funded UTxO: $err"
                                         )
                                 }
 
@@ -368,7 +368,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                     println(s"[$name] ✓ Found minted tokens: ${utxo.output.value}")
                                     utxo
                                 case Left(err) =>
-                                    fail(s"[$name] Failed to find minted tokens: ${err.getMessage}")
+                                    fail(s"[$name] Failed to find minted tokens: $err")
                             }
 
                             // Calculate deposit amount including minted tokens
@@ -522,7 +522,7 @@ class MultiClientDemoTest extends AnyFunSuite with Matchers {
                                     case Right(utxo) => utxo
                                     case Left(err) =>
                                         fail(
-                                          s"[Bob - Preliminary] Failed to find UTxO to spend: ${err.getMessage}"
+                                          s"[Bob - Preliminary] Failed to find UTxO to spend: $err"
                                         )
                                 }
 

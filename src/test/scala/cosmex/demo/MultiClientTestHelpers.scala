@@ -36,7 +36,7 @@ object MultiClientTestHelpers {
         val witnessSet = tx.witnessSet.copy(
           vkeyWitnesses = TaggedSortedSet.from(Seq(witness))
         )
-        tx.copy(witnessSet = witnessSet)
+        tx.withWitness(witnessSet)
     }
 
     /** Result of channel opening */
